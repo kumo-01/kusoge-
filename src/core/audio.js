@@ -9,6 +9,7 @@ class Sound {
     this.master = null;
     this.noiseBuf = null;
     this.engine = null;
+    this.rain = null;
     try {
       this.muted = localStorage.getItem(MUTE_KEY) === '1';
     } catch {
@@ -200,6 +201,31 @@ class Sound {
           this._bark(0.9);
           this._bark(1.1);
           break;
+        case 'chance':
+          // タイミングチャンス出現: ピロピロッ
+          [988, 1318, 988, 1318].forEach((f, i) => this._tone({ type: 'square', from: f, dur: 0.06, vol: 0.1, delay: i * 0.06 }));
+          break;
+        case 'perfect':
+          [1046, 1318, 1568, 2093].forEach((f, i) => this._tone({ type: 'triangle', from: f, dur: 0.12, vol: 0.24, delay: i * 0.045 }));
+          this._noise({ dur: 0.5, vol: 0.2, filter: 'highpass', from: 1200, to: 4000 });
+          break;
+        case 'good':
+          this._tone({ type: 'triangle', from: 880, dur: 0.1, vol: 0.22 });
+          this._tone({ type: 'triangle', from: 1318, dur: 0.18, vol: 0.22, delay: 0.07 });
+          break;
+        case 'miss':
+          this._tone({ type: 'triangle', from: 500, to: 300, dur: 0.25, vol: 0.18 });
+          break;
+        case 'rainReady':
+          this._tone({ type: 'sine', from: 700, to: 1400, dur: 0.25, vol: 0.18 });
+          this._tone({ type: 'sine', from: 1050, to: 2100, dur: 0.25, vol: 0.12, delay: 0.12 });
+          break;
+        case 'thunder':
+          // ゴロゴロ…ドーン
+          this._noise({ dur: 1.6, vol: 0.7, filter: 'lowpass', from: 900, to: 80, q: 0.5 });
+          this._noise({ dur: 0.25, vol: 0.5, filter: 'bandpass', from: 2500, to: 600, q: 0.7 });
+          this._tone({ from: 70, to: 35, dur: 1.2, vol: 0.4 });
+          break;
         case 'lose':
           [523, 494, 466, 440].forEach((f, i) => this._tone({ type: 'triangle', from: f, dur: 0.25, vol: 0.18, delay: i * 0.22 }));
           break;
@@ -249,10 +275,49 @@ class Sound {
     }
   }
 
+  /** 雨の音（ザーッ）。level: 0..1、0 で止める */
+  setRain(level) {
+    if (level <= 0.01 || this.muted) {
+      if (this.rain) {
+        const r = this.rain;
+        this.rain = null;
+        try {
+          r.g.gain.setTargetAtTime(0, this.ctx.currentTime, 0.2);
+          r.src.stop(this.ctx.currentTime + 1);
+        } catch {
+          /* noop */
+        }
+      }
+      return;
+    }
+    const ctx = this._ensure();
+    if (!ctx || ctx.state !== 'running' || !this.noiseBuf) return;
+    try {
+      if (!this.rain) {
+        const src = ctx.createBufferSource();
+        src.buffer = this.noiseBuf;
+        src.loop = true;
+        const f = ctx.createBiquadFilter();
+        f.type = 'bandpass';
+        f.frequency.value = 1400;
+        f.Q.value = 0.4;
+        const g = ctx.createGain();
+        g.gain.value = 0;
+        src.connect(f).connect(g).connect(this.master);
+        src.start();
+        this.rain = { src, g };
+      }
+      this.rain.g.gain.setTargetAtTime(level * 0.22, ctx.currentTime, 0.15);
+    } catch {
+      /* noop */
+    }
+  }
+
   _stopEngine() {
     if (!this.engine) return;
     const e = this.engine;
     this.engine = null;
+    this.rain = null;
     try {
       e.g.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
       e.osc.stop(this.ctx.currentTime + 0.3);

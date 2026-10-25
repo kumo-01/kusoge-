@@ -10,9 +10,10 @@ import { stepKart, PHYS_KEYS } from './physics.js';
 import { World } from './world.js';
 import { ChaseCamera } from './camera.js';
 import { Hud } from './hud.js';
-import { RACE, NET, IN, ITEMS, KART } from './constants.js';
+import { RACE, NET, IN, ITEMS, KART, RAIN } from './constants.js';
 import { lerp, lerpAngle, angleDiff } from '../../core/util.js';
 import { spinAngleOf } from './kart.js';
+import { stepTiming } from './timing.js';
 
 const CAMERA_KEY = 'wanwan.kartCamera';
 
@@ -20,13 +21,13 @@ export function createGame() {
   return new DogKartGame();
 }
 
-const EVENT_TYPES = new Set(['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof']);
+const EVENT_TYPES = new Set(['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain']);
 
 function cleanEvent(e) {
   if (!e || typeof e !== 'object' || !EVENT_TYPES.has(e.t)) return null;
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-  const idx = (v) => (Number.isInteger(v) && v >= 0 && v < 4 ? v : 0);
-  return { id: n(e.id), t: e.t, k: idx(e.k), by: idx(e.by), r: idx(e.r), v: idx(e.v), x: n(e.x), z: n(e.z), s: n(e.s), b: Math.max(0, Math.min(64, n(e.b) | 0)), item: n(e.item) | 0, lap: n(e.lap) | 0, grant: !!e.grant, big: !!e.big };
+  const idx = (v) => (Number.isInteger(v) && v >= 0 && v < RACE.HUMANS + RACE.MAX_NPCS ? v : 0);
+  return { id: n(e.id), t: e.t, k: idx(e.k), by: idx(e.by), r: idx(e.r), v: idx(e.v), x: n(e.x), z: n(e.z), s: n(e.s), b: Math.max(0, Math.min(64, n(e.b) | 0)), item: n(e.item) | 0, lap: n(e.lap) | 0, q: Math.max(-1, Math.min(2, n(e.q) | 0)), grant: !!e.grant, big: !!e.big };
 }
 
 /** ゲスト自身の車のクライアント予測 */
@@ -57,6 +58,11 @@ class Predictor {
       return;
     }
     for (const f of ['lap', 'cp', 'item', 'roll', 'fin', 'ft', 'lapStart', 'best', 'stats', 'spinDur', 'wrong', 'bump']) this.k[f] = server[f];
+    // タイミングブーストは自分の画面（予測）で進める。ホストのほうが先に進んでいたら合わせる
+    if (server.tb > this.k.tb) {
+      this.k.tb = server.tb;
+      this.k.tw = server.tw;
+    }
     while (this.hist.length && this.hist[0].seq < ack) this.hist.shift();
     const e = this.hist[0];
     if (!e || e.seq !== ack) {
@@ -113,11 +119,14 @@ class DogKartGame {
     this.isHost = ctx.isHost;
     this.me = ctx.playerIndex;
     this.sound = ctx.sound;
-    this.track = new Track();
+    this.track = new Track(ctx.options?.course ?? 0);
     this.sim = new RaceSim(this.track, { npcs: ctx.options?.npcs ?? 0 });
     this.paused = true;
     this.finished = false;
     this.hud = new Hud(ctx.container, this.track, this.me);
+    this.hud.onRain = () => {
+      this.rainPressed = true;
+    };
     this.world = null;
     try {
       this.world = new World(ctx.container, this.track, this.sim.boxPos);
@@ -156,6 +165,18 @@ class DogKartGame {
     this.hud.onCameraToggle = () => this.toggleCamera();
     this.hud.setCameraMode(this.cameraMode);
     this._prevY = [];
+    this.tapPressed = false;
+    this.rainPressed = false;
+    this.rainReady = false;
+    this._prevTw = 0;
+    this._rainLevel = 0;
+    // 画面を押す（クリック・タップ）とタイミングブースト。ボタンの上は除く
+    this._onPointer = (e) => {
+      if (this.paused || e.button > 0) return;
+      if (e.target instanceof Element && e.target.closest('button, a, input')) return;
+      this.tapPressed = true;
+    };
+    ctx.container.addEventListener('pointerdown', this._onPointer);
   }
 
   /** カメラ切り替え（三人称 ⇔ 一人称）。自分だけの設定で、相手には影響しない */
@@ -181,6 +202,10 @@ class DogKartGame {
     if (i.isDown('KeyD', 'ArrowRight')) b |= IN.RIGHT;
     if (i.consume('Space')) b |= IN.ITEM;
     if (i.consume('KeyR')) b |= IN.RESPAWN;
+    if (i.consume('Enter', 'NumpadEnter', 'KeyE') || this.tapPressed) b |= IN.TAP;
+    if (i.consume('KeyQ') || this.rainPressed) b |= IN.RAIN;
+    this.tapPressed = false;
+    this.rainPressed = false;
     if (i.consume('KeyC')) this.toggleCamera();
     return b;
   }
@@ -218,7 +243,7 @@ class DogKartGame {
     for (let i = 0; i < n; i++) {
       const seq = msg.seq - n + 1 + i;
       if (seq <= this.lastQueuedSeq) continue; // 古い入力は無視
-      this.guestQueue.push({ seq, bits: msg.inputs[i] & 63 });
+      this.guestQueue.push({ seq, bits: msg.inputs[i] & 255 });
       this.lastQueuedSeq = seq;
     }
     if (this.guestQueue.length > 120) this.guestQueue.splice(0, this.guestQueue.length - 120);
@@ -269,6 +294,8 @@ class DogKartGame {
         const s = this.sim.s;
         const raceT = this._guestRaceTime();
         const active = s.phase === 'racing' || (s.phase === 'countdown' && raceT >= 0);
+        // タイミングブーストのリングは自分の車の予測で出す（判定はホストが入力の順番どおりに行う）
+        if (active && s.phase !== 'finished') stepTiming(this.pred.k, this.sim.progressOf(this.pred.k), s.tc, !!(bits & IN.TAP), dt, null);
         stepKart(this.pred.k, bits, dt, this.track, active && s.phase !== 'finished');
         this.pred.record(this.seq);
       }
@@ -361,6 +388,9 @@ class DogKartGame {
   pause() {
     this.paused = true;
     this.sound.setEngine(false);
+    this.sound.setRain(0);
+    this.tapPressed = false;
+    this.rainPressed = false;
     if (this.isHost) {
       this.guestQueue = [];
       this.lastQueuedSeq = this.sim.s.ack;
@@ -492,6 +522,33 @@ class DogKartGame {
         case 'boing':
           fx?.text('ボヨン!', e.x, 2.5, e.z, 2.4);
           break;
+        case 'timing': {
+          const k = kartPos(e.k) || e;
+          if (e.q > 0) {
+            fx?.ring(k.x, 0.6, k.z, e.q === 2 ? 0xffe066 : 0x7ad7ff, e.q === 2 ? 7 : 4.5);
+            fx?.text(e.q === 2 ? 'ジャスト!' : 'ナイス!', k.x, 4, k.z, e.q === 2 ? 4.2 : 3.2);
+            if (e.q === 2) fx?.sparkle(k.x, 1.5, k.z, 16);
+          }
+          if (e.k === me) {
+            this.hud.timingResult(e.q);
+            snd.play(e.q === 2 ? 'perfect' : e.q === 1 ? 'good' : 'miss');
+            if (e.q > 0) {
+              snd.play('boost');
+              this.cam?.addShake(0.3);
+            }
+          }
+          break;
+        }
+        case 'rain': {
+          const k = kartPos(e.k) || e;
+          snd.play('thunder');
+          this.hud.thunder();
+          fx?.text('ゴロゴロ…', k.x, 5, k.z, 4.5);
+          const who = KART_NAMES[e.k] || '';
+          if (e.k === me) this.hud.flash('☔ 豪雨をよんだ！ みんなおそくなるワン', 'good', 2200);
+          else this.hud.flash(`☔ ${who}が豪雨をよんだ！ スピードダウン…`, 'bad', 2200);
+          break;
+        }
         case 'poof':
           fx?.puff(e.x, 1, e.z, { n: 5, size: 0.7, spread: 1 });
           break;
@@ -604,6 +661,7 @@ class DogKartGame {
       karts.forEach((k, i) => {
         const mood = winner < 0 ? 0 : i >= 2 ? (k.fin ? 1 : 0) : winner === i ? 1 : -1;
         w.karts[i].setFirstPerson(firstPerson && i === this.me);
+        w.karts[i].own = i === this.me;
         w.karts[i].update(k, dt, mood);
       });
       w.updateItems(st.items, dt);
@@ -623,6 +681,23 @@ class DogKartGame {
     const info = this.ctx.getNetInfo();
     const rtt = info.rtt != null ? `${Math.round(info.rtt)}ms` : '';
     const sk = s.karts[this.me]; // 周回・アイテムは確定状態を表示
+    // タイミングブーストと豪雨は、ゲストは自分の予測（押したタイミングがそのまま判定に使われる）で表示する
+    const pk = !this.isHost && NET.PREDICTION && this.pred.k ? this.pred.k : sk;
+    const tw = s.phase === 'racing' ? pk.tw : 0;
+    if (tw > 0 && this._prevTw <= 0 && !this.paused) this.sound.play('chance');
+    this._prevTw = tw;
+    const onFinal = this.isHost ? sk.lap >= RACE.LAPS - 1 : this.sim.progressOf(pk) >= (RACE.LAPS - 1) * this.track.length;
+    const rainReady = s.phase === 'racing' && !s.ru && onFinal && !sk.fin;
+    if (rainReady && !this.rainReady && !this.paused) {
+      this.sound.play('rainReady');
+      this.hud.flash('☔ 豪雨チャンス！ Q か ☔ で雨をよべる', 'final', 1800);
+    }
+    this.rainReady = rainReady;
+    // 雨の強さ（降り始めと止み際はなめらかに）
+    const rainTarget = s.rain > 0 ? Math.min(1, s.rain / 0.8, (RAIN.DURATION - s.rain) / 0.5 + 0.2) : 0;
+    this._rainLevel += (rainTarget - this._rainLevel) * Math.min(1, dt * 4);
+    this.world?.setRain(this._rainLevel);
+    this.sound.setRain(this.paused ? 0 : this._rainLevel);
     this.hud.update(
       {
         rank: this.sim.rankOf(this.me),
@@ -635,6 +710,9 @@ class DogKartGame {
         roll: sk.roll,
         wrong: sk.wrong,
         phase: s.phase,
+        tw,
+        rainReady,
+        wet: mine.wet || 0,
         karts,
         netText: this.paused ? '⏸ 一時停止中' : `📶 ${this.isHost ? 'ゲスト' : 'ホスト'}と接続中 ${rtt}`,
         netTone: this.paused ? 'warn' : info.rtt != null && info.rtt > 250 ? 'warn' : 'ok',
@@ -648,10 +726,13 @@ class DogKartGame {
 
   end() {
     this.sound.setEngine(false);
+    this.sound.setRain(0);
   }
 
   destroy() {
     this.sound.setEngine(false);
+    this.sound.setRain(0);
+    this.ctx.container.removeEventListener('pointerdown', this._onPointer);
     this.world?.dispose();
     this.world = null;
     this.hud.dispose();

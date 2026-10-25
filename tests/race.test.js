@@ -1,9 +1,9 @@
 // レースシミュレーションの単体テスト（ブラウザ不要）: node --test tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Track } from '../src/games/dogKart/track.js';
-import { RaceSim, sanitizeSnapshot } from '../src/games/dogKart/race.js';
-import { IN, ITEMS, RACE, KART } from '../src/games/dogKart/constants.js';
+import { Track, COURSES } from '../src/games/dogKart/track.js';
+import { RaceSim, sanitizeSnapshot, packNet, unpackNet } from '../src/games/dogKart/race.js';
+import { IN, ITEMS, RACE, KART, TIMING, RAIN } from '../src/games/dogKart/constants.js';
 import { decode, encode, FROM_GUEST, FROM_HOST, sanitizeRoomState } from '../src/core/protocol.js';
 
 const DT = 1 / 60;
@@ -28,9 +28,9 @@ function placeAhead(k, other, dist) {
 }
 
 /** コースに沿って走るボット */
-function bot(k, latOff = 0) {
-  const p = track.project(k.x, k.z);
-  const tgt = track.pointAt(p.s + 14, latOff);
+function bot(k, latOff = 0, tr = track) {
+  const p = tr.project(k.x, k.z);
+  const tgt = tr.pointAt(p.s + 14, latOff);
   let d = Math.atan2(tgt.x - k.x, tgt.z - k.z) - k.h;
   while (d > Math.PI) d -= 2 * Math.PI;
   while (d < -Math.PI) d += 2 * Math.PI;
@@ -291,4 +291,174 @@ test('NPC 2 台入りのレース: NPC が自分で走って周回し、人間�
   other.loadSnapshot(snap);
   assert.equal(other.s.karts.length, 4);
   assert.equal(other.s.karts[3].npc, 1);
+});
+
+test('3 コースとも: 閉じていて離れた区間が十分離れ、内側が lat < 0、6 台のスタート位置が道路上', () => {
+  assert.equal(COURSES.length, 3);
+  COURSES.forEach((c, ci) => {
+    const t = new Track(ci);
+    assert.equal(t.name, c.name);
+    assert.ok(t.length > 800 && t.length < 1200, `${c.name} length ${t.length}`);
+    let minD = Infinity;
+    for (let i = 0; i < t.n; i += 2)
+      for (let j = i + 2; j < t.n; j += 2) {
+        if (Math.abs(t.wrapDS(t.cum[i] - t.cum[j])) < 70) continue;
+        minD = Math.min(minD, Math.hypot(t.x[i] - t.x[j], t.z[i] - t.z[j]));
+      }
+    assert.ok(minD > t.wallDist * 2 + 15, `${c.name} min separation ${minD}`);
+    // 反時計回り（内側が中心線の右 = lat < 0）
+    let area = 0;
+    for (let i = 0; i < t.n; i++) {
+      const k = (i + 1) % t.n;
+      area += t.x[i] * t.z[k] - t.x[k] * t.z[i];
+    }
+    assert.ok(area > 0, `${c.name} orientation`);
+    const starts = Array.from({ length: 6 }, (_, i) => t.startPos(i));
+    for (const [i, p] of starts.entries()) {
+      assert.ok(Math.abs(t.project(p.x, p.z).lat) < t.roadHalf - 2, `${c.name} start ${i} on road`);
+      for (let j = 0; j < i; j++) assert.ok(Math.hypot(p.x - starts[j].x, p.z - starts[j].z) > KART.RADIUS * 2.5, `${c.name} start ${i}/${j} overlap`);
+    }
+    for (const b of t.itemBoxes()) assert.ok(Math.abs(t.project(b.x, b.z).lat) < t.roadHalf, `${c.name} box on road`);
+  });
+});
+
+test('3 コースとも: NPC 4 台（6 台）でレースが決着し、NPC も周回する', () => {
+  COURSES.forEach((c, ci) => {
+    const t = new Track(ci);
+    const sim = new RaceSim(t, { npcs: 4 });
+    assert.equal(sim.s.karts.length, 6);
+    const npcLaps = [0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < 60 * 300 && sim.s.phase !== 'finished'; i++) {
+      const [a, b] = sim.s.karts;
+      sim.step(DT, [bot(a, 4, t), bot(b, -4, t)]);
+      for (const e of sim.drainEvents()) if (e.t === 'lap') npcLaps[e.k]++;
+    }
+    assert.equal(sim.s.phase, 'finished', `${c.name} finished`);
+    for (let i = 2; i < 6; i++) assert.ok(npcLaps[i] >= 2, `${c.name} npc ${i} laps ${npcLaps[i]}`);
+    const r = sim.buildResult();
+    assert.ok(r.stats[0].host.includes('/ 6台'));
+  });
+});
+
+test('NPC の数は 0〜4 台に制限される', () => {
+  assert.equal(new RaceSim(track, { npcs: 9 }).s.karts.length, 6);
+  assert.equal(new RaceSim(track, { npcs: -1 }).s.karts.length, 2);
+});
+
+test('タイミングブースト: チャンスは 1〜2 回で、ジャストで押すとブースト・ずれると無し・押さないと失敗', () => {
+  const counts = new Set();
+  for (let i = 0; i < 40; i++) {
+    const sim = new RaceSim(track);
+    const tc = sim.s.tc;
+    counts.add(tc.length);
+    assert.ok(tc.length >= 1 && tc.length <= 2);
+    for (const p of tc) assert.ok(p > 0 && p < RACE.LAPS * track.length);
+  }
+  assert.deepEqual([...counts].sort(), [1, 2]);
+
+  // 3 人のボット: 0 はジャスト、1 は早押し、もう 1 回は押さない
+  const sim = new RaceSim(track);
+  const results = { 0: [], 1: [] };
+  let boostSeen = false;
+  for (let i = 0; i < 60 * 240 && sim.s.phase !== 'finished'; i++) {
+    const [a, b] = sim.s.karts;
+    let ia = bot(a, 3);
+    let ib = bot(b, -3);
+    if (a.tw > 0 && a.tw <= TIMING.SWEET + 0.01) ia |= IN.TAP;
+    if (b.tw > 0 && b.tw < TIMING.WINDOW - 0.1 && b.tb === 1) ib |= IN.TAP; // 1 回目は早すぎ、2 回目は押さない
+    sim.step(DT, [ia, ib]);
+    for (const e of sim.drainEvents()) {
+      if (e.t !== 'timing') continue;
+      results[e.k].push(e.q);
+      if (e.k === 0 && e.q === 2) boostSeen = a.boost > TIMING.BOOST_PERFECT - 0.1;
+    }
+  }
+  const n = sim.s.tc.length;
+  assert.deepEqual(results[0], Array(n).fill(2), 'host perfect every time');
+  assert.equal(results[1][0], 0, 'early tap = no boost');
+  if (n === 2) assert.equal(results[1][1], -1, 'no tap = missed');
+  assert.ok(boostSeen);
+});
+
+test('豪雨: 最終ラップ前は呼べず、最終ラップで呼ぶと呼んだ車以外が遅くなる（1 レース 1 回）', () => {
+  const sim = new RaceSim(track, { npcs: 2 });
+  while (sim.s.phase === 'countdown') sim.step(DT, [0, 0, 0, 0]);
+  const [a, b] = sim.s.karts;
+  // NPC が勝手に呼ばないように NPC を止めておく（周回数を進めない）
+  sim.step(DT, [IN.RAIN, 0]);
+  for (let i = 0; i < 60; i++) sim.step(DT, [0, 0]);
+  assert.equal(sim.s.ru, 0, 'not on final lap');
+  assert.equal(b.wet, 0);
+  // ゲストが最終ラップへ
+  b.lap = RACE.LAPS - 1;
+  sim.step(DT, [0, IN.RAIN]);
+  assert.equal(sim.s.ru, 1);
+  assert.equal(sim.s.rk, 1);
+  assert.ok(sim.s.rain > RAIN.DURATION - 0.1);
+  assert.equal(b.wet, 0, 'caller not slowed');
+  assert.ok(a.wet > 0 && sim.s.karts[2].wet > 0 && sim.s.karts[3].wet > 0, 'others slowed');
+  const ev = sim.drainEvents().filter((e) => e.t === 'rain');
+  assert.equal(ev.length, 1);
+  // 2 回目は呼べない
+  a.lap = RACE.LAPS - 1;
+  sim.step(DT, [IN.RAIN, 0]);
+  assert.equal(sim.s.rk, 1);
+  assert.equal(sim.drainEvents().filter((e) => e.t === 'rain').length, 0);
+  // 遅くなっている間は最高速が下がる
+  Object.assign(a, { boost: 0, slow: 0, grass: 0, sp: 0 });
+  for (let i = 0; i < 60 * 3; i++) sim.step(DT, [IN.UP, 0]);
+  assert.ok(a.sp <= KART.MAX_SPEED * RAIN.FACTOR + 0.5, `wet speed ${a.sp}`);
+  // 時間がたつと元に戻る
+  for (let i = 0; i < 60 * RAIN.DURATION; i++) sim.step(DT, [IN.UP, 0]);
+  assert.equal(a.wet, 0);
+  assert.equal(sim.s.rain, 0);
+});
+
+test('豪雨: 最終ラップに入る直前に押した入力も少しの間は有効（通信の遅れ対策）', () => {
+  const sim = new RaceSim(track);
+  while (sim.s.phase === 'countdown') sim.step(DT, [0, 0]);
+  const b = sim.s.karts[1];
+  sim.step(DT, [0, IN.RAIN]);
+  for (let i = 0; i < 10; i++) sim.step(DT, [0, 0]);
+  b.lap = RACE.LAPS - 1;
+  sim.step(DT, [0, 0]);
+  assert.equal(sim.s.rk, 1);
+});
+
+test('NPC も最終ラップで豪雨を呼び、タイミングブーストを使う', () => {
+  const sim = new RaceSim(track, { npcs: 2 });
+  let rainBy = -1;
+  let npcTiming = 0;
+  for (let i = 0; i < 60 * 240 && sim.s.phase !== 'finished'; i++) {
+    const [a, b] = sim.s.karts;
+    // 人間はゆっくり走る（NPC が先に最終ラップへ）
+    sim.step(DT, [i % 3 ? bot(a, 3) : 0, i % 3 ? bot(b, -3) : 0]);
+    for (const e of sim.drainEvents()) {
+      if (e.t === 'rain') rainBy = e.k;
+      if (e.t === 'timing' && e.k >= 2) npcTiming++;
+    }
+  }
+  assert.ok(rainBy >= 2, `rain by ${rainBy}`);
+  assert.ok(npcTiming >= 2, `npc timing ${npcTiming}`);
+});
+
+test('定期配信の形式でタイミング・豪雨の状態も復元できる', () => {
+  const sim = new RaceSim(track, { npcs: 4 });
+  while (sim.s.phase === 'countdown') sim.step(DT, [0, 0]);
+  const k = sim.s.karts[1];
+  k.lap = RACE.LAPS - 1;
+  k.tw = 0.9;
+  k.tb = 1;
+  sim.step(DT, [0, IN.RAIN]);
+  const snap = JSON.parse(encode(packNet(sim.getSnapshot())));
+  const back = sanitizeSnapshot(unpackNet(snap), new RaceSim(track).s, 15);
+  assert.equal(back.karts.length, 6);
+  assert.deepEqual(back.tc.map((v) => Math.round(v)), sim.s.tc.map((v) => Math.round(v)));
+  assert.equal(back.ru, 1);
+  assert.equal(back.rk, 1);
+  assert.ok(back.rain > 0);
+  assert.ok(Math.abs(back.karts[1].tw - k.tw) < 0.01);
+  assert.equal(back.karts[1].tb, 1);
+  assert.ok(back.karts[0].wet > 0);
+  assert.equal(back.karts[5].npc, 1);
 });

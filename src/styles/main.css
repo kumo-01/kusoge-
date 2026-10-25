@@ -1368,3 +1368,141 @@ body[data-screen='game'] .toasts {
   display: inline-flex;
   gap: 6px;
 }
+
+/* ---------- タイミングブースト・豪雨 ---------- */
+.hud-timing {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  width: 120px;
+  height: 120px;
+  margin-left: -60px;
+  margin-top: -60px;
+}
+.hud-timing-target,
+.hud-timing-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+.hud-timing-target {
+  border: 8px solid rgba(255, 255, 255, 0.9);
+  background: radial-gradient(circle, rgba(255, 210, 63, 0.55) 0 38%, rgba(255, 255, 255, 0.12) 40%);
+  box-shadow: 0 0 0 4px rgba(40, 30, 60, 0.25);
+}
+.hud-timing-target::after {
+  content: '⚡';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 2.6rem;
+  text-shadow: none;
+}
+.hud-timing-ring {
+  border: 7px solid var(--pink, #ff6fae);
+  box-shadow: 0 0 12px rgba(255, 111, 174, 0.8);
+  will-change: transform;
+}
+.hud-timing.near .hud-timing-ring {
+  border-color: #7ad7ff;
+  box-shadow: 0 0 16px rgba(122, 215, 255, 0.9);
+}
+.hud-timing.just .hud-timing-ring {
+  border-color: #ffe066;
+  box-shadow: 0 0 24px 6px rgba(255, 224, 102, 0.95);
+}
+.hud-timing.just .hud-timing-target {
+  transform: scale(1.06);
+}
+.hud-timing-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 70px;
+  white-space: nowrap;
+  font-size: 1.15rem;
+  background: rgba(40, 30, 60, 0.45);
+  padding: 0.15em 0.9em;
+  border-radius: 999px;
+  text-align: center;
+}
+.hud-timing-label small {
+  display: block;
+  font-size: 0.7rem;
+  opacity: 0.9;
+}
+.hud-rain-btn {
+  pointer-events: auto;
+  display: block;
+  margin: 0 auto 18px;
+  font: inherit;
+  font-weight: 900;
+  font-size: 1rem;
+  color: #fff;
+  background: linear-gradient(180deg, #6d7bd6, #3d4aa8);
+  border: 4px solid #fff;
+  border-radius: 999px;
+  padding: 0.5em 1em;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.2), 0 0 20px rgba(120, 140, 255, 0.8);
+  cursor: pointer;
+  animation: rain-pulse 0.7s ease-in-out infinite alternate;
+  white-space: nowrap;
+}
+.hud-rain-btn small {
+  margin-left: 0.4em;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 999px;
+  padding: 0 0.5em;
+  font-size: 0.7rem;
+}
+@keyframes rain-pulse {
+  to {
+    transform: scale(1.08);
+  }
+}
+.hud-wet {
+  position: absolute;
+  top: 26%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 90px;
+  background: rgba(61, 74, 168, 0.75);
+  padding: 0.25em 1em;
+  border-radius: 999px;
+  font-size: 1rem;
+  white-space: nowrap;
+}
+.hud-thunder {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+.hud-thunder.on {
+  animation: thunder 0.9s ease-out;
+}
+@keyframes thunder {
+  0% {
+    opacity: 0.85;
+  }
+  15% {
+    opacity: 0.1;
+  }
+  25% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (max-width: 720px) {
+  .hud-timing {
+    transform: scale(0.8);
+  }
+  .hud-rain-btn {
+    font-size: 0.85rem;
+  }
+}

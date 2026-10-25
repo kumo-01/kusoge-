@@ -39,8 +39,10 @@ const PALETTE = {
   1: { main: 0x3d8bff, dark: 0x1f5fd1, accent: 0x7ff0c8, css: '#2f6fe0', flag: 0xffffff },
   2: { main: 0xff8fd0, dark: 0xd85fa6, accent: 0xffffff, css: '#d85fa6', flag: 0xffffff }, // NPC プードル
   3: { main: 0xffc93c, dark: 0xd99a14, accent: 0x5a3e2b, css: '#b07a00', flag: 0x5a3e2b }, // NPC パグ
+  4: { main: 0x22b573, dark: 0x168a55, accent: 0xffd23f, css: '#168a55', flag: 0xffd23f }, // NPC ダックス
+  5: { main: 0x8a63ff, dark: 0x6340d6, accent: 0xb8f2ff, css: '#6340d6', flag: 0xffffff }, // NPC ハスキー
 };
-const DOG_KINDS = ['shiba', 'corgi', 'poodle', 'pug'];
+const DOG_KINDS = ['shiba', 'corgi', 'poodle', 'pug', 'dachs', 'husky'];
 
 /** スピン中の見た目の回転角（状態から決まるのでホストとゲストで同じ） */
 export function spinAngleOf(r) {
@@ -49,7 +51,7 @@ export function spinAngleOf(r) {
 
 export class KartView {
   constructor(index) {
-    const pal = PALETTE[index];
+    const pal = PALETTE[index] || PALETTE[0];
     this.group = new THREE.Group();
     this.body = new THREE.Group(); // 傾き・跳ね用
     this.group.add(this.body);
@@ -180,7 +182,24 @@ export class KartView {
     }
     this.dizzy.visible = false;
     this.body.add(this.dizzy);
+    // 豪雨でずぶぬれのときは頭の上に小さな雨雲
+    this.cloud = new THREE.Group();
+    this.cloud.position.set(0, 4.2, -0.3);
+    const cloudMat = once('m-raincloud', () => toon(0x6b7189));
+    for (const [cx, cy, cr] of [[0, 0, 0.75], [-0.7, -0.1, 0.55], [0.7, -0.1, 0.55], [0.3, 0.3, 0.5]]) {
+      add(once('g-cloudpuff', () => new THREE.IcosahedronGeometry(1, 1)), cloudMat, [cx, cy, 0], null, this.cloud).scale.setScalar(cr);
+    }
+    const dropMat = once('m-drop', () => new THREE.MeshBasicMaterial({ color: 0x8ec5ff }));
+    this.drops = [];
+    for (let i = 0; i < 5; i++) {
+      const d = add(once('g-drop', () => new THREE.CylinderGeometry(0.04, 0.04, 0.5, 4)), dropMat, [(i - 2) * 0.35, -0.8, (i % 2) * 0.3 - 0.15], null, this.cloud);
+      d.castShadow = false;
+      this.drops.push(d);
+    }
+    this.cloud.visible = false;
+    this.group.add(this.cloud);
     this.firstPerson = false;
+    this.own = false; // 自分の車か
     this._t = 0;
   }
 
@@ -244,6 +263,12 @@ export class KartView {
     if (this.dizzy.visible) {
       this.dizzy.rotation.y = t * 6;
       for (const st of this.dizzy.children) st.rotation.y = -this.dizzy.rotation.y;
+    }
+    // 自分の車の雨雲は前が見えなくなるので出さない（HUD の「ずぶぬれ」表示で知らせる）
+    this.cloud.visible = !this.own && r.wet > 0;
+    if (this.cloud.visible) {
+      this.cloud.rotation.y = -(r.h + spinAngle) + Math.sin(t * 1.5) * 0.2; // ワールドに対してほぼ向きを固定
+      this.drops.forEach((d, i) => (d.position.y = -0.6 - ((t * 3 + i * 0.37) % 1) * 2.2));
     }
     this.dog.animate({ dt, speed: r.sp, steer: r.st, spin: r.spin, boost: boosting ? 1 : 0, bump: r.bump, mood });
   }

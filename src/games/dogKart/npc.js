@@ -1,7 +1,7 @@
 // NPC（コンピューター）の運転。ホストだけが実行し、入力ビットを作って人間と同じ物理で走らせる。
 // 思考に使う状態（走行ライン・引っかかり時間）は車の状態に入れてあるので、スナップショットで復元できる。
 
-import { IN, ITEMS, KART, NPC } from './constants.js';
+import { IN, ITEMS, KART, NPC, TIMING } from './constants.js';
 import { nextRandom } from './items.js';
 
 function angleTo(k, x, z) {
@@ -77,6 +77,17 @@ export function npcInput(sim, k, dt) {
     k.as = 0;
     bits |= IN.RESPAWN;
   }
+
+  // タイミングブースト: だいたいのタイミングで押す（ジャストとは限らない）
+  if (k.tw > 0) {
+    if (k.tn <= 0) k.tn = TIMING.SWEET + (nextRandom(s) - 0.5) * 0.5;
+    if (k.tw <= k.tn) {
+      bits |= IN.TAP;
+      k.tn = 0;
+    }
+  }
+  // 豪雨: 最終ラップに入ってしばらくすると呼ぶ（人間が先に呼べる余裕を残す）
+  if (sim.canCallRain(k) && nextRandom(s) < dt * 0.35) bits |= IN.RAIN;
 
   // アイテム
   if (k.item && k.roll <= 0 && s.phase === 'racing') {

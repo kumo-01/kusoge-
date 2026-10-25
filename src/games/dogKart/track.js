@@ -3,12 +3,37 @@
 
 import { RACE } from './constants.js';
 
-// 草原サーキット（反時計回り）。長いストレート、ヘアピン、S字、大きなカーブ。
-const CONTROL = [
-  [-30, -100], [30, -100], [85, -94], [126, -62], [138, -14], [118, 30],
-  [80, 44], [54, 66], [54, 100], [82, 128], [76, 166], [24, 182],
-  [-30, 166], [-52, 124], [-86, 96], [-126, 64], [-142, 12], [-128, -50], [-86, -90],
-].map(([x, z]) => [x * 1.02, z * 1.02]);
+// コース一覧（すべて反時計回り＝内側は中心線の右側 lat < 0）。theme は world.js の見た目の種類
+export const COURSES = [
+  {
+    // 長いストレート、ヘアピン、S字、大きなカーブ
+    name: 'わんわん草原サーキット',
+    theme: 'meadow',
+    control: [
+      [-30, -100], [30, -100], [85, -94], [126, -62], [138, -14], [118, 30],
+      [80, 44], [54, 66], [54, 100], [82, 128], [76, 166], [24, 182],
+      [-30, 166], [-52, 124], [-86, 96], [-126, 64], [-142, 12], [-128, -50], [-86, -90],
+    ].map(([x, z]) => [x * 1.02, z * 1.02]),
+  },
+  {
+    // 海ぞいの長いストレートと、波のようにうねる浜辺の道
+    name: 'しっぽフリフリ海岸',
+    theme: 'beach',
+    control: [
+      [-120, -70], [-40, -75], [40, -75], [120, -70], [180, -50], [210, -5], [195, 40], [150, 60], [100, 45],
+      [60, 70], [20, 95], [-30, 82], [-72, 62], [-112, 78], [-160, 80], [-205, 45], [-210, -10], [-180, -55],
+    ],
+  },
+  {
+    // 切り返しの多いテクニカルな雪山
+    name: 'もこもこ雪山',
+    theme: 'snow',
+    control: [
+      [-60, -95], [0, -98], [52, -90], [92, -62], [100, -20], [75, 10], [40, 25], [25, 55], [50, 88], [100, 95],
+      [140, 122], [135, 170], [85, 188], [25, 175], [-25, 145], [-60, 108], [-110, 95], [-150, 58], [-152, 0], [-128, -62],
+    ],
+  },
+];
 
 function catmull(p0, p1, p2, p3, t) {
   // centripetal ではなく uniform。制御点が均等に近いので十分なめらか
@@ -18,7 +43,12 @@ function catmull(p0, p1, p2, p3, t) {
 }
 
 export class Track {
-  constructor(control = CONTROL) {
+  /** @param {number | number[][]} course コース番号（COURSES の添字）または制御点の配列 */
+  constructor(course = 0) {
+    const def = Array.isArray(course) ? { name: 'custom', theme: 'meadow', control: course } : COURSES[course] || COURSES[0];
+    const control = def.control;
+    this.name = def.name;
+    this.theme = def.theme;
     this.roadHalf = 11; // 道路の半幅
     this.wallDist = 15.5; // 中心線から壁までの距離（道路の外は芝生）
     this.checkpoints = RACE.CHECKPOINTS;
@@ -162,10 +192,22 @@ export class Track {
     return out;
   }
 
-  /** スタート位置: 前列に人間（0 = ホスト, 1 = ゲスト）、後列に NPC */
+  /** スタート位置: 前列に人間（0 = ホスト, 1 = ゲスト）、2 列目以降に NPC（2 台ずつ） */
   startPos(index) {
-    const row = index < 2 ? 0 : 1;
+    const row = Math.floor(index / 2);
     const side = index % 2 === 0 ? 1 : -1;
-    return this.pointAt(-10 - row * 9, side * 5);
+    return this.pointAt(-10 - row * 8, side * 5);
+  }
+
+  /** 中心線の範囲（背景の配置などに使う） */
+  bounds() {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (let i = 0; i < this.n; i++) {
+      minX = Math.min(minX, this.x[i]);
+      maxX = Math.max(maxX, this.x[i]);
+      minZ = Math.min(minZ, this.z[i]);
+      maxZ = Math.max(maxZ, this.z[i]);
+    }
+    return { minX, maxX, minZ, maxZ };
   }
 }

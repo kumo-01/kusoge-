@@ -32,6 +32,8 @@ const STYLE = {
   // NPC
   poodle: { fur: 0xfff3f6, dark: 0xf2d4dd, cream: 0xffffff, inner: 0xffd0dc, ears: 'floppy', earSpread: 0.46, scarf: 0xff6fae, pom: true },
   pug: { fur: 0xead1a4, dark: 0x3b2f2a, cream: 0xf6e3c0, inner: 0x3b2f2a, ears: 'fold', earSpread: 0.36, scarf: 0x22b573, muzzle: 0x3b2f2a },
+  dachs: { fur: 0xb5622e, dark: 0x7a3b16, cream: 0xe0a070, inner: 0x7a3b16, ears: 'long', earSpread: 0.44, scarf: 0xffd23f, snout: true },
+  husky: { fur: 0x8d97aa, dark: 0x5b6477, cream: 0xffffff, inner: 0xffd2d8, earH: 0.46, earW: 0.26, earSpread: 0.31, earTilt: 0.1, scarf: 0x8a63ff, mask: true },
 };
 
 /**
@@ -82,7 +84,12 @@ export function buildDog(kind) {
   if (kind === 'corgi') {
     head.add(mesh(SPHERE(), cream, { pos: [0, 0.18, 0.32], scale: [0.12, 0.32, 0.2] })); // 額の白いライン
   }
-  head.add(mesh(SPHERE(), st.muzzle ? m(st.muzzle) : cream, { pos: [0, -0.14, 0.34], scale: [0.34, 0.26, 0.26] }));
+  if (st.mask) {
+    // ハスキー: 顔の白いマスク
+    head.add(mesh(SPHERE(), cream, { pos: [0, -0.04, 0.2], scale: [0.48, 0.36, 0.34] }));
+    for (const side of [-1, 1]) head.add(mesh(SPHERE_LO(), cream, { pos: [side * 0.16, 0.2, 0.4], scale: [0.07, 0.05, 0.03] })); // 眉
+  }
+  head.add(mesh(SPHERE(), st.muzzle ? m(st.muzzle) : cream, { pos: [0, -0.14, st.snout ? 0.44 : 0.34], scale: st.snout ? [0.26, 0.2, 0.36] : [0.34, 0.26, 0.26] }));
   head.add(mesh(SPHERE(), cream, { pos: [-0.3, -0.12, 0.22], scale: [0.18, 0.15, 0.15] }));
   head.add(mesh(SPHERE(), cream, { pos: [0.3, -0.12, 0.22], scale: [0.18, 0.15, 0.15] }));
   // 鼻・口
@@ -111,6 +118,10 @@ export function buildDog(kind) {
       // プードル: もこもこの垂れ耳
       pivot.position.set(side * st.earSpread, 0.12, -0.02);
       for (const [y, r] of [[-0.12, 0.17], [-0.3, 0.19], [-0.46, 0.15]]) pivot.add(mesh(SPHERE_LO(), fur, { pos: [side * 0.04, y, 0], scale: [r * 0.8, r, r] }));
+    } else if (st.ears === 'long') {
+      // ダックス: 長い垂れ耳
+      pivot.position.set(side * st.earSpread, 0.14, -0.04);
+      pivot.add(mesh(SPHERE_LO(), dark, { pos: [side * 0.05, -0.28, 0], scale: [0.1, 0.36, 0.2] }));
     } else if (st.ears === 'fold') {
       // パグ: 小さく前に折れた耳
       pivot.position.set(side * st.earSpread, 0.34, 0.02);
@@ -137,6 +148,12 @@ export function buildDog(kind) {
     // くるんと巻いたしっぽ
     tail.add(mesh(g('tailTorus', () => new THREE.TorusGeometry(0.16, 0.08, 8, 14, Math.PI * 1.6)), fur, { pos: [0, 0.2, 0], rot: [0, Math.PI / 2, 0] }));
     tail.add(mesh(SPHERE_LO(), cream, { pos: [0, 0.34, 0.05], scale: [0.08, 0.08, 0.08] }));
+  } else if (kind === 'husky') {
+    // ふさふさのしっぽ
+    tail.add(mesh(SPHERE_LO(), fur, { pos: [0, 0.3, -0.18], scale: [0.13, 0.3, 0.13], rot: [-0.8, 0, 0] }));
+    tail.add(mesh(SPHERE_LO(), cream, { pos: [0, 0.52, -0.34], scale: [0.08, 0.1, 0.08] }));
+  } else if (kind === 'dachs') {
+    tail.add(mesh(CAPSULE(), fur, { pos: [0, 0.2, -0.2], scale: [0.6, 0.8, 0.6], rot: [-1.0, 0, 0] }));
   } else if (kind === 'poodle') {
     tail.add(mesh(SPHERE_LO(), fur, { pos: [0, 0.3, -0.1], scale: [0.2, 0.2, 0.2] })); // ぽんぽんしっぽ
   } else {

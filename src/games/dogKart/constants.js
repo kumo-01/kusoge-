@@ -6,7 +6,7 @@ export const RACE = {
   END_DELAY: 4.0, // 勝者確定から結果画面までの演出時間
   CHECKPOINTS: 8, // 1周あたりのチェックポイント数（0番がスタートライン）
   HUMANS: 2, // 0 = ホスト, 1 = ゲスト。2 以降は NPC
-  MAX_NPCS: 2,
+  MAX_NPCS: 4,
 };
 
 export const KART = {
@@ -69,8 +69,28 @@ export const IN = {
   RIGHT: 8,
   ITEM: 16, // 押した瞬間だけ
   RESPAWN: 32, // 押した瞬間だけ
+  TAP: 64, // タイミングブーストの「タップ」。押した瞬間だけ
+  RAIN: 128, // 豪雨を呼ぶ。押した瞬間だけ
   HELD: 15,
-  ONESHOT: 48,
+  ONESHOT: 240,
+};
+
+// タイミングブースト: レース中に 1〜2 回、リングが縮んで的に重なった瞬間に押すとブースト
+export const TIMING = {
+  WINDOW: 1.6, // リングが出てから消えるまで（秒）
+  SWEET: 0.45, // 残り時間がこの値のときがジャスト
+  PERFECT: 0.08, // ジャストからのずれの許容（秒）
+  GOOD: 0.2,
+  BOOST_PERFECT: 2.4,
+  BOOST_GOOD: 1.3,
+};
+
+// 豪雨: 最終ラップに入った車は 1 レースに 1 回だけ（早い者勝ち）雨雲を呼べる。呼んだ車以外は一時的に遅くなる
+export const RAIN = {
+  DURATION: 7, // 雨が降っている時間
+  SLOW_TIME: 5, // 呼んだ車以外が遅くなる時間
+  FACTOR: 0.72, // その間の最高速の倍率
+  REQUEST_GRACE: 0.5, // 最終ラップに入る直前に押した入力を待つ時間（通信の遅れ対策）
 };
 
 // NPC（コンピューター）の運転

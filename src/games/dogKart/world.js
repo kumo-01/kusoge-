@@ -31,10 +31,59 @@ function canvasTexture(w, hgt, draw, { repeat = false } = {}) {
 
 const FONT = '"M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", "Arial Rounded MT Bold", sans-serif';
 
+// コースごとの見た目（track.theme）
+const THEMES = {
+  meadow: {
+    sky: [0x4fb4ff, 0xe6f7ff],
+    fog: 0x9fdcff,
+    hemi: [0xdff4ff, 0x76c85b],
+    ground: ['#7fd35f', 'rgba(90,180,70,0.35)', 'rgba(170,235,120,0.35)'],
+    shoulder: 0x67c24f,
+    mountains: { colors: [0x8fd18b, 0x7cc6a0, 0x9bd4c4, 0xa9dc8f], count: 22, size: 1 },
+    trees: 'round',
+    deco: { colors: [0xffffff, 0xffe066, 0xff8fb1, 0xb197fc, 0xffa94d], scale: 1, y: 0.3, count: 500 },
+    landmarks: 'dog',
+    signs: ['わんわんGP', 'ホネ注意！', 'バナナに注意', 'スピード出しすぎ注意ワン', '体当たり上等！', 'がんばれ〜！'],
+    fans: ['shiba', 'corgi', 'corgi', 'shiba'],
+  },
+  beach: {
+    sky: [0x1f9cff, 0xfff4dc],
+    fog: 0xbfe8ff,
+    hemi: [0xfff7e0, 0xe8cf8f],
+    ground: ['#f2d79b', 'rgba(255,255,255,0.35)', 'rgba(200,160,90,0.3)'],
+    shoulder: 0xe6c27c,
+    mountains: { colors: [0x5fcf8a, 0x4cb97a, 0x7ad39a], count: 9, size: 0.45 },
+    trees: 'palm',
+    deco: { colors: [0xff8fb1, 0xffa94d, 0xffffff, 0xffe066], scale: 0.8, y: 0.2, count: 260 },
+    landmarks: 'beach',
+    ocean: true,
+    signs: ['しっぽフリフリ海岸', '波に注意！', 'カニ横断中', 'ヤシの実注意', '体当たり上等！', 'がんばれ〜！'],
+    fans: ['poodle', 'pug', 'corgi', 'shiba'],
+  },
+  snow: {
+    sky: [0x7fa8d8, 0xf2f7ff],
+    fog: 0xe3edf8,
+    hemi: [0xf0f6ff, 0xb9cbe0],
+    ground: ['#f4f8ff', 'rgba(170,200,235,0.35)', 'rgba(255,255,255,0.7)'],
+    shoulder: 0xdde8f5,
+    mountains: { colors: [0x9fb4cf, 0x8ca3c2, 0xb4c6dc], count: 22, size: 1.25, caps: true },
+    trees: 'pine',
+    deco: { colors: [0xffffff, 0xeef5ff, 0xd8e8fa], scale: 3, y: 0, count: 220 },
+    landmarks: 'snow',
+    snowfall: true,
+    signs: ['もこもこ雪山', 'カーブ連続！', '雪だるま注意', 'さむいワン…', '体当たり上等！', 'がんばれ〜！'],
+    fans: ['husky', 'shiba', 'husky', 'dachs'],
+  },
+};
+
 export class World {
   constructor(container, track, boxPos) {
     this.track = track;
     this.boxPos = boxPos;
+    this.theme = THEMES[track.theme] || THEMES.meadow;
+    const bb = track.bounds();
+    this.bb = bb;
+    this.center = { x: (bb.minX + bb.maxX) / 2, z: (bb.minZ + bb.maxZ) / 2 };
     this.disposables = [];
     this.container = container;
 
@@ -54,14 +103,15 @@ export class World {
 
     const scene = new THREE.Scene();
     this.scene = scene;
-    const skyColor = new THREE.Color(0x9fdcff);
+    const skyColor = new THREE.Color(this.theme.fog);
     scene.background = skyColor;
-    scene.fog = new THREE.Fog(skyColor, 160, 520);
+    scene.fog = new THREE.Fog(skyColor.clone(), 160, 520);
 
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.3, 1200);
 
     // 光
-    scene.add(new THREE.HemisphereLight(0xdff4ff, 0x76c85b, 1.25));
+    this.hemi = new THREE.HemisphereLight(this.theme.hemi[0], this.theme.hemi[1], 1.25);
+    scene.add(this.hemi);
     const sun = new THREE.DirectionalLight(0xfff4e0, 1.7);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
@@ -81,6 +131,7 @@ export class World {
     this._buildTrack();
     this._buildScenery();
     this._buildItemViews();
+    this._buildWeather();
 
     this.karts = [];
     this.ensureKarts(2);
@@ -117,7 +168,7 @@ export class World {
         side: THREE.BackSide,
         depthWrite: false,
         fog: false,
-        uniforms: { top: { value: new THREE.Color(0x4fb4ff) }, bottom: { value: new THREE.Color(0xe6f7ff) } },
+        uniforms: { top: { value: new THREE.Color(this.theme.sky[0]) }, bottom: { value: new THREE.Color(this.theme.sky[1]) } },
         vertexShader: 'varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
         fragmentShader: 'uniform vec3 top; uniform vec3 bottom; varying vec3 vPos; void main(){ float h = clamp(normalize(vPos).y * 1.6 + 0.1, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, h), 1.0); }',
       }),
@@ -128,6 +179,7 @@ export class World {
     // 雲（白い球の集まり）
     const rnd = seeded(7);
     const cloudMat = this._track(new THREE.MeshToonMaterial({ color: 0xffffff }));
+    this.cloudMat = cloudMat;
     const puff = this._track(new THREE.IcosahedronGeometry(1, 1));
     this.clouds = [];
     for (let i = 0; i < 16; i++) {
@@ -147,37 +199,78 @@ export class World {
       this.clouds.push(g);
     }
 
-    // 遠くの山
+    // 遠くの山（海のコースでは小さな島、雪山では雪をかぶった山）
     const mountainGeo = this._track(new THREE.ConeGeometry(1, 1, 7));
-    const colors = [0x8fd18b, 0x7cc6a0, 0x9bd4c4, 0xa9dc8f];
-    for (let i = 0; i < 22; i++) {
-      const a = (i / 22) * Math.PI * 2 + rnd() * 0.2;
+    const mt = this.theme.mountains;
+    const capMat = mt.caps ? this._track(new THREE.MeshToonMaterial({ color: 0xffffff })) : null;
+    for (let i = 0; i < mt.count; i++) {
+      const a = (i / mt.count) * Math.PI * 2 + rnd() * 0.2;
       const r = 430 + rnd() * 80;
-      const m = new THREE.Mesh(mountainGeo, this._track(new THREE.MeshToonMaterial({ color: colors[i % colors.length] })));
-      const s = 60 + rnd() * 70;
+      const m = new THREE.Mesh(mountainGeo, this._track(new THREE.MeshToonMaterial({ color: mt.colors[i % mt.colors.length] })));
+      const s = (60 + rnd() * 70) * mt.size;
       m.scale.set(s * 1.3, s, s * 1.3);
-      m.position.set(Math.cos(a) * r, s / 2 - 2, Math.sin(a) * r);
+      m.position.set(this.center.x + Math.cos(a) * r, s / 2 - 2, this.center.z + Math.sin(a) * r);
       this.scene.add(m);
+      if (capMat) {
+        const cap = new THREE.Mesh(mountainGeo, capMat);
+        cap.scale.set(s * 1.3 * 0.42, s * 0.42, s * 1.3 * 0.42);
+        cap.position.set(m.position.x, s - 2 - s * 0.21 + 0.3, m.position.z);
+        this.scene.add(cap);
+      }
     }
   }
 
   _buildGround() {
+    const [base, dotA, dotB] = this.theme.ground;
     const tex = this._track(
       canvasTexture(256, 256, (x, w, h) => {
-        x.fillStyle = '#7fd35f';
+        x.fillStyle = base;
         x.fillRect(0, 0, w, h);
         const r = seeded(3);
         for (let i = 0; i < 900; i++) {
-          x.fillStyle = r() < 0.5 ? 'rgba(90,180,70,0.35)' : 'rgba(170,235,120,0.35)';
+          x.fillStyle = r() < 0.5 ? dotA : dotB;
           x.fillRect(r() * w, r() * h, 2 + r() * 4, 2 + r() * 4);
         }
       }, { repeat: true }),
     );
-    tex.repeat.set(120, 120);
-    const ground = new THREE.Mesh(this._track(new THREE.PlaneGeometry(1400, 1400)), this._track(new THREE.MeshToonMaterial({ map: tex })));
+    const mat = this._track(new THREE.MeshToonMaterial({ map: tex }));
+    let ground;
+    if (this.theme.ocean) {
+      // 砂浜の島（楕円）と、まわりの海
+      const bb = this.bb;
+      this.island = { rx: (bb.maxX - bb.minX) / 2 + 95, rz: (bb.maxZ - bb.minZ) / 2 + 95 };
+      tex.repeat.set(60, 60);
+      ground = new THREE.Mesh(this._track(new THREE.CircleGeometry(1, 72)), mat);
+      ground.scale.set(this.island.rx, this.island.rz, 1);
+      // 波打ち際の白い縁
+      const surf = new THREE.Mesh(this._track(new THREE.RingGeometry(1, 1.06, 72)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })));
+      surf.rotation.x = -Math.PI / 2;
+      surf.scale.set(this.island.rx, this.island.rz, 1);
+      surf.position.set(this.center.x, -0.1, this.center.z);
+      this.surf = surf;
+      this.scene.add(surf);
+      const sea = new THREE.Mesh(this._track(new THREE.PlaneGeometry(2400, 2400)), this._track(new THREE.MeshToonMaterial({ color: 0x35b4e8 })));
+      sea.rotation.x = -Math.PI / 2;
+      sea.position.set(this.center.x, -0.4, this.center.z);
+      sea.receiveShadow = true;
+      this.scene.add(sea);
+      ground.position.set(this.center.x, 0, this.center.z);
+    } else {
+      tex.repeat.set(120, 120);
+      ground = new THREE.Mesh(this._track(new THREE.PlaneGeometry(1400, 1400)), mat);
+      ground.position.set(this.center.x, 0, this.center.z);
+    }
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.scene.add(ground);
+  }
+
+  /** 背景を置ける地面の上か（海のコースでは島の中だけ） */
+  _onLand(x, z, margin = 0) {
+    if (!this.island) return true;
+    const dx = (x - this.center.x) / (this.island.rx - margin);
+    const dz = (z - this.center.z) / (this.island.rz - margin);
+    return dx * dx + dz * dz < 1;
   }
 
   /** 中心線に沿ったリボン状のメッシュ */
@@ -255,7 +348,7 @@ export class World {
       this.scene.add(curb);
     }
     // 芝生の路肩（少し濃い緑）
-    const shoulderMat = this._track(new THREE.MeshToonMaterial({ color: 0x67c24f }));
+    const shoulderMat = this._track(new THREE.MeshToonMaterial({ color: this.theme.shoulder }));
     for (const side of [1, -1]) {
       const sh = new THREE.Mesh(this._ribbon(side * (t.roadHalf + 1.3), side * (t.wallDist + 0.3), 0.015, 8), shoulderMat);
       sh.receiveShadow = true;
@@ -392,58 +485,65 @@ export class World {
   _buildScenery() {
     const rnd = seeded(42);
     const scene = this.scene;
+    const th = this.theme;
+    const bb = this.bb;
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const v = new THREE.Vector3();
     const s = new THREE.Vector3();
     const col = new THREE.Color();
+    const inArea = (pad) => [bb.minX - pad + rnd() * (bb.maxX - bb.minX + pad * 2), bb.minZ - pad + rnd() * (bb.maxZ - bb.minZ + pad * 2)];
 
-    // 木
+    // 木（草原: 丸い木 / 海: ヤシの木 / 雪山: もみの木）
     const spots = [];
     for (let tries = 0; tries < 3000 && spots.length < 170; tries++) {
-      const x = (rnd() - 0.5) * 520;
-      const z = (rnd() - 0.5) * 480 + 30;
-      if (!this._farFromTrack(x, z, 6)) continue;
+      const [x, z] = inArea(100);
+      if (!this._farFromTrack(x, z, 6) || !this._onLand(x, z, 8)) continue;
       if (spots.some(([a, b]) => (a - x) ** 2 + (b - z) ** 2 < 64)) continue;
       spots.push([x, z]);
     }
-    const trunks = new THREE.InstancedMesh(this._track(new THREE.CylinderGeometry(0.5, 0.7, 3, 6)), this._track(new THREE.MeshToonMaterial({ color: 0x9a6a3a })), spots.length);
-    const crowns = new THREE.InstancedMesh(this._track(new THREE.IcosahedronGeometry(2.6, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length * 2);
-    trunks.castShadow = crowns.castShadow = true;
-    const greens = [0x4cb944, 0x5fcf55, 0x3fa34d, 0x7ad35a, 0x9be070];
-    spots.forEach(([x, z], i) => {
-      const sc = 0.8 + rnd() * 0.8;
-      q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6);
-      m4.compose(v.set(x, 1.5 * sc, z), q, s.set(sc, sc, sc));
-      trunks.setMatrixAt(i, m4);
-      m4.compose(v.set(x, 4.2 * sc, z), q, s.set(sc * 1.1, sc, sc * 1.1));
-      crowns.setMatrixAt(i * 2, m4);
-      m4.compose(v.set(x, 6.2 * sc, z), q, s.set(sc * 0.7, sc * 0.7, sc * 0.7));
-      crowns.setMatrixAt(i * 2 + 1, m4);
-      const c = greens[Math.floor(rnd() * greens.length)];
-      crowns.setColorAt(i * 2, col.set(c));
-      crowns.setColorAt(i * 2 + 1, col.set(c).offsetHSL(0, 0, 0.06));
-    });
-    scene.add(trunks, crowns);
-
-    // 花
-    const flowerSpots = [];
-    for (let tries = 0; tries < 4000 && flowerSpots.length < 500; tries++) {
-      const x = (rnd() - 0.5) * 420;
-      const z = (rnd() - 0.5) * 400 + 30;
-      if (this._farFromTrack(x, z, 1.5)) flowerSpots.push([x, z]);
+    if (th.trees === 'palm') this._palmTrees(spots, rnd);
+    else if (th.trees === 'pine') this._pineTrees(spots, rnd);
+    else {
+      const trunks = new THREE.InstancedMesh(this._track(new THREE.CylinderGeometry(0.5, 0.7, 3, 6)), this._track(new THREE.MeshToonMaterial({ color: 0x9a6a3a })), spots.length);
+      const crowns = new THREE.InstancedMesh(this._track(new THREE.IcosahedronGeometry(2.6, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length * 2);
+      trunks.castShadow = crowns.castShadow = true;
+      const greens = [0x4cb944, 0x5fcf55, 0x3fa34d, 0x7ad35a, 0x9be070];
+      spots.forEach(([x, z], i) => {
+        const sc = 0.8 + rnd() * 0.8;
+        q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6);
+        m4.compose(v.set(x, 1.5 * sc, z), q, s.set(sc, sc, sc));
+        trunks.setMatrixAt(i, m4);
+        m4.compose(v.set(x, 4.2 * sc, z), q, s.set(sc * 1.1, sc, sc * 1.1));
+        crowns.setMatrixAt(i * 2, m4);
+        m4.compose(v.set(x, 6.2 * sc, z), q, s.set(sc * 0.7, sc * 0.7, sc * 0.7));
+        crowns.setMatrixAt(i * 2 + 1, m4);
+        const c = greens[Math.floor(rnd() * greens.length)];
+        crowns.setColorAt(i * 2, col.set(c));
+        crowns.setColorAt(i * 2 + 1, col.set(c).offsetHSL(0, 0, 0.06));
+      });
+      scene.add(trunks, crowns);
     }
-    const flowers = new THREE.InstancedMesh(this._track(new THREE.IcosahedronGeometry(0.35, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), flowerSpots.length);
-    const fc = [0xffffff, 0xffe066, 0xff8fb1, 0xb197fc, 0xffa94d];
-    flowerSpots.forEach(([x, z], i) => {
-      m4.compose(v.set(x, 0.3, z), q.identity(), s.set(1, 1, 1));
-      flowers.setMatrixAt(i, m4);
-      flowers.setColorAt(i, col.set(fc[i % fc.length]));
+
+    // 小物（花 / 貝がら / 雪のかたまり）
+    const deco = th.deco;
+    const decoSpots = [];
+    for (let tries = 0; tries < deco.count * 8 && decoSpots.length < deco.count; tries++) {
+      const [x, z] = inArea(50);
+      if (this._farFromTrack(x, z, 1.5 + deco.scale * 0.4) && this._onLand(x, z, 4)) decoSpots.push([x, z]);
+    }
+    const decos = new THREE.InstancedMesh(this._track(new THREE.IcosahedronGeometry(0.35, deco.scale > 1 ? 1 : 0)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), decoSpots.length);
+    decoSpots.forEach(([x, z], i) => {
+      const sc = deco.scale * (0.6 + rnd() * 0.8);
+      m4.compose(v.set(x, deco.y, z), q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6), s.set(sc, deco.scale > 1 ? sc * 0.55 : sc, sc));
+      decos.setMatrixAt(i, m4);
+      decos.setColorAt(i, col.set(deco.colors[i % deco.colors.length]));
     });
-    scene.add(flowers);
+    decos.receiveShadow = true;
+    scene.add(decos);
 
     // 看板
-    const signs = ['わんわんGP', 'ホネ注意！', 'バナナに注意', 'スピード出しすぎ注意ワン', '体当たり上等！', 'がんばれ〜！'];
+    const signs = th.signs;
     const signTexts = signs.map((txt, i) =>
       this._track(
         canvasTexture(512, 256, (x, w, h) => {
@@ -470,6 +570,8 @@ export class World {
       const sPos = ((i + 0.55) / 9) * t.length;
       const side = i % 2 ? 1 : -1;
       const p = t.pointAt(sPos, side * (t.wallDist + 6));
+      // 別の区間のコースに近すぎる場所には置かない
+      if (!this._farFromTrack(p.x, p.z, 3)) continue;
       const g = new THREE.Group();
       g.position.set(p.x, 0, p.z);
       // コース側を向く（看板の正面 = ローカル +z）
@@ -487,19 +589,22 @@ export class World {
       scene.add(g);
     }
 
-    // 内側のランドマーク: 巨大な犬小屋・骨・消火栓・ごはん皿
+    // 内側のランドマーク
     const places = [];
-    for (let tries = 0; tries < 2000 && places.length < 4; tries++) {
-      const x = (rnd() - 0.5) * 200;
-      const z = (rnd() - 0.5) * 200 + 30;
+    for (let tries = 0; tries < 3000 && places.length < 4; tries++) {
+      const [x, z] = inArea(0);
       if (!this._farFromTrack(x, z, 18)) continue;
-      // コースの内側だけに置く（このコースでは中心線の右側 = lat < 0 が内側）
+      // コースの内側だけに置く（どのコースも中心線の右側 = lat < 0 が内側）
       const p = t.project(x, z);
       if (p.lat > 0) continue;
       if (places.some(([a, b]) => (a - x) ** 2 + (b - z) ** 2 < 900)) continue;
       places.push([x, z]);
     }
-    const builders = [() => this._dogHouse(), () => this._bigBone(), () => this._hydrant(), () => this._bowl()];
+    const builders = {
+      dog: [() => this._dogHouse(), () => this._bigBone(), () => this._hydrant(), () => this._bowl()],
+      beach: [() => this._sandCastle(), () => this._parasol(), () => this._beachBall(), () => this._parasol()],
+      snow: [() => this._snowman(), () => this._igloo(), () => this._snowman(), () => this._bigBone()],
+    }[th.landmarks];
     places.forEach(([x, z], i) => {
       const o = builders[i % builders.length]();
       o.position.set(x, 0, z);
@@ -509,16 +614,180 @@ export class World {
 
     // 応援する犬たち（スタート付近の外側）
     this.fans = [];
-    const fanKinds = ['shiba', 'corgi', 'corgi', 'shiba'];
     for (let i = 0; i < 4; i++) {
       const p = t.pointAt(-20 + i * 12, -(t.wallDist + 4.5));
-      const dog = buildDog(fanKinds[i]);
+      const dog = buildDog(th.fans[i]);
       dog.group.position.set(p.x, 0, p.z);
       dog.group.rotation.y = Math.atan2(p.tz, -p.tx); // コースの方を向く
       dog.group.scale.setScalar(2.2);
       scene.add(dog.group);
       this.fans.push(dog);
     }
+  }
+
+  _palmTrees(spots, rnd) {
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const v = new THREE.Vector3();
+    const s = new THREE.Vector3();
+    const col = new THREE.Color();
+    const trunks = new THREE.InstancedMesh(this._track(new THREE.CylinderGeometry(0.35, 0.6, 9, 6).translate(0, 4.5, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xb98a55 })), spots.length);
+    const leafGeo = this._track(new THREE.BoxGeometry(0.9, 0.15, 5).translate(0, 0, 2.4));
+    const leaves = new THREE.InstancedMesh(leafGeo, this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length * 6);
+    const nuts = new THREE.InstancedMesh(this._track(new THREE.SphereGeometry(0.45, 8, 6)), this._track(new THREE.MeshToonMaterial({ color: 0x7a4a24 })), spots.length * 2);
+    trunks.castShadow = leaves.castShadow = true;
+    spots.forEach(([x, z], i) => {
+      const sc = 0.8 + rnd() * 0.5;
+      const lean = (rnd() - 0.5) * 0.3;
+      e.set(lean, rnd() * 6, 0, 'YXZ');
+      q.setFromEuler(e);
+      m4.compose(v.set(x, 0, z), q, s.set(sc, sc, sc));
+      trunks.setMatrixAt(i, m4);
+      const topX = x + Math.sin(lean) * 9 * sc * Math.sin(e.y);
+      const topZ = z + Math.sin(lean) * 9 * sc * Math.cos(e.y);
+      const topY = 9 * sc;
+      for (let j = 0; j < 6; j++) {
+        e.set(0.35 + rnd() * 0.2, (j / 6) * Math.PI * 2 + rnd() * 0.3, 0, 'YXZ');
+        q.setFromEuler(e);
+        m4.compose(v.set(topX, topY, topZ), q, s.set(sc, sc, sc));
+        leaves.setMatrixAt(i * 6 + j, m4);
+        leaves.setColorAt(i * 6 + j, col.set(j % 2 ? 0x3fae4f : 0x5fcf55));
+      }
+      for (let j = 0; j < 2; j++) {
+        m4.compose(v.set(topX + (j ? 0.5 : -0.5), topY - 0.6, topZ), q.identity(), s.set(sc, sc, sc));
+        nuts.setMatrixAt(i * 2 + j, m4);
+      }
+    });
+    this.scene.add(trunks, leaves, nuts);
+  }
+
+  _pineTrees(spots, rnd) {
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const v = new THREE.Vector3();
+    const s = new THREE.Vector3();
+    const col = new THREE.Color();
+    const trunks = new THREE.InstancedMesh(this._track(new THREE.CylinderGeometry(0.4, 0.55, 2.4, 6)), this._track(new THREE.MeshToonMaterial({ color: 0x7a5232 })), spots.length);
+    const cones = new THREE.InstancedMesh(this._track(new THREE.ConeGeometry(1, 1, 7)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length * 4);
+    trunks.castShadow = cones.castShadow = true;
+    const greens = [0x2f7d4f, 0x3a8f5c, 0x276b45];
+    spots.forEach(([x, z], i) => {
+      const sc = 0.8 + rnd() * 0.7;
+      q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6);
+      m4.compose(v.set(x, 1.2 * sc, z), q, s.set(sc, sc, sc));
+      trunks.setMatrixAt(i, m4);
+      const green = greens[Math.floor(rnd() * greens.length)];
+      // 3 段の葉と、てっぺんの雪
+      [[3.2, 3.4, 3], [5.2, 2.6, 2.6], [7, 1.8, 2.2], [8.1, 0.9, 1.0]].forEach(([y, r, hgt], j) => {
+        m4.compose(v.set(x, y * sc, z), q, s.set(r * sc, hgt * sc, r * sc));
+        cones.setMatrixAt(i * 4 + j, m4);
+        cones.setColorAt(i * 4 + j, col.set(j === 3 ? 0xffffff : green));
+      });
+    });
+    this.scene.add(trunks, cones);
+  }
+
+  _sandCastle() {
+    const g = new THREE.Group();
+    const sand = this._track(new THREE.MeshToonMaterial({ color: 0xe9c47e }));
+    const flag = this._track(new THREE.MeshToonMaterial({ color: 0xff4d5e }));
+    const base = new THREE.Mesh(this._track(new THREE.BoxGeometry(14, 5, 14)), sand);
+    base.position.y = 2.5;
+    g.add(base);
+    for (const [x, z] of [[-7, -7], [7, -7], [-7, 7], [7, 7], [0, 0]]) {
+      const big = x === 0;
+      const tower = new THREE.Mesh(this._track(new THREE.CylinderGeometry(big ? 3.2 : 2.2, big ? 3.6 : 2.6, big ? 10 : 7.5, 12)), sand);
+      tower.position.set(x, big ? 5 : 3.75, z);
+      const roof = new THREE.Mesh(this._track(new THREE.ConeGeometry(big ? 3.8 : 2.8, big ? 4 : 3, 12)), sand);
+      roof.position.set(x, (big ? 10 : 7.5) + (big ? 2 : 1.5), z);
+      g.add(tower, roof);
+      if (big) {
+        const pole = new THREE.Mesh(this._track(new THREE.CylinderGeometry(0.1, 0.1, 4, 6)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })));
+        pole.position.set(0, 16, 0);
+        const f = new THREE.Mesh(this._track(new THREE.BoxGeometry(2, 1.2, 0.1)), flag);
+        f.position.set(1, 17.3, 0);
+        g.add(pole, f);
+      }
+    }
+    g.traverse((o) => {
+      o.castShadow = true;
+      o.receiveShadow = true;
+    });
+    return g;
+  }
+
+  _parasol() {
+    const g = new THREE.Group();
+    const pole = new THREE.Mesh(this._track(new THREE.CylinderGeometry(0.3, 0.3, 11, 8)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })));
+    pole.position.y = 5.5;
+    g.add(pole);
+    const colors = [0xff4d5e, 0xffffff, 0x3d8bff, 0xffffff, 0xffd23f, 0xffffff, 0x22b573, 0xffffff];
+    for (let i = 0; i < 8; i++) {
+      const seg = new THREE.Mesh(this._track(new THREE.ConeGeometry(8, 3, 8, 1, true, (i / 8) * Math.PI * 2, Math.PI / 4)), this._track(new THREE.MeshToonMaterial({ color: colors[i], side: THREE.DoubleSide })));
+      seg.position.y = 11.5;
+      seg.castShadow = true;
+      g.add(seg);
+    }
+    const towel = new THREE.Mesh(this._track(new THREE.BoxGeometry(5, 0.15, 9)), this._track(new THREE.MeshToonMaterial({ color: 0xff8fb1 })));
+    towel.position.set(5, 0.1, 0);
+    g.add(towel);
+    return g;
+  }
+
+  _beachBall() {
+    const g = new THREE.Group();
+    const colors = [0xff4d5e, 0xffffff, 0x3d8bff, 0xffffff, 0xffd23f, 0xffffff];
+    for (let i = 0; i < 6; i++) {
+      const seg = new THREE.Mesh(this._track(new THREE.SphereGeometry(5, 16, 12, (i / 6) * Math.PI * 2, Math.PI / 3)), this._track(new THREE.MeshToonMaterial({ color: colors[i] })));
+      seg.position.y = 5;
+      seg.castShadow = true;
+      g.add(seg);
+    }
+    g.rotation.z = 0.3;
+    return g;
+  }
+
+  _snowman() {
+    const g = new THREE.Group();
+    const snow = this._track(new THREE.MeshToonMaterial({ color: 0xffffff }));
+    const black = this._track(new THREE.MeshToonMaterial({ color: 0x2b2b33 }));
+    for (const [y, r] of [[4, 4.5], [10.5, 3.2], [15.6, 2.4]]) {
+      const b = new THREE.Mesh(this._track(new THREE.SphereGeometry(r, 18, 14)), snow);
+      b.position.y = y;
+      b.castShadow = true;
+      g.add(b);
+    }
+    const nose = new THREE.Mesh(this._track(new THREE.ConeGeometry(0.45, 2.4, 8).rotateX(Math.PI / 2)), this._track(new THREE.MeshToonMaterial({ color: 0xff8a3d })));
+    nose.position.set(0, 15.6, 3.2);
+    g.add(nose);
+    for (const sx of [-0.9, 0.9]) {
+      const eye = new THREE.Mesh(this._track(new THREE.SphereGeometry(0.35, 8, 6)), black);
+      eye.position.set(sx, 16.4, 2.1);
+      g.add(eye);
+    }
+    const scarf = new THREE.Mesh(this._track(new THREE.TorusGeometry(2.5, 0.6, 8, 18)), this._track(new THREE.MeshToonMaterial({ color: 0xff4d5e })));
+    scarf.rotation.x = Math.PI / 2;
+    scarf.position.y = 13.4;
+    const hat = new THREE.Mesh(this._track(new THREE.CylinderGeometry(1.6, 1.6, 2.6, 14)), black);
+    hat.position.y = 18.6;
+    const brim = new THREE.Mesh(this._track(new THREE.CylinderGeometry(2.5, 2.5, 0.3, 16)), black);
+    brim.position.y = 17.4;
+    g.add(scarf, hat, brim);
+    return g;
+  }
+
+  _igloo() {
+    const g = new THREE.Group();
+    const ice = this._track(new THREE.MeshToonMaterial({ color: 0xf1f7ff }));
+    const dome = new THREE.Mesh(this._track(new THREE.SphereGeometry(7, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2)), ice);
+    const door = new THREE.Mesh(this._track(new THREE.CylinderGeometry(2.4, 2.4, 4, 14, 1, false, 0, Math.PI).rotateZ(Math.PI / 2).rotateY(Math.PI / 2)), ice);
+    door.position.set(0, 0, 7);
+    const hole = new THREE.Mesh(this._track(new THREE.CircleGeometry(1.8, 16, 0, Math.PI)), this._track(new THREE.MeshBasicMaterial({ color: 0x33415c })));
+    hole.position.set(0, 0.05, 9.02);
+    dome.castShadow = door.castShadow = true;
+    g.add(dome, door, hole);
+    return g;
   }
 
   _dogHouse() {
@@ -743,6 +1012,107 @@ export class World {
     for (const f of this.fans) f.animate({ dt, speed: 6, steer: Math.sin(performance.now() / 600) * 0.5, spin: 0, boost: 0, bump: 0, mood: 1 });
     const tt = performance.now() / 1000;
     this.flags.forEach((f, i) => (f.rotation.y = Math.sin(tt * 3 + i) * 0.4));
+    if (this.surf) this.surf.scale.set(this.island.rx * (1 + Math.sin(tt * 0.8) * 0.006), this.island.rz * (1 + Math.sin(tt * 0.8) * 0.006), 1);
+    this._updateWeather(dt);
+  }
+
+  // ---- 天気: 豪雨（全コース）と、雪山の降雪 ----
+  _buildWeather() {
+    const box = { w: 90, h: 40 };
+    this._wbox = box;
+    const rnd = seeded(99);
+    // 雨: 細い線を落とす。描く本数は雨の強さで変える
+    const N = 900;
+    this._drops = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) this._drops.set([(rnd() - 0.5) * box.w, rnd() * box.h, (rnd() - 0.5) * box.w], i * 3);
+    const geo = this._track(new THREE.BufferGeometry());
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 6), 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setDrawRange(0, 0);
+    this.rainLines = new THREE.LineSegments(geo, this._track(new THREE.LineBasicMaterial({ color: 0xc4defc, transparent: true, opacity: 0.6, depthWrite: false })));
+    this.rainLines.frustumCulled = false;
+    this.rainLines.visible = false;
+    this.scene.add(this.rainLines);
+    // 雪: ゆっくり舞う点
+    if (this.theme.snowfall) {
+      const M = 700;
+      this._flakes = new Float32Array(M * 3);
+      for (let i = 0; i < M; i++) this._flakes.set([(rnd() - 0.5) * box.w * 1.4, rnd() * box.h, (rnd() - 0.5) * box.w * 1.4], i * 3);
+      const fg = this._track(new THREE.BufferGeometry());
+      fg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(M * 3), 3).setUsage(THREE.DynamicDrawUsage));
+      this.snow = new THREE.Points(fg, this._track(new THREE.PointsMaterial({ color: 0xffffff, size: 0.45, transparent: true, opacity: 0.9, depthWrite: false })));
+      this.snow.frustumCulled = false;
+      this.scene.add(this.snow);
+    }
+    this._rain = 0;
+    this._base = {
+      fog: this.scene.fog.color.clone(),
+      top: this.sky.material.uniforms.top.value.clone(),
+      bottom: this.sky.material.uniforms.bottom.value.clone(),
+      hemi: this.hemi.intensity,
+      sun: this.sun.intensity,
+    };
+    this._gray = new THREE.Color(0x5d6578);
+  }
+
+  /** 豪雨の強さ 0..1 */
+  setRain(level) {
+    this._rain = level;
+  }
+
+  _updateWeather(dt) {
+    const cam = this.camera.position;
+    const box = this._wbox;
+    const level = this._rain;
+    const b = this._base;
+    // 空を暗くする
+    const k = level * 0.6;
+    this.scene.fog.color.copy(b.fog).lerp(this._gray, k);
+    this.scene.background.copy(this.scene.fog.color);
+    this.sky.material.uniforms.top.value.copy(b.top).lerp(this._gray, k);
+    this.sky.material.uniforms.bottom.value.copy(b.bottom).lerp(this._gray, k * 0.8);
+    this.hemi.intensity = b.hemi * (1 - level * 0.3);
+    this.sun.intensity = b.sun * (1 - level * 0.55);
+    this.cloudMat.color.setScalar(1 - level * 0.45);
+
+    this.rainLines.visible = level > 0.02;
+    if (this.rainLines.visible) {
+      const d = this._drops;
+      const n = Math.floor((d.length / 3) * Math.min(1, level));
+      const pos = this.rainLines.geometry.attributes.position;
+      const arr = pos.array;
+      const fall = 70 * dt;
+      for (let i = 0; i < n; i++) {
+        const j = i * 3;
+        d[j + 1] -= fall;
+        if (d[j + 1] < 0) d[j + 1] += box.h;
+        // カメラの周りの箱の中で、はみ出したら反対側へ
+        const x = cam.x + ((((d[j] - cam.x) % box.w) + box.w * 1.5) % box.w) - box.w / 2;
+        const z = cam.z + ((((d[j + 2] - cam.z) % box.w) + box.w * 1.5) % box.w) - box.w / 2;
+        const y = d[j + 1];
+        arr.set([x, y, z, x + 0.15, y + 1.8, z], i * 6);
+      }
+      pos.needsUpdate = true;
+      this.rainLines.geometry.setDrawRange(0, n * 2);
+      this.rainLines.material.opacity = 0.35 + level * 0.3;
+    }
+    if (this.snow) {
+      const f = this._flakes;
+      const pos = this.snow.geometry.attributes.position;
+      const arr = pos.array;
+      const t = performance.now() / 1000;
+      const w = box.w * 1.4;
+      for (let i = 0; i < f.length / 3; i++) {
+        const j = i * 3;
+        f[j + 1] -= (2.2 + (i % 5) * 0.4) * dt;
+        if (f[j + 1] < 0) f[j + 1] += box.h;
+        const x = cam.x + ((((f[j] - cam.x) % w) + w * 1.5) % w) - w / 2 + Math.sin(t + i) * 0.8;
+        const z = cam.z + ((((f[j + 2] - cam.z) % w) + w * 1.5) % w) - w / 2;
+        arr[j] = x;
+        arr[j + 1] = f[j + 1];
+        arr[j + 2] = z;
+      }
+      pos.needsUpdate = true;
+    }
   }
 
   /** 影を落とすライトを注目点に合わせて動かす */

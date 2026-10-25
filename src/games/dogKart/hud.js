@@ -1,7 +1,9 @@
 // ゲーム中の HUD（DOM）。周回・順位・速度・アイテム・時間・接続状態・ミニマップ
 import { h, formatTime } from '../../core/util.js';
 import { ITEM_INFO } from './items.js';
-import { RACE } from './constants.js';
+import { RACE, TIMING } from './constants.js';
+
+export const KART_COLORS = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#ffc93c', '#22b573', '#8a63ff'];
 
 export class Hud {
   constructor(container, track, me) {
@@ -26,6 +28,18 @@ export class Hud {
     this.camBtn = h('button.hud-cam-btn', { onclick: () => this.onCameraToggle?.(), title: 'カメラ切り替え（C）' }, '🎥 三人称');
     this.rankTotal = h('div.hud-rank-total', null, '/2');
     this.mapCanvas = h('canvas.hud-map', { width: 180, height: 180 });
+    // タイミングブースト: 外側のリングが縮んで的に重なったら押す
+    this.timingRing = h('div.hud-timing-ring');
+    this.timing = h(
+      'div.hud-timing',
+      { hidden: true },
+      h('div.hud-timing-target'),
+      this.timingRing,
+      h('div.hud-timing-label', null, 'ここだ！で画面をタップ', h('small', null, 'クリック / タップ / Enter')),
+    );
+    this.rainBtn = h('button.hud-rain-btn', { hidden: true, onclick: () => this.onRain?.(), title: '豪雨をよぶ（Q）' }, '☔ 豪雨をよぶ', h('small', null, 'Q'));
+    this.wetBadge = h('div.hud-wet', { hidden: true }, '☔ ずぶぬれ… スピードダウン');
+    this.thunderEl = h('div.hud-thunder');
     this.fallback = h('div.hud-fallback', { hidden: true }, '3D表示を開始できなかったため、簡易表示で遊んでいます');
 
     this.root.append(
@@ -34,8 +48,11 @@ export class Hud {
       h('div.hud-tl', null, h('div.hud-rank-wrap', null, this.rank, this.rankTotal), h('div.hud-lt', null, this.lap, this.time)),
       h('div.hud-tr', null, this.net, this.mapCanvas, this.camBtn),
       h('div.hud-bl', null, h('div.hud-speed', null, this.speed, h('span', null, 'わんkm/h')), h('div.hud-speed-bar', null, this.speedBar)),
-      h('div.hud-br', null, this.itemSlot),
-      h('div.hud-bc', null, 'W/↑ アクセル　S/↓ ブレーキ　A D/← → ハンドル　Space アイテム　R 復帰　C カメラ'),
+      h('div.hud-br', null, this.rainBtn, this.itemSlot),
+      h('div.hud-bc', null, 'W/↑ アクセル　S/↓ ブレーキ　A D/← → ハンドル　Space アイテム　R 復帰　C カメラ　Enter/タップ タイミング　Q 豪雨'),
+      this.thunderEl,
+      this.wetBadge,
+      this.timing,
       this.cdBox,
       this.center,
       this.warn,
@@ -128,6 +145,18 @@ export class Hud {
     this._set('net', this.net, d.netText);
     this.net.className = `hud-net tone-${d.netTone}`;
     this.warn.hidden = !(d.wrong > 1);
+    this.wetBadge.hidden = !(d.wet > 0);
+    this.rainBtn.hidden = !d.rainReady;
+
+    // タイミングブーストのリング: 残り WINDOW → SWEET で大きさ 2.6 → 1（的と同じ）、その後さらに縮む
+    const tw = d.tw || 0;
+    this.timing.hidden = !(tw > 0);
+    if (tw > 0) {
+      const scale = 1 + ((tw - TIMING.SWEET) / (TIMING.WINDOW - TIMING.SWEET)) * 1.6;
+      this.timingRing.style.transform = `scale(${Math.max(0.15, scale).toFixed(3)})`;
+      this.timing.classList.toggle('near', Math.abs(tw - TIMING.SWEET) <= TIMING.GOOD);
+      this.timing.classList.toggle('just', Math.abs(tw - TIMING.SWEET) <= TIMING.PERFECT);
+    }
 
     // カウントダウン
     let cd = '';
@@ -157,7 +186,7 @@ export class Hud {
       const [px, py] = this._map(k.x, k.z);
       x.beginPath();
       x.arc(px, py, i === this.me ? 7 : 6, 0, Math.PI * 2);
-      x.fillStyle = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#ffc93c'][i] || '#999';
+      x.fillStyle = KART_COLORS[i] || '#999';
       x.fill();
       x.lineWidth = 2.5;
       x.strokeStyle = '#fff';
@@ -167,6 +196,22 @@ export class Hud {
 
   setCameraMode(mode) {
     this.camBtn.textContent = mode === 'first' ? '🎥 一人称' : '🎥 三人称';
+  }
+
+  /** タイミングブーストの結果。q: 2 ジャスト / 1 ナイス / 0 ずれた / -1 押さなかった */
+  timingResult(q) {
+    this.timing.hidden = true;
+    if (q === 2) this.flash('⚡ ジャスト！ブースト！', 'goal', 1300);
+    else if (q === 1) this.flash('ナイス！ブースト', 'good', 1100);
+    else if (q === 0) this.flash('タイミングがずれた…', 'bad', 1000);
+    else this.flash('チャンスをのがした…', 'plain', 1000);
+  }
+
+  /** 雷の光 */
+  thunder() {
+    this.thunderEl.classList.remove('on');
+    void this.thunderEl.offsetWidth; // アニメーションを最初から
+    this.thunderEl.classList.add('on');
   }
 
   /** 中央に大きなメッセージ */

@@ -3,7 +3,7 @@
 // 車の速度 = 前方向 × sp（スカラー）＋ 押し出し速度 (kx, kz)
 // 押し出し速度は横滑りやノックバックとして働き、すぐに減衰する。
 
-import { KART, IN } from './constants.js';
+import { KART, IN, RAIN } from './constants.js';
 
 export function createKart(index, pos) {
   return {
@@ -41,16 +41,22 @@ export function createKart(index, pos) {
     al: 0, // NPC: 目標の走行ライン（横位置）
     at: 0, // NPC: 走行ラインを変えるまでの時間
     as: 0, // NPC: 止まっている時間（引っかかり検出）
+    tw: 0, // タイミングブースト: リングの残り時間（0 なら出ていない）
+    tb: 0, // タイミングブースト: これまでに出たチャンスの数
+    tn: 0, // NPC: タイミングを押す予定の残り時間
+    wet: 0, // 豪雨で遅くなっている残り時間
+    rq: 0, // 豪雨を呼ぶ入力の保留時間（最終ラップに入る直前に押した場合）
     stats: { bumps: 0, hits: 0, hitBy: 0, walls: 0, items: 0, boosts: 0 },
   };
 }
 
 /** 物理に関わる数値フィールド（予測の誤差補正で使う） */
-export const PHYS_KEYS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'spin', 'boost', 'slow', 'inv', 'rc'];
+export const PHYS_KEYS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'spin', 'boost', 'slow', 'inv', 'rc', 'wet'];
 
 export function maxSpeedOf(k) {
   let m = (k.boost > 0 ? KART.BOOST_SPEED : KART.MAX_SPEED) * (k.ms || 1);
   if (k.slow > 0) m *= KART.SLOW_FACTOR;
+  if (k.wet > 0) m *= RAIN.FACTOR;
   if (k.grass && k.boost <= 0) m *= KART.GRASS_FACTOR;
   return m;
 }
@@ -140,6 +146,7 @@ export function stepKart(k, input, dt, track, active) {
   k.bump = Math.max(0, k.bump - dt);
   k.rc = Math.max(0, k.rc - dt);
   k.bc = Math.max(0, k.bc - dt);
+  k.wet = Math.max(0, k.wet - dt);
 
   return collideWalls(k, track);
 }

@@ -2,13 +2,14 @@
 // 状態 this.s はシリアライズ可能なデータだけで構成し、Three.js のオブジェクトは一切持たない。
 // 車は 0 = ホスト, 1 = ゲスト, 2 以降 = NPC。
 
-import { RACE, ITEMS, IN } from './constants.js';
+import { RACE, ITEMS, IN, RAIN, TIMING } from './constants.js';
 import { createKart, stepKart, collideKarts } from './physics.js';
 import { updateItems, useItem } from './items.js';
 import { npcInput } from './npc.js';
+import { stepTiming, pickChances } from './timing.js';
 import { formatTime } from '../../core/util.js';
 
-export const KART_NAMES = ['柴犬', 'コーギー', 'プードル', 'パグ'];
+export const KART_NAMES = ['柴犬', 'コーギー', 'プードル', 'パグ', 'ダックス', 'ハスキー'];
 
 export class RaceSim {
   /** @param {{ npcs?: number }} options */
@@ -38,7 +39,12 @@ export class RaceSim {
       nextId: 1,
       rng: (Math.random() * 4294967296) >>> 0,
       ack: 0, // 最後に適用したゲスト入力の seq
+      tc: [], // タイミングブーストのチャンス地点（スタートからの走行距離）
+      rain: 0, // 豪雨の残り時間
+      rk: -1, // 豪雨を呼んだ車
+      ru: 0, // このレースで豪雨を使ったか（1 レース 1 回）
     };
+    this.s.tc = pickChances(this.s, t.length);
   }
 
   /** 1 ステップ進める。inputs[0] = ホスト, inputs[1] = ゲスト（NPC の入力はここで作る） */
@@ -56,8 +62,19 @@ export class RaceSim {
     const active = s.phase === 'racing';
     this.prog = s.karts.map((k) => this.progressOf(k));
 
+    s.rain = Math.max(0, s.rain - dt);
+
     for (const k of s.karts) {
       const inp = k.npc ? npcInput(this, k, dt) : inputs[k.i] | 0;
+      if (active) {
+        stepTiming(k, this.prog[k.i], s.tc, !!(inp & IN.TAP), dt, ev);
+        // 豪雨: 最終ラップに入る直前に押した入力も少しだけ待つ（ゲストの画面では予測で先に最終ラップに入るため）
+        if (inp & IN.RAIN && !s.ru) k.rq = RAIN.REQUEST_GRACE;
+        if (k.rq > 0) {
+          if (this.canCallRain(k)) this.callRain(k);
+          else k.rq = Math.max(0, k.rq - dt);
+        }
+      }
       if (active && inp & IN.ITEM) useItem(s, k, ev);
       if (active && inp & IN.RESPAWN) this.respawn(k);
       const wall = stepKart(k, inp, dt, track, active);
@@ -137,12 +154,32 @@ export class RaceSim {
     }
   }
 
+  /** 豪雨を呼べるか: 最終ラップに入っていて、まだ誰も呼んでいない */
+  canCallRain(k) {
+    const s = this.s;
+    return s.phase === 'racing' && !s.ru && k.lap >= RACE.LAPS - 1 && !(k.fin && !k.npc);
+  }
+
+  /** 豪雨を呼ぶ。呼んだ車以外（ゴール済みの人間を除く）がしばらく遅くなる */
+  callRain(k) {
+    const s = this.s;
+    s.ru = 1;
+    s.rk = k.i;
+    s.rain = RAIN.DURATION;
+    k.rq = 0;
+    for (const o of s.karts) {
+      if (o === k || (o.fin && !o.npc)) continue;
+      o.wet = RAIN.SLOW_TIME;
+    }
+    this.events.push({ t: 'rain', k: k.i, x: k.x, z: k.z });
+  }
+
   /** 最後に通過したチェックポイント付近へ復帰 */
   respawn(k) {
     if (k.rc > 0 || (k.fin && !k.npc)) return;
     const track = this.track;
     const s0 = k.lap === 0 && k.cp === 0 ? -10 : track.cpS(k.cp) + 3;
-    const p = track.pointAt(s0, [5, -5, 1.5, -1.5][k.i] ?? 0);
+    const p = track.pointAt(s0, [5, -5, 1.5, -1.5, 8, -8][k.i] ?? 0);
     k.x = p.x;
     k.z = p.z;
     k.h = p.h;
@@ -223,7 +260,9 @@ export class RaceSim {
     ];
     if (total > 2) {
       const order = s.karts.map((k) => k.i).sort((x, y) => this.rankOf(x, prog) - this.rankOf(y, prog));
-      stats.push({ label: '着順', host: order.map((i) => KART_NAMES[i]).slice(0, 2).join(' → '), guest: order.map((i) => KART_NAMES[i]).slice(2).join(' → ') });
+      const names = order.map((i, n) => `${n + 1}.${KART_NAMES[i]}`);
+      const half = Math.ceil(names.length / 2);
+      stats.push({ label: '着順', host: names.slice(0, half).join(' '), guest: names.slice(half).join(' ') });
     }
     return {
       gameId: 'dogKart',
@@ -243,9 +282,12 @@ const int = (v, d = 0, lo = 0, hi = 1e9) => Math.round(num(v, d, lo, hi));
 function sanitizeKart(r, i, prev) {
   const k = { ...prev };
   if (!r || typeof r !== 'object') return k;
-  for (const f of ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'al', 'at', 'as']) {
+  for (const f of ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'al', 'at', 'as', 'tn', 'rq']) {
     k[f] = num(r[f], prev[f] ?? 0);
   }
+  k.tw = num(r.tw, 0, 0, TIMING.WINDOW);
+  k.tb = int(r.tb, 0, 0, 2);
+  k.wet = num(r.wet, 0, 0, RAIN.SLOW_TIME);
   k.ms = num(r.ms, 1, 0.5, 1.2);
   k.spinDur = Math.max(0.1, k.spinDur);
   k.i = i;
@@ -280,6 +322,10 @@ export function sanitizeSnapshot(r, prev, boxCount) {
     nextId: int(r.nextId, 1),
     rng: int(r.rng, 1, 0, 4294967295) >>> 0,
     ack: int(r.ack, 0),
+    tc: Array.isArray(r.tc) ? r.tc.slice(0, 2).map((v) => num(v, 0, 0, 1e5)) : prev.tc || [],
+    rain: num(r.rain, 0, 0, RAIN.DURATION),
+    rk: Number.isInteger(r.rk) && r.rk >= 0 && r.rk < r.karts.length ? r.rk : -1,
+    ru: r.ru ? 1 : 0,
   };
   if (Array.isArray(r.proj)) {
     for (const p of r.proj.slice(0, 32)) {
@@ -297,7 +343,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
 }
 
 // ---- 定期配信用のコンパクトな形式（キー名を省いて配列にする。通信量を約半分に） ----
-const NET_KART_FIELDS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item'];
+const NET_KART_FIELDS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'tw', 'tb', 'wet'];
 const PHASES = ['countdown', 'racing', 'finished'];
 
 /** 定期配信用に詰める（stats や NPC の思考状態は省く） */
@@ -310,6 +356,8 @@ export function packNet(s) {
     e: s.endT,
     w: s.winner,
     a: s.ack,
+    tc: s.tc,
+    rn: [s.rain, s.rk, s.ru],
     k: s.karts.map((k) => NET_KART_FIELDS.map((f) => k[f])),
     b: s.boxes,
     pr: s.proj.map((p) => [p.id, p.o, p.x, p.z, p.vx, p.vz, p.life, p.age, p.b]),
@@ -332,6 +380,10 @@ export function unpackNet(p) {
     endT: p.e,
     winner: p.w,
     ack: p.a,
+    tc: p.tc,
+    rain: Array.isArray(p.rn) ? p.rn[0] : 0,
+    rk: Array.isArray(p.rn) ? p.rn[1] : -1,
+    ru: Array.isArray(p.rn) ? p.rn[2] : 0,
     karts: p.k.slice(0, 8).map((a) => row(a, NET_KART_FIELDS)),
     boxes: p.b,
     proj: Array.isArray(p.pr) ? p.pr.slice(0, 32).map((a) => row(a, ['id', 'o', 'x', 'z', 'vx', 'vz', 'life', 'age', 'b'])) : [],
