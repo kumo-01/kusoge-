@@ -1,24 +1,27 @@
 // コースの形状（純粋な計算のみ。描画は world.js）
 // 制御点を Catmull-Rom 曲線でつなぎ、弧長で等間隔に並べ直した閉じたポリラインとして扱う。
 
-import { RACE } from './constants.js';
+import { RACE, PAD } from './constants.js';
 
-// コース一覧（すべて反時計回り＝内側は中心線の右側 lat < 0）。theme は world.js の見た目の種類
+// コース一覧（すべて反時計回り＝内側は中心線の右側 lat < 0）。theme は world.js の見た目の種類。
+// scale は制御点の拡大率（コースの長さ）
 export const COURSES = [
   {
     // 長いストレート、ヘアピン、S字、大きなカーブ
     name: 'わんわん草原サーキット',
     theme: 'meadow',
+    scale: 1.45,
     control: [
       [-30, -100], [30, -100], [85, -94], [126, -62], [138, -14], [118, 30],
       [80, 44], [54, 66], [54, 100], [82, 128], [76, 166], [24, 182],
       [-30, 166], [-52, 124], [-86, 96], [-126, 64], [-142, 12], [-128, -50], [-86, -90],
-    ].map(([x, z]) => [x * 1.02, z * 1.02]),
+    ],
   },
   {
     // 海ぞいの長いストレートと、波のようにうねる浜辺の道
     name: 'しっぽフリフリ海岸',
     theme: 'beach',
+    scale: 1.4,
     control: [
       [-120, -70], [-40, -75], [40, -75], [120, -70], [180, -50], [210, -5], [195, 40], [150, 60], [100, 45],
       [60, 70], [20, 95], [-30, 82], [-72, 62], [-112, 78], [-160, 80], [-205, 45], [-210, -10], [-180, -55],
@@ -28,6 +31,7 @@ export const COURSES = [
     // 切り返しの多いテクニカルな雪山
     name: 'もこもこ雪山',
     theme: 'snow',
+    scale: 1.4,
     control: [
       [-60, -95], [0, -98], [52, -90], [92, -62], [100, -20], [75, 10], [40, 25], [25, 55], [50, 88], [100, 95],
       [140, 122], [135, 170], [85, 188], [25, 175], [-25, 145], [-60, 108], [-110, 95], [-150, 58], [-152, 0], [-128, -62],
@@ -46,7 +50,8 @@ export class Track {
   /** @param {number | number[][]} course コース番号（COURSES の添字）または制御点の配列 */
   constructor(course = 0) {
     const def = Array.isArray(course) ? { name: 'custom', theme: 'meadow', control: course } : COURSES[course] || COURSES[0];
-    const control = def.control;
+    const sc = def.scale || 1;
+    const control = def.control.map(([x, z]) => [x * sc, z * sc]);
     this.name = def.name;
     this.theme = def.theme;
     this.roadHalf = 11; // 道路の半幅
@@ -104,6 +109,11 @@ export class Track {
       this.cum[i + 1] = this.cum[i] + len;
     }
     this.length = this.cum[N];
+    // ブーストパッド: 1 周に 6 枚（コース上の割合位置と横位置）。アイテムボックスとは重ならない場所
+    this.pads = [[0.08, 0], [0.33, -5], [0.4, 5], [0.62, 0], [0.86, -5], [0.92, 5]].map(([f, lat]) => {
+      const p = this.pointAt(f * this.length, lat);
+      return { x: p.x, z: p.z, h: p.h, tx: p.tx, tz: p.tz };
+    });
     this._proj = { i: 0, t: 0, s: 0, lat: 0, cx: 0, cz: 0, tx: 0, tz: 1, nx: 1, nz: 0 };
   }
 
@@ -190,6 +200,18 @@ export class Track {
       }
     }
     return out;
+  }
+
+  /** (x, z) がブーストパッドの上なら true */
+  onPad(x, z) {
+    const hl = PAD.LENGTH / 2;
+    const hw = PAD.WIDTH / 2;
+    for (const p of this.pads) {
+      const dx = x - p.x;
+      const dz = z - p.z;
+      if (Math.abs(dx * p.tx + dz * p.tz) <= hl && Math.abs(dx * p.tz - dz * p.tx) <= hw) return true;
+    }
+    return false;
   }
 
   /** スタート位置: 前列に人間（0 = ホスト, 1 = ゲスト）、2 列目以降に NPC（2 台ずつ） */

@@ -226,6 +226,11 @@ class Sound {
           this._noise({ dur: 0.25, vol: 0.5, filter: 'bandpass', from: 2500, to: 600, q: 0.7 });
           this._tone({ from: 70, to: 35, dur: 1.2, vol: 0.4 });
           break;
+        case 'pad':
+          // ブーストパッド: ピュイーン
+          this._tone({ type: 'sawtooth', from: 300, to: 1400, dur: 0.3, vol: 0.14 });
+          this._noise({ dur: 0.3, vol: 0.18, filter: 'highpass', from: 1500, to: 4500 });
+          break;
         case 'lose':
           [523, 494, 466, 440].forEach((f, i) => this._tone({ type: 'triangle', from: f, dur: 0.25, vol: 0.18, delay: i * 0.22 }));
           break;
@@ -317,7 +322,6 @@ class Sound {
     if (!this.engine) return;
     const e = this.engine;
     this.engine = null;
-    this.rain = null;
     try {
       e.g.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
       e.osc.stop(this.ctx.currentTime + 0.3);

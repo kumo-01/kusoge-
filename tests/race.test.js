@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Track, COURSES } from '../src/games/dogKart/track.js';
 import { RaceSim, sanitizeSnapshot, packNet, unpackNet } from '../src/games/dogKart/race.js';
-import { IN, ITEMS, RACE, KART, TIMING, RAIN } from '../src/games/dogKart/constants.js';
+import { IN, ITEMS, RACE, KART, TIMING, RAIN, PAD } from '../src/games/dogKart/constants.js';
 import { decode, encode, FROM_GUEST, FROM_HOST, sanitizeRoomState } from '../src/core/protocol.js';
 
 const DT = 1 / 60;
@@ -41,7 +41,7 @@ function bot(k, latOff = 0, tr = track) {
 }
 
 test('コースは閉じていて、離れた区間同士が十分に離れている', () => {
-  assert.ok(track.length > 600);
+  assert.ok(track.length > 1200);
   let minD = Infinity;
   for (let i = 0; i < track.n; i += 2)
     for (let j = i + 2; j < track.n; j += 2) {
@@ -165,7 +165,7 @@ test('バナナを踏むとスピンし、スピン後の無敵中は連続で�
 test('わんわんブーストで最高速を超えられる', () => {
   const sim = newRace();
   const a = sim.s.karts[0];
-  place(a, 30, 0);
+  place(a, 600, 0); // ブーストパッドのない区間
   sim.s.karts[1].x += 500;
   for (let i = 0; i < 60 * 4; i++) sim.step(DT, [bot(a), 0]);
   const normal = a.sp;
@@ -298,7 +298,7 @@ test('3 コースとも: 閉じていて離れた区間が十分離れ、内側�
   COURSES.forEach((c, ci) => {
     const t = new Track(ci);
     assert.equal(t.name, c.name);
-    assert.ok(t.length > 800 && t.length < 1200, `${c.name} length ${t.length}`);
+    assert.ok(t.length > 1200 && t.length < 1600, `${c.name} length ${t.length}`);
     let minD = Infinity;
     for (let i = 0; i < t.n; i += 2)
       for (let j = i + 2; j < t.n; j += 2) {
@@ -380,17 +380,27 @@ test('タイミングブースト: チャンスは 1〜2 回で、ジャスト�
   assert.ok(boostSeen);
 });
 
-test('豪雨: 最終ラップ前は呼べず、最終ラップで呼ぶと呼んだ車以外が遅くなる（1 レース 1 回）', () => {
+test('豪雨: 最終ラップに入った最下位の車だけが呼べ、呼んだ車以外が遅くなる（1 レース 1 回）', () => {
   const sim = new RaceSim(track, { npcs: 2 });
   while (sim.s.phase === 'countdown') sim.step(DT, [0, 0, 0, 0]);
   const [a, b] = sim.s.karts;
-  // NPC が勝手に呼ばないように NPC を止めておく（周回数を進めない）
+  // NPC が勝手に呼ばないように NPC は止めておく（最終ラップに入れない）
   sim.step(DT, [IN.RAIN, 0]);
   for (let i = 0; i < 60; i++) sim.step(DT, [0, 0]);
   assert.equal(sim.s.ru, 0, 'not on final lap');
   assert.equal(b.wet, 0);
-  // ゲストが最終ラップへ
-  b.lap = RACE.LAPS - 1;
+  // 最終ラップでも最下位でなければ呼べない（a だけ最終ラップ = 先頭）
+  a.lap = RACE.LAPS - 1;
+  sim.step(DT, [IN.RAIN, 0]);
+  for (let i = 0; i < 60; i++) sim.step(DT, [0, 0]);
+  assert.equal(sim.s.ru, 0, 'leader cannot call');
+  assert.equal(sim.canCallRain(a), false);
+  // 全員が最終ラップに入り、ゲストが最後尾になったら、ゲストだけが呼べる
+  for (const k of sim.s.karts) k.lap = RACE.LAPS - 1;
+  place(b, -60, 0);
+  assert.equal(sim.rankOf(1), 4);
+  sim.step(DT, [IN.RAIN, 0]);
+  assert.equal(sim.s.ru, 0, 'host is not last');
   sim.step(DT, [0, IN.RAIN]);
   assert.equal(sim.s.ru, 1);
   assert.equal(sim.s.rk, 1);
@@ -417,9 +427,12 @@ test('豪雨: 最終ラップ前は呼べず、最終ラップで呼ぶと呼ん
 test('豪雨: 最終ラップに入る直前に押した入力も少しの間は有効（通信の遅れ対策）', () => {
   const sim = new RaceSim(track);
   while (sim.s.phase === 'countdown') sim.step(DT, [0, 0]);
-  const b = sim.s.karts[1];
+  const [a, b] = sim.s.karts;
+  a.lap = RACE.LAPS - 1; // ホストは先に最終ラップへ（ゲストより前にいる）
+  placeAhead(b, a, 6);
   sim.step(DT, [0, IN.RAIN]);
   for (let i = 0; i < 10; i++) sim.step(DT, [0, 0]);
+  assert.equal(sim.s.ru, 0);
   b.lap = RACE.LAPS - 1;
   sim.step(DT, [0, 0]);
   assert.equal(sim.s.rk, 1);
@@ -431,8 +444,7 @@ test('NPC も最終ラップで豪雨を呼び、タイミングブーストを�
   let npcTiming = 0;
   for (let i = 0; i < 60 * 240 && sim.s.phase !== 'finished'; i++) {
     const [a, b] = sim.s.karts;
-    // 人間はゆっくり走る（NPC が先に最終ラップへ）
-    sim.step(DT, [i % 3 ? bot(a, 3) : 0, i % 3 ? bot(b, -3) : 0]);
+    sim.step(DT, [bot(a, 3), bot(b, -3)]);
     for (const e of sim.drainEvents()) {
       if (e.t === 'rain') rainBy = e.k;
       if (e.t === 'timing' && e.k >= 2) npcTiming++;
@@ -446,7 +458,8 @@ test('定期配信の形式でタイミング・豪雨の状態も復元でき�
   const sim = new RaceSim(track, { npcs: 4 });
   while (sim.s.phase === 'countdown') sim.step(DT, [0, 0]);
   const k = sim.s.karts[1];
-  k.lap = RACE.LAPS - 1;
+  for (const o of sim.s.karts) o.lap = RACE.LAPS - 1;
+  place(k, -60, 0); // 最後尾
   k.tw = 0.9;
   k.tb = 1;
   sim.step(DT, [0, IN.RAIN]);
@@ -461,4 +474,29 @@ test('定期配信の形式でタイミング・豪雨の状態も復元でき�
   assert.equal(back.karts[1].tb, 1);
   assert.ok(back.karts[0].wet > 0);
   assert.equal(back.karts[5].npc, 1);
+});
+
+test('ブーストパッド: 3 コースとも道路上にあり、踏むとブーストして加速する', () => {
+  COURSES.forEach((c, ci) => {
+    const t = new Track(ci);
+    assert.equal(t.pads.length, 6);
+    for (const p of t.pads) {
+      assert.ok(Math.abs(t.project(p.x, p.z).lat) < t.roadHalf - PAD.WIDTH / 2 + 0.5, `${c.name} pad on road`);
+      assert.ok(t.onPad(p.x, p.z));
+      assert.ok(!t.onPad(p.x + p.tx * PAD.LENGTH, p.z + p.tz * PAD.LENGTH), 'ahead of pad is off');
+    }
+    // パッドとアイテムボックスは重ならない
+    for (const b of t.itemBoxes()) assert.ok(!t.pads.some((p) => Math.hypot(p.x - b.x, p.z - b.z) < PAD.LENGTH), `${c.name} pad/box overlap`);
+  });
+  const sim = newRace();
+  const [a, b] = sim.s.karts;
+  const pad = track.pads[0];
+  Object.assign(a, { x: pad.x - pad.tx * 6, z: pad.z - pad.tz * 6, h: pad.h, sp: KART.MAX_SPEED * 0.8, kx: 0, kz: 0, boost: 0 });
+  place(b, 700, 0); // パッドのない場所
+  b.sp = KART.MAX_SPEED * 0.8;
+  for (let i = 0; i < 40; i++) sim.step(DT, [IN.UP, IN.UP]);
+  assert.ok(a.boost > 0 || a.sp > KART.MAX_SPEED, `pad boost sp=${a.sp} boost=${a.boost}`);
+  assert.ok(a.sp > b.sp + 3, `pad kart faster ${a.sp} vs ${b.sp}`);
+  // パッドの外ではブーストしない
+  assert.equal(b.boost, 0);
 });

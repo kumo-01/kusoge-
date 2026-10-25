@@ -61,10 +61,10 @@ class Music {
     document.addEventListener('visibilitychange', () => {
       // 裏のタブではタイマーが間引かれて音がずれるので止める
       if (document.visibilityState === 'hidden') this._stopTimer();
-      else if (this.wanted) this.play(this.wanted, true);
+      else if (this.wanted) this.play(this.wanted);
     });
-    // 最初のクリック/キー入力で AudioContext が使えるようになったら鳴らし始める
-    const unlock = () => this.wanted && this.play(this.wanted, true);
+    // 初回の入力で AudioContext が動き出した時だけ始める（鳴っている最中のクリックや押鍵で曲を頭から鳴らし直さない）
+    const unlock = () => this.wanted && !this._timer && this.play(this.wanted);
     window.addEventListener('pointerdown', unlock, { capture: true });
     window.addEventListener('keydown', unlock, { capture: true });
   }
@@ -77,14 +77,15 @@ class Music {
       /* noop */
     }
     if (m) this._stopTimer(true);
-    else if (this.wanted) this.play(this.wanted, true);
+    else if (this.wanted) this.play(this.wanted);
   }
 
   /** 曲を切り替える（同じ曲なら何もしない） */
   play(name, force = false) {
     this.wanted = name;
     if (!force && this.track === name && this._timer) return;
-    if (name !== this.track) this.tempoScale = 1;
+    const resume = name === this.track;
+    if (!resume) this.tempoScale = 1;
     if (this.muted || !TRACKS[name] || document.visibilityState === 'hidden') return;
     const ctx = this.sound._ensure?.();
     if (!ctx || ctx.state !== 'running') return;
@@ -95,7 +96,7 @@ class Music {
       this.gain.gain.value = 0;
       this.gain.gain.setTargetAtTime(this._vol(), ctx.currentTime, 0.3);
       this.gain.connect(ctx.destination);
-      this.step = 0;
+      if (!resume) this.step = 0; // 裏のタブから戻った時などは続きから鳴らす
       this.nextTime = ctx.currentTime + 0.1;
       this._timer = setInterval(() => this._schedule(), 25);
     } catch {

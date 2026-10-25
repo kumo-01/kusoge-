@@ -165,6 +165,7 @@ class DogKartGame {
     this.hud.onCameraToggle = () => this.toggleCamera();
     this.hud.setCameraMode(this.cameraMode);
     this._prevY = [];
+    this._onPad = [];
     this.tapPressed = false;
     this.rainPressed = false;
     this.rainReady = false;
@@ -607,6 +608,14 @@ class DogKartGame {
       const py = this._prevY[i] ?? k.y;
       if (py > 0.6 && k.y <= 0.05) fx.puff(k.x, 0.3, k.z, { n: 6, size: 0.8, spread: 2.5, up: 1, color: k.grass ? 0xc8e6a0 : 0xffffff });
       this._prevY[i] = k.y;
+      // ブーストパッドを踏んだ瞬間（描画している位置で判定。通信の遅れで音が遅れない）
+      const onPad = k.y < 0.8 && this.track.onPad(k.x, k.z);
+      if (onPad && !this._onPad[i]) {
+        fx.sparks(k.x, 0.4, k.z, 10, 0xffe066, 1.2);
+        fx.ring(k.x, 0.2, k.z, 0xffd23f, 4);
+        if (i === this.me && !this.paused) this.sound.play('pad');
+      }
+      this._onPad[i] = onPad;
       if (k.boost > 0 && Math.random() < 0.5) {
         fx.puff(k.x - fxx * 2.4, 0.6, k.z - fzz * 2.4, { color: 0xffd27a, size: 0.35, up: 0.5, life: 0.25, alpha: 0.5 });
         if (Math.random() < 0.5) fx.sparks(k.x - fxx * 2.2, 0.6, k.z - fzz * 2.2, 2, 0xffe066, 0.5);
@@ -687,10 +696,12 @@ class DogKartGame {
     if (tw > 0 && this._prevTw <= 0 && !this.paused) this.sound.play('chance');
     this._prevTw = tw;
     const onFinal = this.isHost ? sk.lap >= RACE.LAPS - 1 : this.sim.progressOf(pk) >= (RACE.LAPS - 1) * this.track.length;
-    const rainReady = s.phase === 'racing' && !s.ru && onFinal && !sk.fin;
+    const rank = this.sim.rankOf(this.me);
+    // 豪雨を呼べるのは、最終ラップに入った最下位の車だけ（判定はホスト）
+    const rainReady = s.phase === 'racing' && !s.ru && onFinal && !sk.fin && rank === s.karts.length;
     if (rainReady && !this.rainReady && !this.paused) {
       this.sound.play('rainReady');
-      this.hud.flash('☔ 豪雨チャンス！ Q か ☔ で雨をよべる', 'final', 1800);
+      this.hud.flash('☔ 最下位の特権！ Q か ☔ で豪雨をよべる', 'final', 1800);
     }
     this.rainReady = rainReady;
     // 雨の強さ（降り始めと止み際はなめらかに）
@@ -700,7 +711,7 @@ class DogKartGame {
     this.sound.setRain(this.paused ? 0 : this._rainLevel);
     this.hud.update(
       {
-        rank: this.sim.rankOf(this.me),
+        rank,
         total: s.karts.length,
         lap: sk.lap,
         time: s.phase === 'countdown' ? raceT : sk.fin ? sk.ft : raceT,

@@ -3,7 +3,7 @@
 // 車の速度 = 前方向 × sp（スカラー）＋ 押し出し速度 (kx, kz)
 // 押し出し速度は横滑りやノックバックとして働き、すぐに減衰する。
 
-import { KART, IN, RAIN } from './constants.js';
+import { KART, IN, RAIN, PAD } from './constants.js';
 
 export function createKart(index, pos) {
   return {
@@ -96,7 +96,12 @@ export function stepKart(k, input, dt, track, active) {
   k.st += (steerIn - k.st) * Math.min(1, dt * 10);
   k.th = up ? 1 : down ? -1 : 0;
 
+  // ブーストパッド（地面にいる間だけ）。踏んでいる間はブーストが続き、加速する
+  const onPad = k.y < 0.8 && track.onPad(k.x, k.z);
+  if (onPad) k.boost = Math.max(k.boost, PAD.BOOST);
+
   const maxSp = maxSpeedOf(k);
+  if (onPad) k.sp = Math.min(maxSp, k.sp + PAD.ACCEL * dt);
   if (up) {
     if (k.sp < 0) k.sp += KART.BRAKE * dt;
     else k.sp += (k.boost > 0 ? KART.BOOST_ACCEL : KART.ACCEL) * dt * (1 - 0.55 * Math.min(1, Math.max(0, k.sp / maxSp)));

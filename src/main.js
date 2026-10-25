@@ -210,5 +210,5 @@ window.__wanwan = {
 };
 // 自動テスト用のフック。VITE_TEST_HOOKS=1 でビルドしたときだけ有効（通常のビルドには含まれない）
 if (import.meta.env.VITE_TEST_HOOKS === '1') {
-  window.__wanwan.test = { room: () => app.room, game: () => app.room?.gm?.game || null };
+  window.__wanwan.test = { room: () => app.room, game: () => app.room?.gm?.game || null, music: () => app.music };
 }

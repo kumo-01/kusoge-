@@ -5,6 +5,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { KartView } from './kart.js';
 import { Effects } from './effects.js';
 import { buildDog } from './dog.js';
+import { PAD } from './constants.js';
 
 // 背景配置用の決定的な乱数（ホストとゲストで同じ景色になる）
 function seeded(seed) {
@@ -451,6 +452,8 @@ export class World {
     gate.add(banner);
     this.scene.add(gate);
 
+    this._buildPads();
+
     // チェックポイントの旗（進み具合の目印）
     const flagGeo = this._track(new THREE.ConeGeometry(0.9, 2.2, 3).rotateZ(-Math.PI / 2).translate(1.1, 0, 0));
     const poleGeo = this._track(new THREE.CylinderGeometry(0.08, 0.08, 4, 6));
@@ -476,6 +479,52 @@ export class World {
     }
   }
 
+  /** ブーストパッド: 路面に光る矢印（流れるようにアニメーションする） */
+  _buildPads() {
+    const tex = this._track(
+      canvasTexture(128, 128, (x, w, h) => {
+        const g = x.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, '#ff9f1c');
+        g.addColorStop(1, '#ffd23f');
+        x.fillStyle = g;
+        x.fillRect(0, 0, w, h);
+        // 進行方向（キャンバスの下）を向いた矢印
+        x.fillStyle = '#ffffff';
+        x.strokeStyle = '#d9480f';
+        x.lineWidth = 5;
+        x.beginPath();
+        x.moveTo(w * 0.12, h * 0.1);
+        x.lineTo(w * 0.5, h * 0.55);
+        x.lineTo(w * 0.88, h * 0.1);
+        x.lineTo(w * 0.88, h * 0.36);
+        x.lineTo(w * 0.5, h * 0.88);
+        x.lineTo(w * 0.12, h * 0.36);
+        x.closePath();
+        x.fill();
+        x.stroke();
+      }, { repeat: true }),
+    );
+    tex.repeat.set(1, 2);
+    this.padTex = tex;
+    const geo = this._track(new THREE.PlaneGeometry(PAD.WIDTH, PAD.LENGTH));
+    const mat = this._track(new THREE.MeshBasicMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    const glowGeo = this._track(new THREE.PlaneGeometry(PAD.WIDTH + 1.2, PAD.LENGTH + 1.2));
+    const glowMat = this._track(new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+    for (const p of this.track.pads) {
+      const g = new THREE.Group();
+      g.position.set(p.x, 0.06, p.z);
+      g.rotation.y = p.h;
+      const glow = new THREE.Mesh(glowGeo, glowMat);
+      glow.rotation.x = -Math.PI / 2;
+      glow.position.y = -0.01;
+      const pad = new THREE.Mesh(geo, mat);
+      pad.rotation.x = -Math.PI / 2;
+      pad.receiveShadow = true;
+      g.add(glow, pad);
+      this.scene.add(g);
+    }
+  }
+
   /** コースから十分離れているか */
   _farFromTrack(x, z, margin) {
     const p = this.track.project(x, z);
@@ -496,7 +545,7 @@ export class World {
 
     // 木（草原: 丸い木 / 海: ヤシの木 / 雪山: もみの木）
     const spots = [];
-    for (let tries = 0; tries < 3000 && spots.length < 170; tries++) {
+    for (let tries = 0; tries < 3000 && spots.length < 240; tries++) {
       const [x, z] = inArea(100);
       if (!this._farFromTrack(x, z, 6) || !this._onLand(x, z, 8)) continue;
       if (spots.some(([a, b]) => (a - x) ** 2 + (b - z) ** 2 < 64)) continue;
@@ -1013,6 +1062,7 @@ export class World {
     const tt = performance.now() / 1000;
     this.flags.forEach((f, i) => (f.rotation.y = Math.sin(tt * 3 + i) * 0.4));
     if (this.surf) this.surf.scale.set(this.island.rx * (1 + Math.sin(tt * 0.8) * 0.006), this.island.rz * (1 + Math.sin(tt * 0.8) * 0.006), 1);
+    if (this.padTex) this.padTex.offset.y += dt * 1.2; // 矢印が進行方向へ流れる
     this._updateWeather(dt);
   }
 

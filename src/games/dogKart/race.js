@@ -154,10 +154,11 @@ export class RaceSim {
     }
   }
 
-  /** 豪雨を呼べるか: 最終ラップに入っていて、まだ誰も呼んでいない */
+  /** 豪雨を呼べるか: 最終ラップに入っていて、まだ誰も呼んでいなくて、全員（NPC 含む）の中で最下位 */
   canCallRain(k) {
     const s = this.s;
-    return s.phase === 'racing' && !s.ru && k.lap >= RACE.LAPS - 1 && !(k.fin && !k.npc);
+    if (s.phase !== 'racing' || s.ru || k.lap < RACE.LAPS - 1 || (k.fin && !k.npc)) return false;
+    return this.rankOf(k.i, this.prog.length ? this.prog : null) === s.karts.length;
   }
 
   /** 豪雨を呼ぶ。呼んだ車以外（ゴール済みの人間を除く）がしばらく遅くなる */
