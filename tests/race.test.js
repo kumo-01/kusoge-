@@ -242,3 +242,53 @@ test('プロトコル: 方向・形式・サイズが不正なメッセージは
   assert.equal(sanitizeRoomState({ screen: 'hack', guest: 'none', rev: 1, ready: {} }), null);
   assert.ok(sanitizeRoomState({ screen: 'home', guest: 'connected', rev: 1, ready: { host: true } }));
 });
+
+test('アイテムを持っている車はボックスをすり抜け、箱は消えない（総取り防止）', () => {
+  const sim = newRace();
+  const a = sim.s.karts[0];
+  a.item = ITEMS.BONE;
+  const box = sim.boxPos[0];
+  Object.assign(a, { x: box.x, z: box.z });
+  sim.step(DT, [0, 0]);
+  assert.equal(sim.s.boxes[0], 0, 'box must remain');
+  assert.equal(a.roll, 0);
+  // ルーレット中も同様
+  a.item = 0;
+  a.roll = 0.5;
+  sim.step(DT, [0, 0]);
+  assert.equal(sim.s.boxes[0], 0);
+  // 手ぶらなら取れる
+  a.roll = 0;
+  sim.step(DT, [0, 0]);
+  assert.ok(sim.s.boxes[0] > 0);
+});
+
+test('アイテムボックスは 1 か所に横 5 列', () => {
+  assert.equal(new RaceSim(track).boxPos.length, 15);
+});
+
+test('NPC 2 台入りのレース: NPC が自分で走って周回し、人間がゴールすると決着する', () => {
+  const sim = new RaceSim(track, { npcs: 2 });
+  assert.equal(sim.s.karts.length, 4);
+  let npcLaps = 0;
+  let npcItems = 0;
+  for (let i = 0; i < 60 * 240 && sim.s.phase !== 'finished'; i++) {
+    const [a, b] = sim.s.karts;
+    sim.step(DT, [bot(a, 4), bot(b, -4)]);
+    for (const e of sim.drainEvents()) {
+      if (e.t === 'lap' && e.k >= 2) npcLaps++;
+      if (e.t === 'use' && e.k >= 2) npcItems++;
+    }
+  }
+  assert.equal(sim.s.phase, 'finished');
+  assert.ok(sim.s.winner === 0 || sim.s.winner === 1, 'winner is human');
+  assert.ok(npcLaps >= 4, `npc laps ${npcLaps}`);
+  assert.ok(npcItems >= 1, `npc items ${npcItems}`);
+  const r = sim.buildResult();
+  assert.ok(r.stats[0].host.includes('/ 4台'));
+  const snap = JSON.parse(encode(sim.getSnapshot()));
+  const other = new RaceSim(track, { npcs: 2 });
+  other.loadSnapshot(snap);
+  assert.equal(other.s.karts.length, 4);
+  assert.equal(other.s.karts[3].npc, 1);
+});

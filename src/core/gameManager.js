@@ -19,19 +19,20 @@ import { Emitter, h, now } from './util.js';
 
 export const LOOP_CONFIG = {
   FIXED_DT: 1 / 60, // ゲーム更新 60Hz
-  SNAPSHOT_HZ: 20, // ネットワーク配信（毎秒20回）
+  SNAPSHOT_HZ: 30, // ネットワーク配信（毎秒30回）
   MAX_FRAME_DT: 0.25, // 長いフレームでも物理が暴走しないように
   MAX_STEPS: 8,
   HISTORY_SEC: 6, // 切断時に巻き戻せる範囲
 };
 
 export class GameManager extends Emitter {
-  constructor({ role, net, input, sound, layer }) {
+  constructor({ role, net, input, sound, music, layer }) {
     super();
     this.role = role;
     this.net = net;
     this.input = input;
     this.sound = sound;
+    this.music = music;
     this.layer = layer;
     this.game = null;
     this.def = null;
@@ -51,7 +52,7 @@ export class GameManager extends Emitter {
   }
 
   /** ゲームモジュールを読み込んで起動する（一時停止状態で開始） */
-  async create(def, matchId, gen) {
+  async create(def, matchId, gen, options = {}) {
     this.destroy();
     const token = ++this._token;
     const mod = await def.load();
@@ -73,11 +74,14 @@ export class GameManager extends Emitter {
       container,
       input: this.input,
       sound: this.sound,
+      music: this.music,
+      options, // 準備画面でホストが決めたゲーム設定（例: NPC の台数）
       fixedDt: LOOP_CONFIG.FIXED_DT,
       // ゲスト → ホストへの操作入力
       sendInput: (seq, inputs) => {
         if (this.isHost || this.game !== game || !this.running) return;
-        this.net.send({ type: 'player_input', matchId, gen: this.gen, seq, inputs });
+        // 連続入力は順不同の高速チャンネルで送る（重複・欠落は seq と重ね送りで吸収）
+        this.net.sendFast({ type: 'player_input', matchId, gen: this.gen, seq, inputs });
       },
       // ゲーム固有メッセージ（双方向）
       sendGameMessage: (data) => {
@@ -247,7 +251,8 @@ export class GameManager extends Emitter {
     const keepAfter = t - LOOP_CONFIG.HISTORY_SEC * 1000;
     while (this._history.length && this._history[0].t < keepAfter) this._history.shift();
     if (this.net.congested && ev.length === 0) return; // 送信が詰まっているときは位置更新を間引く
-    this.net.send({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this._netSeq, snap, ev });
+    const payload = this.game.encodeNetSnapshot ? this.game.encodeNetSnapshot(snap) : snap;
+    this.net.sendFast({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this._netSeq, snap: payload, ev });
   }
 
   destroy() {

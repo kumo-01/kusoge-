@@ -5,20 +5,22 @@ export const RACE = {
   COUNTDOWN: 3.6, // 開始カウントダウン（秒）。raceTime は -COUNTDOWN から始まり 0 で GO
   END_DELAY: 4.0, // 勝者確定から結果画面までの演出時間
   CHECKPOINTS: 8, // 1周あたりのチェックポイント数（0番がスタートライン）
+  HUMANS: 2, // 0 = ホスト, 1 = ゲスト。2 以降は NPC
+  MAX_NPCS: 2,
 };
 
 export const KART = {
-  RADIUS: 1.35, // 当たり判定の半径
-  MAX_SPEED: 27,
-  BOOST_SPEED: 40,
-  ACCEL: 20,
-  BOOST_ACCEL: 45,
-  BRAKE: 34,
+  RADIUS: 1.4, // 当たり判定の半径
+  MAX_SPEED: 34,
+  BOOST_SPEED: 49,
+  ACCEL: 25,
+  BOOST_ACCEL: 55,
+  BRAKE: 42,
   REVERSE_ACCEL: 14,
-  REVERSE_MAX: 9,
-  COAST: 7, // アクセルを離したときの減速
-  OVERSPEED_DECAY: 22, // 最高速を超えている時に戻す速さ
-  STEER_RATE: 2.35, // rad/s
+  REVERSE_MAX: 10,
+  COAST: 8, // アクセルを離したときの減速
+  OVERSPEED_DECAY: 26, // 最高速を超えている時に戻す速さ
+  STEER_RATE: 2.4, // rad/s
   GRASS_FACTOR: 0.55, // 芝生の上では最高速が下がる
   GRASS_DRAG: 10,
   KNOCK_DECAY: 3.2, // 横方向の押し出し速度の減衰
@@ -37,7 +39,7 @@ export const ITEMS = {
   BOX_RESPAWN: 4.0,
   BOX_RADIUS: 2.2,
   ROULETTE: 1.1, // アイテムが決まるまでのルーレット時間
-  BONE_SPEED: 46,
+  BONE_SPEED: 58,
   BONE_LIFE: 2.6,
   BONE_BOUNCES: 2,
   BONE_HIT_R: 2.0,
@@ -52,7 +54,8 @@ export const ITEMS = {
 
 export const NET = {
   INPUT_SEND_EVERY: 2, // ゲストは 2 tick ごと（30Hz）に入力をまとめて送る
-  INTERP_DELAY: 0.1, // 相手の車の表示遅延（補間用）
+  INTERP_DELAY: 0.08, // 相手の車の表示遅延（補間用。配信間隔 1/30 秒の 2 倍強）
+  INPUT_REDUNDANCY: 8, // 入力を送るとき直近何 tick 分を重ねて送るか（取りこぼし対策）
   PREDICTION: true, // ゲスト自身の車をクライアント予測する
   SNAP_DIST: 6, // 予測の誤差がこれ以上なら瞬時に合わせる
   INPUT_BUFFER_MAX: 8,
@@ -68,4 +71,12 @@ export const IN = {
   RESPAWN: 32, // 押した瞬間だけ
   HELD: 15,
   ONESHOT: 48,
+};
+
+// NPC（コンピューター）の運転
+export const NPC = {
+  SPEED: 0.93, // 最高速の倍率（ふつう）
+  SPEED_BEHIND: 1.02, // 人間より大きく遅れているとき
+  SPEED_AHEAD: 0.84, // 人間より大きく先行しているとき
+  RUBBER_DIST: 140, // 追い上げ/手加減を始める差（コース上の距離）
 };

@@ -79,6 +79,7 @@ export class ScreenRouter {
           ? h('button.btn.btn-small.btn-light', { onclick: () => app.confirmFreeSlot() }, '新しいゲストを招待')
           : null,
         h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
+        h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'),
         isHost
           ? h('button.btn.btn-small.btn-danger', { onclick: () => app.disband() }, '解散')
           : h('button.btn.btn-small.btn-ghost', { onclick: () => app.leave() }, '退出')),

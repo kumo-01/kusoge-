@@ -54,7 +54,9 @@ export function mount(el, app) {
     cdEl = h('div.resume-countdown', { hidden: true });
     lastCd = null;
 
-    const muteBtn = h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊');
+    const muteBtn = h('span.btn-pair', null,
+      h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
+      h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'));
     const topButtons = isHost
       ? h('div.game-topbar', null,
           muteBtn,

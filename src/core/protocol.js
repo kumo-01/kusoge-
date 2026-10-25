@@ -4,7 +4,7 @@
 // PeerJS の DataConnection は serialization: 'raw' で使い、文字列の長さを
 // パース前に確認してから JSON.parse する（巨大データでクラッシュさせないため）。
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** 1 メッセージの最大文字数 */
 export const MAX_MESSAGE_CHARS = 60000;
@@ -59,7 +59,7 @@ const MATCH = { matchId: id, gen: int(0, 1e9) };
 
 const SCHEMAS = {
   join_request: { v: int(0, 1000), key: str(64), token: opt(str(64)) },
-  join_accepted: { token: str(64), room: obj, rejoin: bool },
+  join_accepted: { token: str(64), room: obj, rejoin: bool, fast: opt(str(32)) },
   join_rejected: { reason: str(32) },
   room_state: { room: obj },
   ready_change: { ready: bool },
@@ -84,6 +84,10 @@ export const FROM_GUEST = new Set([
   'join_request', 'ready_change', 'player_input', 'resume_ack', 'game_msg',
   'leave', 'bye', 'ping', 'pong', 'presence',
 ]);
+/** 高速チャンネル（順不同）で受け付けるもの */
+export const FAST_FROM_GUEST = new Set(['player_input']);
+export const FAST_FROM_HOST = new Set(['game_snapshot']);
+
 export const FROM_HOST = new Set([
   'join_accepted', 'join_rejected', 'room_state', 'game_start', 'game_snapshot',
   'game_msg', 'game_result', 'pause', 'resume', 'game_abort', 'room_close',
@@ -137,10 +141,16 @@ export function sanitizeRoomState(r) {
     ready: { host: r.ready.host === true, guest: r.ready.guest === true },
     startInMs: num(0, 10000)(r.startInMs) ? r.startInMs : null,
     gameId: id(r.gameId) ? r.gameId : null,
+    options: {},
     match: null,
     result: obj(r.result) ? r.result : null,
     hostHidden: r.hostHidden === true,
   };
+  if (obj(r.options)) {
+    for (const [k, v] of Object.entries(r.options).slice(0, 8)) {
+      if (/^[A-Za-z]{1,16}$/.test(k) && (int(0, 99)(v) || str(16)(v) || bool(v))) room.options[k] = v;
+    }
+  }
   if (obj(r.match)) {
     const m = r.match;
     if (!id(m.matchId) || !int(0, 1e9)(m.gen) || !oneOf(...MATCH_STATUS)(m.status)) return null;

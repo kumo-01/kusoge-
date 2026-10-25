@@ -29,6 +29,9 @@ function mesh(geometry, material, { pos, scale, rot } = {}) {
 const STYLE = {
   shiba: { fur: 0xf2a04b, dark: 0xcf7a2a, cream: 0xfff1d6, inner: 0xffd2a6, earH: 0.42, earW: 0.24, earSpread: 0.33, earTilt: 0.18, scarf: 0xe8384f },
   corgi: { fur: 0xe8893a, dark: 0xc46a22, cream: 0xffffff, inner: 0xffc1a3, earH: 0.62, earW: 0.3, earSpread: 0.38, earTilt: 0.32, scarf: 0x3b82f6 },
+  // NPC
+  poodle: { fur: 0xfff3f6, dark: 0xf2d4dd, cream: 0xffffff, inner: 0xffd0dc, ears: 'floppy', earSpread: 0.46, scarf: 0xff6fae, pom: true },
+  pug: { fur: 0xead1a4, dark: 0x3b2f2a, cream: 0xf6e3c0, inner: 0x3b2f2a, ears: 'fold', earSpread: 0.36, scarf: 0x22b573, muzzle: 0x3b2f2a },
 };
 
 /**
@@ -79,14 +82,14 @@ export function buildDog(kind) {
   if (kind === 'corgi') {
     head.add(mesh(SPHERE(), cream, { pos: [0, 0.18, 0.32], scale: [0.12, 0.32, 0.2] })); // 額の白いライン
   }
-  head.add(mesh(SPHERE(), cream, { pos: [0, -0.14, 0.34], scale: [0.34, 0.26, 0.26] }));
+  head.add(mesh(SPHERE(), st.muzzle ? m(st.muzzle) : cream, { pos: [0, -0.14, 0.34], scale: [0.34, 0.26, 0.26] }));
   head.add(mesh(SPHERE(), cream, { pos: [-0.3, -0.12, 0.22], scale: [0.18, 0.15, 0.15] }));
   head.add(mesh(SPHERE(), cream, { pos: [0.3, -0.12, 0.22], scale: [0.18, 0.15, 0.15] }));
   // 鼻・口
   head.add(mesh(SPHERE_LO(), black, { pos: [0, -0.04, 0.6], scale: [0.09, 0.07, 0.07] }));
   head.add(mesh(SPHERE_LO(), white, { pos: [-0.025, -0.015, 0.66], scale: [0.025, 0.02, 0.02] }));
   const tongue = mesh(SPHERE_LO(), pink, { pos: [0, -0.3, 0.52], scale: [0.08, 0.1, 0.05] });
-  tongue.visible = kind === 'corgi';
+  tongue.visible = kind === 'corgi' || kind === 'pug';
   head.add(tongue);
   // 目
   const eyes = [];
@@ -100,25 +103,42 @@ export function buildDog(kind) {
     head.add(mesh(SPHERE_LO(), blush, { pos: [side * 0.36, -0.12, 0.3], scale: [0.09, 0.05, 0.04] }));
     if (kind === 'shiba') head.add(mesh(SPHERE_LO(), cream, { pos: [side * 0.17, 0.22, 0.42], scale: [0.06, 0.04, 0.03] })); // 麻呂眉
   }
-  // 耳
+  // 耳（立ち耳 / 垂れ耳 / 折れ耳）
   const ears = [];
   for (const side of [-1, 1]) {
     const pivot = new THREE.Group();
-    pivot.position.set(side * st.earSpread, 0.36, -0.02);
-    pivot.rotation.z = -side * st.earTilt;
-    const ear = mesh(CONE(), fur, { pos: [0, st.earH / 2, 0], scale: [st.earW, st.earH, 0.12], rot: [0, Math.PI / 4, 0] });
-    const inner = mesh(CONE(), m(st.inner), { pos: [0, st.earH * 0.42, 0.045], scale: [st.earW * 0.6, st.earH * 0.7, 0.05], rot: [0, Math.PI / 4, 0] });
-    pivot.add(ear, inner);
+    if (st.ears === 'floppy') {
+      // プードル: もこもこの垂れ耳
+      pivot.position.set(side * st.earSpread, 0.12, -0.02);
+      for (const [y, r] of [[-0.12, 0.17], [-0.3, 0.19], [-0.46, 0.15]]) pivot.add(mesh(SPHERE_LO(), fur, { pos: [side * 0.04, y, 0], scale: [r * 0.8, r, r] }));
+    } else if (st.ears === 'fold') {
+      // パグ: 小さく前に折れた耳
+      pivot.position.set(side * st.earSpread, 0.34, 0.02);
+      pivot.add(mesh(CONE(), dark, { pos: [side * 0.06, 0.02, 0.08], scale: [0.2, 0.2, 0.08], rot: [1.9, Math.PI / 4, side * 0.4] }));
+    } else {
+      pivot.position.set(side * st.earSpread, 0.36, -0.02);
+      pivot.rotation.z = -side * st.earTilt;
+      const ear = mesh(CONE(), fur, { pos: [0, st.earH / 2, 0], scale: [st.earW, st.earH, 0.12], rot: [0, Math.PI / 4, 0] });
+      const inner = mesh(CONE(), m(st.inner), { pos: [0, st.earH * 0.42, 0.045], scale: [st.earW * 0.6, st.earH * 0.7, 0.05], rot: [0, Math.PI / 4, 0] });
+      pivot.add(ear, inner);
+    }
     head.add(pivot);
     ears.push({ pivot, side });
+  }
+  // プードルの頭のぽんぽん
+  if (st.pom) {
+    for (const [x, y, z, r] of [[0, 0.5, -0.02, 0.24], [-0.17, 0.42, 0.02, 0.17], [0.17, 0.42, 0.02, 0.17], [0, 0.42, 0.18, 0.15]]) head.add(mesh(SPHERE_LO(), fur, { pos: [x, y, z], scale: [r, r, r] }));
+    head.add(mesh(g('bow', () => new THREE.TorusGeometry(0.08, 0.04, 6, 10)), m(0xff6fae), { pos: [0.22, 0.6, 0.05], scale: [1.4, 0.8, 1] }));
   }
   // しっぽ
   const tail = new THREE.Group();
   tail.position.set(0, 0.35, -0.42);
-  if (kind === 'shiba') {
+  if (kind === 'shiba' || kind === 'pug') {
     // くるんと巻いたしっぽ
     tail.add(mesh(g('tailTorus', () => new THREE.TorusGeometry(0.16, 0.08, 8, 14, Math.PI * 1.6)), fur, { pos: [0, 0.2, 0], rot: [0, Math.PI / 2, 0] }));
     tail.add(mesh(SPHERE_LO(), cream, { pos: [0, 0.34, 0.05], scale: [0.08, 0.08, 0.08] }));
+  } else if (kind === 'poodle') {
+    tail.add(mesh(SPHERE_LO(), fur, { pos: [0, 0.3, -0.1], scale: [0.2, 0.2, 0.2] })); // ぽんぽんしっぽ
   } else {
     tail.add(mesh(SPHERE_LO(), dark, { pos: [0, 0.05, -0.08], scale: [0.14, 0.12, 0.16] })); // コーギーの短いしっぽ
   }
@@ -153,11 +173,11 @@ export function buildDog(kind) {
       const flap = Math.sin(t * (12 + sp * 20) + e.side) * 0.08 * (0.3 + sp);
       e.pivot.rotation.x = -sp * 0.55 - a.boost * 0.4 + flap;
     }
-    tail.rotation.y = Math.sin(t * 14) * (kind === 'shiba' ? 0.35 : 0.6);
+    tail.rotation.y = Math.sin(t * 14) * (kind === 'corgi' ? 0.6 : 0.35);
     // ハンドル操作
     arms[0].rotation.x = a.steer * 0.25;
     arms[1].rotation.x = -a.steer * 0.25;
-    tongue.visible = kind === 'corgi' || a.boost > 0 || a.mood === 1;
+    tongue.visible = kind === 'corgi' || kind === 'pug' || a.boost > 0 || a.mood === 1;
     tongue.scale.y = 0.1 + Math.sin(t * 20) * 0.02 + (a.boost > 0 ? 0.04 : 0);
     // スピン中は目を回す（目が縦につぶれる）
     for (const e of eyes) {

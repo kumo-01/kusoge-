@@ -8,7 +8,7 @@ const CONTROL = [
   [-30, -100], [30, -100], [85, -94], [126, -62], [138, -14], [118, 30],
   [80, 44], [54, 66], [54, 100], [82, 128], [76, 166], [24, 182],
   [-30, 166], [-52, 124], [-86, 96], [-126, 64], [-142, 12], [-128, -50], [-86, -90],
-].map(([x, z]) => [x * 0.86, z * 0.86]);
+].map(([x, z]) => [x * 1.02, z * 1.02]);
 
 function catmull(p0, p1, p2, p3, t) {
   // centripetal ではなく uniform。制御点が均等に近いので十分なめらか
@@ -19,8 +19,8 @@ function catmull(p0, p1, p2, p3, t) {
 
 export class Track {
   constructor(control = CONTROL) {
-    this.roadHalf = 8; // 道路の半幅
-    this.wallDist = 12.5; // 中心線から壁までの距離（道路の外は芝生）
+    this.roadHalf = 11; // 道路の半幅
+    this.wallDist = 15.5; // 中心線から壁までの距離（道路の外は芝生）
     this.checkpoints = RACE.CHECKPOINTS;
 
     // 1. 細かくサンプリング
@@ -150,11 +150,11 @@ export class Track {
     return ds > L / 2 ? ds - L : ds;
   }
 
-  /** アイテムボックスの配置（コース上の割合位置 × 横 3 列） */
+  /** アイテムボックスの配置（コース上の割合位置 × 横 5 列） */
   itemBoxes() {
     const out = [];
     for (const f of [0.2, 0.47, 0.76]) {
-      for (const lat of [-5, 0, 5]) {
+      for (const lat of [-8, -4, 0, 4, 8]) {
         const p = this.pointAt(f * this.length, lat);
         out.push({ x: p.x, z: p.z });
       }
@@ -162,8 +162,10 @@ export class Track {
     return out;
   }
 
-  /** スタート位置（スタートラインの少し手前、左右に並ぶ） */
+  /** スタート位置: 前列に人間（0 = ホスト, 1 = ゲスト）、後列に NPC */
   startPos(index) {
-    return this.pointAt(-9, index === 0 ? 3.5 : -3.5);
+    const row = index < 2 ? 0 : 1;
+    const side = index % 2 === 0 ? 1 : -1;
+    return this.pointAt(-10 - row * 9, side * 5);
   }
 }

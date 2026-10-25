@@ -4,7 +4,7 @@
 // - フォーカスが外れたらすべてのキーを離した扱いにする
 
 const GAME_KEYS = new Set([
-  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR',
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR', 'KeyC',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
 ]);
 

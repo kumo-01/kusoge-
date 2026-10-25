@@ -129,6 +129,15 @@ export class Effects {
     }
   }
 
+  /** 火花（壁こすり・ドリフト・ブースト） */
+  sparks(x, y, z, n = 6, color = 0xffb347, power = 1) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = (2 + Math.random() * 5) * power;
+      this._spawn('spark', x, y, z, { life: 0.25 + Math.random() * 0.2, vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, vy: 2 + Math.random() * 4 * power, g: 20, s0: 0.18, s1: 0.04, spin: 12, color });
+    }
+  }
+
   /** 衝撃波の輪 */
   ring(x, y, z, color = 0xffffff, size = 4) {
     const p = this._spawn('ring', x, y, z, { life: 0.4, s0: 0.5, s1: size, color });

@@ -5,6 +5,7 @@ import { ScreenRouter } from './core/screen.js';
 import { HostRoom, GuestRoom } from './core/room.js';
 import { InputManager } from './core/input.js';
 import { sound } from './core/audio.js';
+import { createMusic } from './core/music.js';
 import { describePeerError } from './core/network.js';
 import { readInviteParams, loadGuestSession, clearInviteParams, clearGuestSession } from './core/reconnect.js';
 
@@ -19,6 +20,7 @@ const CLOSE_TEXT = {
 class App {
   constructor(root) {
     this.sound = sound;
+    this.music = createMusic(sound);
     this.input = new InputManager();
     this.room = null;
     this.connectInfo = { busy: false, error: null, notice: null };
@@ -45,6 +47,20 @@ class App {
 
   render() {
     this.router.render();
+    this._updateMusic();
+  }
+
+  /** 画面に合わせて BGM を切り替える（ゲーム中はレース曲、それ以外はメニュー曲） */
+  _updateMusic() {
+    const key = this.router.currentKey;
+    const m = this.room?.state?.match;
+    if (key === 'game') {
+      this.music.play('race');
+      this.music.setDim(!m || m.status !== 'running');
+    } else {
+      this.music.play('menu');
+      this.music.setDim(false);
+    }
   }
 
   _bindRoom(room) {
@@ -57,7 +73,7 @@ class App {
     if (this.room || this.connectInfo.busy) return;
     this.connectInfo = { busy: true, error: null, notice: null };
     this.render();
-    const room = new HostRoom({ sound, input: this.input, layer: this.gameLayer });
+    const room = new HostRoom({ sound, music: this.music, input: this.input, layer: this.gameLayer });
     try {
       await room.create();
     } catch (err) {
@@ -77,7 +93,7 @@ class App {
     const session = loadGuestSession();
     const token = session && session.room === invite.room && session.key === invite.key ? session.token : null;
     if (session && !token) clearGuestSession(); // 別の部屋の古い情報は捨てる
-    const room = new GuestRoom({ invite, token, sound, input: this.input, layer: this.gameLayer });
+    const room = new GuestRoom({ invite, token, sound, music: this.music, input: this.input, layer: this.gameLayer });
     this.room = room;
     this._bindRoom(room);
     this.render();
@@ -140,6 +156,11 @@ class App {
 
   toggleMute() {
     sound.setMuted(!sound.muted);
+    this.render();
+  }
+
+  toggleMusic() {
+    this.music.setMuted(!this.music.muted);
     this.render();
   }
 

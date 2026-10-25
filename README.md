@@ -29,13 +29,19 @@
 ### わんわん爆走カート
 
 - 3周レース。チェックポイントを順番に通らないと周回になりません（逆走・ショートカット対策）
-- アイテムボックスを取ると、ルーレットのあとアイテムが1つ手に入ります（同時に1つまで）
+- アイテムボックスは3か所に横5列。取るとルーレットのあとアイテムが1つ手に入ります（同時に1つまで）。
+  アイテムを持っている間・ルーレット中はボックスをすり抜けるので、1人が箱を割って総取りすることはできません
   - 🦴 **ホネアタック**: 前方に骨を投げる。当たると相手がスピン（壁で跳ね返るので自爆注意）
   - 🍌 **バナナトラップ**: 後ろに置く。踏むとツルッとスピン（一定時間で消える）
   - ⚡ **わんわんブースト**: しばらく超加速
 - 車同士がぶつかると押し合い、速度差が大きいと相手が跳ね上がる「ドカーン!」演出
 - スピンの後は短い無敵時間があり、ハメ続けられないようになっています
-- 先に3周した人が勝ち。結果画面に順位・タイム・ベストラップ・体当たり回数などを表示
+- **NPC（コンピューターの犬）**: 準備画面でホストが「なし / 1台（プードル）/ 2台（プードル・パグ）」を選べます（既定は2台）。
+  NPC もアイテムを使い、体当たりもしてきます。人間との差が開きすぎると手加減・追い上げをします
+- 順位は NPC を含めた全員の中で表示。**勝敗はホストとゲストのどちらが先に3周したか**で決まります（NPC が先にゴールしてもレースは続きます）
+- 結果画面に総合順位・タイム・ベストラップ・体当たり回数・着順などを表示
+- **カメラ**: いつもの三人称（後ろから）と、運転席の犬の目線の一人称を C キーか画面右上の「🎥」ボタンで切り替え（自分の画面だけ・設定は保存）
+- **BGM**: メニュー用とレース用のオリジナル曲を Web Audio で演奏（ファイナルラップでテンポアップ）。🎵 ボタンで効果音とは別にオン/オフ
 
 ### 操作方法（PCキーボード）
 
@@ -47,6 +53,7 @@
 | D / → | 右に曲がる |
 | Space | アイテムを使う |
 | R | 最後に通ったチェックポイント付近へ復帰 |
+| C | カメラ切り替え（三人称 / 一人称） |
 | Esc | （ホストのみ）一時停止 |
 
 ---
@@ -153,6 +160,8 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
   players: '2人対戦',
   controls: [['Space', '早押し']],
   tips: ['ルールの補足'],
+  // 任意: ホストが準備画面で選べる設定。選んだ値は context.options で受け取れる
+  options: [{ key: 'rounds', label: '問題数', choices: [{ value: 5, label: '5問' }, { value: 10, label: '10問' }], default: 5 }],
   load: () => import('./quiz/index.js'), // 選ばれたときだけ読み込む
 },
 ```
@@ -169,10 +178,11 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
 | `loadSnapshot(snapshot)` | 再接続・一時停止時の完全復元 |
 | `applyNetSnapshot(snap, events)` | ゲスト: 定期配信の受信 |
 | `drainNetEvents()` | ホスト（任意）: 前回配信以降の演出イベント |
+| `encodeNetSnapshot(snap)` | ホスト（任意）: 定期配信用に小さく詰める（ゲストの `applyNetSnapshot` で戻す） |
 | `pause()` / `resume()` | 一時停止・再開 |
 | `end()` / `destroy()` | 終了・3Dオブジェクトやリスナーの解放 |
 
-`context` の主な中身: `role`（'host' / 'guest'）, `isHost`, `playerIndex`（ホスト0・ゲスト1）, `container`, `input`（キーボード）, `sound`（効果音）,
+`context` の主な中身: `role`（'host' / 'guest'）, `isHost`, `playerIndex`（ホスト0・ゲスト1）, `container`, `input`（キーボード）, `sound`（効果音）, `music`（BGM）, `options`（準備画面の設定）,
 `sendInput(seq, inputs)`（ゲスト→ホスト）, `sendGameMessage(data)`, `finish(result)`（ホストのみ・勝敗確定）, `getNetInfo()`。
 
 `finish(result)` に渡す結果は次の形にすると、共通の結果画面にそのまま表示されます。
@@ -213,6 +223,7 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
 - スマートフォンは接続・ホームなどの画面表示のみ対応。ゲームのタッチ操作は未対応
 - 招待URLを知っている人はゲスト枠が空いているときに参加できます。信頼できる相手との2人プレイ向けで、強固な認証の代わりにはなりません
 - 収録ゲームは「わんわん爆走カート」1本、コースは1種類です
+- NPC はホストのブラウザで計算します（ホストの端末が遅いと NPC も含めて動きが重くなります）
 
 ---
 
@@ -233,6 +244,7 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
     │   ├── protocol.js            メッセージ種別・検証
     │   ├── reconnect.js           sessionStorage・招待URL
     │   ├── screen.js              画面切替・ヘッダー・ダイアログ・トースト
+    │   ├── music.js           BGM（Web Audio のシーケンサー）
     │   ├── input.js / audio.js / util.js
     ├── screens/                   接続・ホーム・選択・準備・ゲーム・結果
     └── games/
@@ -242,6 +254,7 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
             ├── race.js            レースの正本シミュレーション
             ├── physics.js         アーケード物理
             ├── items.js           アイテム
+            ├── npc.js             NPC の運転
             ├── track.js           コース形状
             ├── world.js           3D の世界
             ├── kart.js / dog.js   カートと犬のモデル
@@ -250,6 +263,16 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
             ├── hud.js             HUD
             └── constants.js       調整用パラメータ
 ```
+
+## 通信と軽量化の工夫
+
+- ゲーム更新はホストで 60Hz、位置の配信は毎秒30回
+- P2P の接続を2本使います。部屋の状態・一時停止などの制御は「順序保証あり」の接続、
+  位置の定期配信とゲストの入力は「順不同」の高速接続（`reliable: false`）で送り、1つのパケットの遅れで後続が詰まらないようにしています。
+  高速接続が開けない環境では自動的に通常の接続で送ります
+- 定期配信はキー名を省いた配列形式に詰めて送信量を減らしています。演出イベントには ID を付けて3回続けて載せ、ゲスト側で重複を除きます
+- ゲストの入力は直近8 tick 分を毎回重ねて送るので、1通落ちても欠けません
+- 描画が重い端末では、自動で解像度 → 影 → さらに解像度の順に画質を下げます（描画解像度は最大1.5倍）
 
 ## 通信プロトコル（概要）
 

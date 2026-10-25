@@ -22,16 +22,20 @@ export class Hud {
     this.cdBox = h('div.hud-cd');
     this.warn = h('div.hud-warn', { hidden: true }, '⚠ 逆走してるワン！');
     this.boostEdge = h('div.hud-boost-edge');
+    this.speedLines = h('div.hud-speedlines');
+    this.camBtn = h('button.hud-cam-btn', { onclick: () => this.onCameraToggle?.(), title: 'カメラ切り替え（C）' }, '🎥 三人称');
+    this.rankTotal = h('div.hud-rank-total', null, '/2');
     this.mapCanvas = h('canvas.hud-map', { width: 180, height: 180 });
     this.fallback = h('div.hud-fallback', { hidden: true }, '3D表示を開始できなかったため、簡易表示で遊んでいます');
 
     this.root.append(
+      this.speedLines,
       this.boostEdge,
-      h('div.hud-tl', null, h('div.hud-rank-wrap', null, this.rank), h('div.hud-lt', null, this.lap, this.time)),
-      h('div.hud-tr', null, this.net, this.mapCanvas),
+      h('div.hud-tl', null, h('div.hud-rank-wrap', null, this.rank, this.rankTotal), h('div.hud-lt', null, this.lap, this.time)),
+      h('div.hud-tr', null, this.net, this.mapCanvas, this.camBtn),
       h('div.hud-bl', null, h('div.hud-speed', null, this.speed, h('span', null, 'わんkm/h')), h('div.hud-speed-bar', null, this.speedBar)),
       h('div.hud-br', null, this.itemSlot),
-      h('div.hud-bc', null, 'W/↑ アクセル　S/↓ ブレーキ　A D/← → ハンドル　Space アイテム　R 復帰'),
+      h('div.hud-bc', null, 'W/↑ アクセル　S/↓ ブレーキ　A D/← → ハンドル　Space アイテム　R 復帰　C カメラ'),
       this.cdBox,
       this.center,
       this.warn,
@@ -93,6 +97,11 @@ export class Hud {
   update(d, dt) {
     this._set('rank', this.rank.firstChild, String(d.rank), 'nodeValue');
     this.rank.classList.toggle('is-first', d.rank === 1);
+    this._set('total', this.rankTotal, `/${d.total || 2}`);
+    // 速いときは集中線
+    const fast = Math.abs(d.speed) > 30 || d.boost > 0;
+    this.speedLines.classList.toggle('on', fast);
+    this.speedLines.classList.toggle('boost', d.boost > 0);
     this._set('lap', this.lap, `LAP ${Math.min(RACE.LAPS, d.lap + 1)}/${RACE.LAPS}`);
     this._set('time', this.time, formatTime(Math.max(0, d.time)));
     const kmh = Math.round(Math.abs(d.speed) * 3.6);
@@ -148,12 +157,16 @@ export class Hud {
       const [px, py] = this._map(k.x, k.z);
       x.beginPath();
       x.arc(px, py, i === this.me ? 7 : 6, 0, Math.PI * 2);
-      x.fillStyle = i === 0 ? '#ff4d5e' : '#3d8bff';
+      x.fillStyle = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#ffc93c'][i] || '#999';
       x.fill();
       x.lineWidth = 2.5;
       x.strokeStyle = '#fff';
       x.stroke();
     });
+  }
+
+  setCameraMode(mode) {
+    this.camBtn.textContent = mode === 'first' ? '🎥 一人称' : '🎥 三人称';
   }
 
   /** 中央に大きなメッセージ */

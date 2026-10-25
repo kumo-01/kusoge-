@@ -13,7 +13,7 @@
 import { Emitter, randomHex, now } from './util.js';
 import { HostNetwork, GuestNetwork, describePeerError } from './network.js';
 import { GameManager } from './gameManager.js';
-import { getGame } from '../games/registry.js';
+import { getGame, defaultOptions, validOptions } from '../games/registry.js';
 import { sanitizeRoomState, sanitizeResult, REJECT_REASONS } from './protocol.js';
 import { clearGuestSession } from './reconnect.js';
 
@@ -26,7 +26,7 @@ export const ROOM_CONFIG = {
 // ホスト
 // ======================================================================
 export class HostRoom extends Emitter {
-  constructor({ sound, input, layer }) {
+  constructor({ sound, music, input, layer }) {
     super();
     this.role = 'host';
     this.sound = sound;
@@ -36,6 +36,7 @@ export class HostRoom extends Emitter {
       guest: 'none',
       ready: { host: false, guest: false },
       gameId: null,
+      options: {},
       match: null,
       result: null,
       hostHidden: document.visibilityState === 'hidden',
@@ -48,7 +49,7 @@ export class HostRoom extends Emitter {
     this._resumeTimer = null;
     this.closed = false;
     this.net = new HostNetwork({ getRoomState: () => this.publicState() });
-    this.gm = new GameManager({ role: 'host', net: this.net, input, sound, layer });
+    this.gm = new GameManager({ role: 'host', net: this.net, input, sound, music, layer });
     this._onVisibility = () => this._visibilityChanged();
     document.addEventListener('visibilitychange', this._onVisibility);
   }
@@ -87,6 +88,7 @@ export class HostRoom extends Emitter {
     return {
       ...s,
       ready: { ...s.ready },
+      options: { ...s.options },
       match: s.match ? { ...s.match } : null,
       startInMs: this._startAt ? Math.max(0, this._startAt - now()) : null,
     };
@@ -223,7 +225,19 @@ export class HostRoom extends Emitter {
     const s = this.state;
     if (s.screen !== 'select' || !getGame(id)) return;
     s.gameId = id;
+    s.options = defaultOptions(getGame(id));
     s.screen = 'ready';
+    this._resetReady();
+    this._changed();
+  }
+
+  /** 準備画面でゲーム設定を変える（ホストのみ）。変えたら準備状態はやり直し */
+  setOption(key, value) {
+    const s = this.state;
+    if (s.screen !== 'ready') return;
+    const next = validOptions(getGame(s.gameId), { ...s.options, [key]: value });
+    if (next[key] !== value || s.options[key] === value) return;
+    s.options = next;
     this._resetReady();
     this._changed();
   }
@@ -247,7 +261,7 @@ export class HostRoom extends Emitter {
     s.match = { matchId, gen: 1, status: 'loading', reason: null, synced: false, started: false };
     this._changed();
     try {
-      await this.gm.create(def, matchId, 1);
+      await this.gm.create(def, matchId, 1, validOptions(def, s.options));
       await this.gm.firstFrame;
     } catch (err) {
       console.error(err);
@@ -391,7 +405,7 @@ export class HostRoom extends Emitter {
 // ゲスト
 // ======================================================================
 export class GuestRoom extends Emitter {
-  constructor({ invite, token, sound, input, layer }) {
+  constructor({ invite, token, sound, music, input, layer }) {
     super();
     this.role = 'guest';
     this.sound = sound;
@@ -404,7 +418,7 @@ export class GuestRoom extends Emitter {
     this.joinedOnce = false;
     this._queue = Promise.resolve();
     this.net = new GuestNetwork({ roomId: invite.room, inviteKey: invite.key, token });
-    this.gm = new GameManager({ role: 'guest', net: this.net, input, sound, layer });
+    this.gm = new GameManager({ role: 'guest', net: this.net, input, sound, music, layer });
 
     this.net.on('state', (st) => {
       this.linkState = st;
@@ -473,7 +487,7 @@ export class GuestRoom extends Emitter {
         if (!def || this.state?.screen !== 'game') return;
         if (!this.gm.game || this.gm.matchId !== msg.matchId) {
           try {
-            await this.gm.create(def, msg.matchId, msg.gen);
+            await this.gm.create(def, msg.matchId, msg.gen, validOptions(def, this.state?.options));
             await this.gm.firstFrame; // 重い初回描画を済ませてから ACK する
           } catch (err) {
             console.error(err);

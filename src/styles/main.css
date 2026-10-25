@@ -1276,3 +1276,95 @@ body[data-screen='game'] .toasts {
 [hidden] {
   display: none !important;
 }
+
+/* ---------- HUD 追加: カメラ切替・順位の母数・集中線 ---------- */
+.hud-cam-btn {
+  pointer-events: auto;
+  font: inherit;
+  font-weight: 900;
+  font-size: 0.8rem;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.9);
+  border: 0;
+  border-radius: 999px;
+  padding: 0.35em 0.9em;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+}
+.hud-rank-wrap {
+  position: relative;
+}
+.hud-rank-total {
+  position: absolute;
+  right: 6px;
+  bottom: 10px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  text-shadow: none;
+}
+.hud-speedlines {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.3s;
+  background: repeating-conic-gradient(from 0deg at 50% 55%, rgba(255, 255, 255, 0.22) 0deg 1.2deg, transparent 1.2deg 9deg);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 55%, transparent 42%, #000 85%);
+  mask-image: radial-gradient(ellipse at 50% 55%, transparent 42%, #000 85%);
+  animation: speedlines 0.25s steps(3) infinite;
+}
+.hud-speedlines.on {
+  opacity: 0.8;
+}
+.hud-speedlines.boost {
+  opacity: 1;
+  background: repeating-conic-gradient(from 0deg at 50% 55%, rgba(255, 220, 120, 0.35) 0deg 1.4deg, transparent 1.4deg 8deg);
+}
+@keyframes speedlines {
+  50% {
+    transform: rotate(2deg) scale(1.03);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-speedlines {
+    animation: none;
+  }
+}
+
+/* ---------- 準備画面のゲーム設定 ---------- */
+.options-card {
+  width: 100%;
+  padding: 14px 18px;
+}
+.option-label {
+  font-weight: 900;
+  margin-bottom: 6px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.88rem;
+  padding: 0.4em 1em;
+  border-radius: 999px;
+  border: 3px solid #f1e6d8;
+  background: var(--cream);
+  color: var(--ink);
+  cursor: pointer;
+}
+.chip.on {
+  background: var(--orange);
+  border-color: var(--orange-d);
+  color: #fff;
+}
+.chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn-pair {
+  display: inline-flex;
+  gap: 6px;
+}

@@ -15,10 +15,13 @@ export function nextRandom(s) {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-/** 順位に応じてアイテムを選ぶ（後ろの人ほどブーストが出やすい） */
-export function chooseItem(s, leading) {
+/** 順位に応じてアイテムを選ぶ（後ろの人ほどブーストが出やすい）。rank: 1 = 先頭, total: 台数 */
+export function chooseItem(s, rank, total) {
   const r = nextRandom(s);
-  const w = leading ? [0.35, 0.5, 0.15] : [0.4, 0.2, 0.4]; // bone, banana, boost
+  let w; // [bone, banana, boost]
+  if (rank === 1) w = [0.35, 0.5, 0.15];
+  else if (rank === total) w = [0.35, 0.15, 0.5];
+  else w = [0.45, 0.25, 0.3];
   if (r < w[0]) return ITEMS.BONE;
   if (r < w[0] + w[1]) return ITEMS.BANANA;
   return ITEMS.BOOST;
@@ -68,11 +71,15 @@ export function useItem(s, k, events) {
   events.push({ t: 'use', k: k.i, item, x: k.x, z: k.z });
 }
 
-/** アイテムボックス・飛翔物・バナナの更新と当たり判定 */
-export function updateItems(s, dt, track, boxPos, leaderIndex, events) {
+/**
+ * アイテムボックス・飛翔物・バナナの更新と当たり判定
+ * @param {(i: number) => number} rankOf 車 i の現在順位（1 = 先頭）
+ */
+export function updateItems(s, dt, track, boxPos, rankOf, events) {
   const karts = s.karts;
 
-  // ボックス
+  // ボックス: アイテムを受け取れる車（手ぶら・ルーレット中でない）だけが箱を割る。
+  // すでに持っている車はすり抜けるので、1人が箱を全部消して総取りすることはできない。
   for (let b = 0; b < s.boxes.length; b++) {
     if (s.boxes[b] > 0) {
       s.boxes[b] = Math.max(0, s.boxes[b] - dt);
@@ -80,13 +87,13 @@ export function updateItems(s, dt, track, boxPos, leaderIndex, events) {
     }
     const p = boxPos[b];
     for (const k of karts) {
+      if (k.item || k.roll > 0 || (k.fin && !k.npc)) continue;
       const dx = k.x - p.x;
       const dz = k.z - p.z;
       if (dx * dx + dz * dz < (ITEMS.BOX_RADIUS + KART.RADIUS) ** 2 && k.y < 2) {
         s.boxes[b] = ITEMS.BOX_RESPAWN;
-        const grant = !k.item && k.roll <= 0 && !k.fin;
-        if (grant) k.roll = ITEMS.ROULETTE;
-        events.push({ t: 'box', k: k.i, b, grant });
+        k.roll = ITEMS.ROULETTE;
+        events.push({ t: 'box', k: k.i, b, grant: true });
         break;
       }
     }
@@ -98,7 +105,7 @@ export function updateItems(s, dt, track, boxPos, leaderIndex, events) {
       k.roll -= dt;
       if (k.roll <= 0) {
         k.roll = 0;
-        k.item = chooseItem(s, k.i === leaderIndex);
+        k.item = chooseItem(s, rankOf(k.i), karts.length);
         events.push({ t: 'item', k: k.i, item: k.item });
       }
     }
@@ -137,7 +144,7 @@ export function updateItems(s, dt, track, boxPos, leaderIndex, events) {
           remove = true;
           if (spinKart(k, ITEMS.BONE_SPIN)) {
             k.stats.hitBy++;
-            if (k.i !== pr.o) karts[pr.o].stats.hits++;
+            if (k.i !== pr.o && karts[pr.o]) karts[pr.o].stats.hits++;
             events.push({ t: 'hit', k: k.i, by: pr.o, x: k.x, z: k.z });
           } else {
             events.push({ t: 'block', k: k.i, x: k.x, z: k.z });
@@ -179,7 +186,7 @@ export function updateItems(s, dt, track, boxPos, leaderIndex, events) {
           remove = true;
           if (spinKart(k, ITEMS.BANANA_SPIN)) {
             k.stats.hitBy++;
-            if (k.i !== bn.o) karts[bn.o].stats.hits++;
+            if (k.i !== bn.o && karts[bn.o]) karts[bn.o].stats.hits++;
             events.push({ t: 'slip', k: k.i, by: bn.o, x: bn.x, z: bn.z });
           } else {
             events.push({ t: 'block', k: k.i, x: k.x, z: k.z });

@@ -39,7 +39,12 @@ export class World {
     this.container = container;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // 軽量化: 高解像度画面でも描画解像度は 1.5 倍まで。重ければ render() で自動的に下げる
+    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    renderer.setPixelRatio(this.pixelRatio);
+    this.quality = 0;
+    this._slowTime = 0;
+    this._lastRender = 0;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -59,7 +64,7 @@ export class World {
     scene.add(new THREE.HemisphereLight(0xdff4ff, 0x76c85b, 1.25));
     const sun = new THREE.DirectionalLight(0xfff4e0, 1.7);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(1024, 1024);
     const sc = sun.shadow.camera;
     sc.left = -45;
     sc.right = 45;
@@ -77,8 +82,8 @@ export class World {
     this._buildScenery();
     this._buildItemViews();
 
-    this.karts = [new KartView(0), new KartView(1)];
-    for (const k of this.karts) scene.add(k.group, k.blob);
+    this.karts = [];
+    this.ensureKarts(2);
     this.effects = new Effects(scene);
 
     // シェーダーを先にコンパイルしておく（初回フレームのカクつき防止）
@@ -746,7 +751,36 @@ export class World {
     this.sun.target.position.set(x, 0, z);
   }
 
+  /** 車の見た目を必要な台数だけ用意する（NPC の数はスナップショットで決まる） */
+  ensureKarts(n) {
+    while (this.karts.length < n) {
+      const k = new KartView(this.karts.length);
+      this.scene.add(k.group, k.blob);
+      this.karts.push(k);
+    }
+  }
+
+  /** 描画が重い端末では画質を段階的に下げる（解像度 → 影 → さらに解像度） */
+  _adaptQuality() {
+    const t = performance.now();
+    const ft = this._lastRender ? t - this._lastRender : 16;
+    this._lastRender = t;
+    if (ft > 200) return; // タブ切り替え直後などは数えない
+    this._ft = this._ft ? this._ft * 0.95 + ft * 0.05 : ft;
+    if (this._ft > 24 && this.quality < 3) this._slowTime += ft;
+    else this._slowTime = Math.max(0, this._slowTime - ft * 0.5);
+    if (this._slowTime > 3000) {
+      this._slowTime = 0;
+      this.quality++;
+      if (this.quality === 1) this.renderer.setPixelRatio((this.pixelRatio = 1));
+      if (this.quality === 2) this.sun.castShadow = false;
+      if (this.quality === 3) this.renderer.setPixelRatio((this.pixelRatio = 0.75));
+      this.resize();
+    }
+  }
+
   render() {
+    this._adaptQuality();
     this.renderer.render(this.scene, this.camera);
   }
 

@@ -37,7 +37,15 @@ function pawTexture(color) {
 const PALETTE = {
   0: { main: 0xff4d5e, dark: 0xc92a3e, accent: 0xffd23f, css: '#e8384f', flag: 0xffd23f },
   1: { main: 0x3d8bff, dark: 0x1f5fd1, accent: 0x7ff0c8, css: '#2f6fe0', flag: 0xffffff },
+  2: { main: 0xff8fd0, dark: 0xd85fa6, accent: 0xffffff, css: '#d85fa6', flag: 0xffffff }, // NPC プードル
+  3: { main: 0xffc93c, dark: 0xd99a14, accent: 0x5a3e2b, css: '#b07a00', flag: 0x5a3e2b }, // NPC パグ
 };
+const DOG_KINDS = ['shiba', 'corgi', 'poodle', 'pug'];
+
+/** スピン中の見た目の回転角（状態から決まるのでホストとゲストで同じ） */
+export function spinAngleOf(r) {
+  return r.spin > 0 ? Math.pow(1 - r.spin / Math.max(0.1, r.spinDur), 0.7) * Math.PI * 4 : 0;
+}
 
 export class KartView {
   constructor(index) {
@@ -136,7 +144,7 @@ export class KartView {
 
     // 無敵中（復帰・スピン後）の点滅用に見た目をまとめて扱う
     // 犬
-    this.dog = buildDog(index === 0 ? 'shiba' : 'corgi');
+    this.dog = buildDog(DOG_KINDS[index] || 'shiba');
     this.dog.group.position.set(0, 0.62, -0.45);
     this.dog.group.scale.setScalar(0.92);
     this.body.add(this.dog.group);
@@ -150,14 +158,45 @@ export class KartView {
     blob.position.y = 0.03;
     blob.scale.set(0.75, 1.1, 1);
     this.blob = blob;
+    // 目を回したときに頭の上を回る星
+    this.dizzy = new THREE.Group();
+    this.dizzy.position.set(0, 2.9, -0.35);
+    const starGeo = once('g-dizzy', () => {
+      const sh = new THREE.Shape();
+      for (let i = 0; i < 10; i++) {
+        const rr = i % 2 === 0 ? 0.28 : 0.12;
+        const a = (i / 10) * Math.PI * 2;
+        if (i === 0) sh.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+        else sh.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+      }
+      return new THREE.ShapeGeometry(sh);
+    });
+    const starMat = once('m-dizzy', () => new THREE.MeshBasicMaterial({ color: 0xffd23f, side: THREE.DoubleSide }));
+    for (let i = 0; i < 4; i++) {
+      const st = new THREE.Mesh(starGeo, starMat);
+      const a = (i / 4) * Math.PI * 2;
+      st.position.set(Math.cos(a) * 0.8, 0, Math.sin(a) * 0.8);
+      this.dizzy.add(st);
+    }
+    this.dizzy.visible = false;
+    this.body.add(this.dizzy);
+    this.firstPerson = false;
     this._t = 0;
+  }
+
+  /** 一人称視点のときは自分の犬を隠す（カメラが頭の中に入らないように） */
+  setFirstPerson(on) {
+    if (this.firstPerson === on) return;
+    this.firstPerson = on;
+    this.dog.group.visible = !on;
+    this.antenna.visible = !on;
   }
 
   /** 状態から見た目を更新する。r は描画用に補間された車の状態 */
   update(r, dt, mood) {
     this._t += dt;
     const t = this._t;
-    const spinAngle = r.spin > 0 ? Math.pow(1 - r.spin / Math.max(0.1, r.spinDur), 0.7) * Math.PI * 4 : 0;
+    const spinAngle = spinAngleOf(r);
     this.group.position.set(r.x, r.y, r.z);
     this.group.rotation.y = r.h + spinAngle;
     this.blob.position.set(r.x, 0.03, r.z);
@@ -200,6 +239,12 @@ export class KartView {
     // 無敵中は点滅
     this.group.visible = !(r.inv > 0 && r.spin <= 0 && Math.floor(t * 12) % 2 === 0);
 
+    // スピン中は頭の上で星がくるくる
+    this.dizzy.visible = !this.firstPerson && r.spin > 0;
+    if (this.dizzy.visible) {
+      this.dizzy.rotation.y = t * 6;
+      for (const st of this.dizzy.children) st.rotation.y = -this.dizzy.rotation.y;
+    }
     this.dog.animate({ dt, speed: r.sp, steer: r.st, spin: r.spin, boost: boosting ? 1 : 0, bump: r.bump, mood });
   }
 

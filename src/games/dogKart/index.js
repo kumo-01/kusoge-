@@ -5,13 +5,16 @@
 //         ホストの確定状態との誤差を少しずつ補正する。
 
 import { Track } from './track.js';
-import { RaceSim, sanitizeSnapshot } from './race.js';
+import { RaceSim, sanitizeSnapshot, packNet, unpackNet, KART_NAMES } from './race.js';
 import { stepKart, PHYS_KEYS } from './physics.js';
 import { World } from './world.js';
 import { ChaseCamera } from './camera.js';
 import { Hud } from './hud.js';
 import { RACE, NET, IN, ITEMS, KART } from './constants.js';
 import { lerp, lerpAngle, angleDiff } from '../../core/util.js';
+import { spinAngleOf } from './kart.js';
+
+const CAMERA_KEY = 'wanwan.kartCamera';
 
 export function createGame() {
   return new DogKartGame();
@@ -22,7 +25,8 @@ const EVENT_TYPES = new Set(['go', 'box', 'item', 'use', 'hit', 'slip', 'block',
 function cleanEvent(e) {
   if (!e || typeof e !== 'object' || !EVENT_TYPES.has(e.t)) return null;
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-  return { t: e.t, k: e.k === 1 ? 1 : 0, by: e.by === 1 ? 1 : 0, r: e.r === 1 ? 1 : 0, v: e.v === 1 ? 1 : 0, x: n(e.x), z: n(e.z), s: n(e.s), b: Math.max(0, Math.min(64, n(e.b) | 0)), item: n(e.item) | 0, lap: n(e.lap) | 0, grant: !!e.grant, big: !!e.big };
+  const idx = (v) => (Number.isInteger(v) && v >= 0 && v < 4 ? v : 0);
+  return { id: n(e.id), t: e.t, k: idx(e.k), by: idx(e.by), r: idx(e.r), v: idx(e.v), x: n(e.x), z: n(e.z), s: n(e.s), b: Math.max(0, Math.min(64, n(e.b) | 0)), item: n(e.item) | 0, lap: n(e.lap) | 0, grant: !!e.grant, big: !!e.big };
 }
 
 /** ゲスト自身の車のクライアント予測 */
@@ -110,7 +114,7 @@ class DogKartGame {
     this.me = ctx.playerIndex;
     this.sound = ctx.sound;
     this.track = new Track();
-    this.sim = new RaceSim(this.track);
+    this.sim = new RaceSim(this.track, { npcs: ctx.options?.npcs ?? 0 });
     this.paused = true;
     this.finished = false;
     this.hud = new Hud(ctx.container, this.track, this.me);
@@ -133,7 +137,10 @@ class DogKartGame {
     this.starveTicks = 0;
     this.carryOneshot = 0;
     this.netEvents = [];
+    this.evSeq = 0;
     // ゲスト用
+    this.seenEvents = new Set();
+    this.sentInputs = [];
     this.buffer = [];
     this.clock = 0;
     this.clockInit = false;
@@ -141,6 +148,27 @@ class DogKartGame {
     this.seq = 0;
     this.pending = [];
     this.lastCd = null;
+    try {
+      this.cameraMode = localStorage.getItem(CAMERA_KEY) === 'first' ? 'first' : 'third';
+    } catch {
+      this.cameraMode = 'third';
+    }
+    this.hud.onCameraToggle = () => this.toggleCamera();
+    this.hud.setCameraMode(this.cameraMode);
+    this._prevY = [];
+  }
+
+  /** カメラ切り替え（三人称 ⇔ 一人称）。自分だけの設定で、相手には影響しない */
+  toggleCamera() {
+    this.cameraMode = this.cameraMode === 'first' ? 'third' : 'first';
+    try {
+      localStorage.setItem(CAMERA_KEY, this.cameraMode);
+    } catch {
+      /* noop */
+    }
+    this.cam?.reset();
+    this.hud.setCameraMode(this.cameraMode);
+    this.sound.play('click');
   }
 
   // ---- 入力 ----
@@ -153,6 +181,7 @@ class DogKartGame {
     if (i.isDown('KeyD', 'ArrowRight')) b |= IN.RIGHT;
     if (i.consume('Space')) b |= IN.ITEM;
     if (i.consume('KeyR')) b |= IN.RESPAWN;
+    if (i.consume('KeyC')) this.toggleCamera();
     return b;
   }
 
@@ -199,7 +228,8 @@ class DogKartGame {
   update(dt) {
     if (this.isHost) {
       const ks = this.sim.s.karts;
-      for (let i = 0; i < 2; i++) {
+      while (this.prev.length < ks.length) this.prev.push({ x: 0, z: 0, y: 0, h: 0 });
+      for (let i = 0; i < ks.length; i++) {
         const p = this.prev[i];
         p.x = ks[i].x;
         p.z = ks[i].z;
@@ -212,8 +242,12 @@ class DogKartGame {
       const ev = this.sim.drainEvents();
       if (ev.length) {
         this._handleEvents(ev);
-        for (const e of ev) this.netEvents.push(e);
-        if (this.netEvents.length > 100) this.netEvents.splice(0, this.netEvents.length - 100);
+        // 定期配信は順不同のチャンネルで送るので、取りこぼしに備えて同じイベントを 3 回続けて載せる（ゲストは id で重複を除く）
+        for (const e of ev) {
+          e.id = ++this.evSeq;
+          this.netEvents.push({ e, n: 3 });
+        }
+        if (this.netEvents.length > 150) this.netEvents.splice(0, this.netEvents.length - 150);
       }
       const s = this.sim.s;
       if (s.phase === 'finished' && s.endT <= 0 && !this.finished) {
@@ -224,8 +258,11 @@ class DogKartGame {
       const bits = this._readInput();
       this.seq++;
       this.pending.push(bits);
+      this.sentInputs.push(bits);
+      if (this.sentInputs.length > NET.INPUT_REDUNDANCY) this.sentInputs.shift();
       if (this.pending.length >= NET.INPUT_SEND_EVERY || bits & IN.ONESHOT) {
-        this.ctx.sendInput(this.seq, this.pending);
+        // 直近の入力をまとめて送る（1 通落ちても次の通に同じ入力が入っている）
+        this.ctx.sendInput(this.seq, this.sentInputs.slice());
         this.pending = [];
       }
       if (NET.PREDICTION && this.pred.k) {
@@ -250,9 +287,18 @@ class DogKartGame {
   }
 
   drainNetEvents() {
-    const e = this.netEvents;
-    this.netEvents = [];
-    return e;
+    const out = [];
+    for (const x of this.netEvents) {
+      out.push(x.e);
+      x.n--;
+    }
+    this.netEvents = this.netEvents.filter((x) => x.n > 0);
+    return out;
+  }
+
+  /** 定期配信用に小さく詰める */
+  encodeNetSnapshot(snap) {
+    return packNet(snap);
   }
 
   loadSnapshot(snap) {
@@ -268,6 +314,7 @@ class DogKartGame {
       this.finished = false;
       this.netEvents = [];
     } else {
+      this.sentInputs = [];
       this.buffer = [{ t: s.tick * this.ctx.fixedDt, s }];
       this.clockInit = false;
       this.pred.reset(s.karts[1]);
@@ -279,11 +326,24 @@ class DogKartGame {
 
   applyNetSnapshot(snap, events) {
     if (this.isHost) return;
-    const s = sanitizeSnapshot(snap, this.sim.s, this.sim.boxPos.length);
-    if (s === this.sim.s) return;
+    // 演出イベントは古いスナップショットに載っていても、まだ見ていなければ処理する
+    const ev = [];
+    for (const e of events) {
+      const c = cleanEvent(e);
+      if (!c || this.seenEvents.has(c.id)) continue;
+      this.seenEvents.add(c.id);
+      ev.push(c);
+    }
+    if (this.seenEvents.size > 400) this.seenEvents = new Set([...this.seenEvents].slice(-200));
+    const raw = snap.p === 1 ? unpackNet(snap) : snap;
+    const s = raw ? sanitizeSnapshot(raw, this.sim.s, this.sim.boxPos.length) : this.sim.s;
     const t = s.tick * this.ctx.fixedDt;
     const last = this.buffer[this.buffer.length - 1];
-    if (last && t < last.t) return; // 順序が逆転した古いデータ
+    if (s === this.sim.s || (last && t <= last.t)) {
+      // 順序が逆転した古いデータ（位置は使わない）
+      if (ev.length) this._handleEvents(ev.sort((a, b) => a.id - b.id));
+      return;
+    }
     this.buffer.push({ t, s });
     while (this.buffer.length > 2 && this.buffer[1].t < t - 1) this.buffer.shift();
     // 受信時刻にゆっくり合わせる時計（受信のゆらぎを吸収）
@@ -295,12 +355,7 @@ class DogKartGame {
     }
     this.sim.s = s;
     if (NET.PREDICTION) this.pred.reconcile(s.karts[1], s.ack);
-    const ev = [];
-    for (const e of events) {
-      const c = cleanEvent(e);
-      if (c) ev.push(c);
-    }
-    if (ev.length) this._handleEvents(ev);
+    if (ev.length) this._handleEvents(ev.sort((a, b) => a.id - b.id));
   }
 
   pause() {
@@ -336,6 +391,7 @@ class DogKartGame {
         case 'box': {
           const p = this.sim.boxPos[e.b];
           if (p) fx?.sparkle(p.x, 1.6, p.z, 12);
+          if (p) fx?.ring(p.x, 1.6, p.z, 0xffe066, 3.5);
           if (e.k === me && e.grant) snd.play('pickup');
           break;
         }
@@ -344,6 +400,7 @@ class DogKartGame {
           break;
         case 'use': {
           const k = kartPos(e.k);
+          if (!k) break;
           if (e.item === ITEMS.BONE) {
             snd.play('throw');
             fx?.text('ワン!', k.x, 3.5, k.z, 3);
@@ -391,12 +448,18 @@ class DogKartGame {
             this.cam?.addShake(Math.min(0.6, e.s / 30));
           }
           fx?.stars(e.x, 1, e.z, 4, 0.5);
+          fx?.sparks(e.x, 0.8, e.z, 10, 0xffb347);
           if (e.s > 15) fx?.text('ゴツン!', e.x, 3, e.z, 2.8);
           break;
         case 'lap':
+          if (e.k === me) {
+            const k = kartPos(e.k);
+            fx?.sparkle(k.x, 2, k.z, 18);
+          }
           if (e.k === me && e.lap < RACE.LAPS) {
             if (e.lap === RACE.LAPS - 1) {
               snd.play('finalLap');
+              this.ctx.music?.setTempoScale(1.12); // ファイナルラップは BGM を速く
               this.hud.flash('FINAL LAP!', 'final', 1600);
             } else {
               snd.play('lap');
@@ -406,18 +469,22 @@ class DogKartGame {
           break;
         case 'finish': {
           const k = kartPos(e.k);
-          fx?.confetti(k.x, 3, k.z, 80);
+          if (!k) break;
+          fx?.confetti(k.x, 3, k.z, e.k < 2 ? 80 : 30);
           if (e.k === me) {
             snd.play('finish');
             this.hud.flash('🏁 ゴール！！', 'goal', 3500);
-          } else {
+          } else if (e.k < 2) {
             snd.play('lose');
             this.hud.flash('あいてが先にゴール…', 'bad', 3500);
+          } else {
+            this.hud.flash(`${KART_NAMES[e.k]}がゴール！`, 'plain', 1500);
           }
           break;
         }
         case 'respawn': {
           const k = kartPos(e.k);
+          if (!k) break;
           fx?.puff(k.x, 1, k.z, { n: 8, size: 1, spread: 2.5 });
           if (e.k === me) snd.play('respawn');
           break;
@@ -457,7 +524,7 @@ class DogKartGame {
       }
     }
     if (!a) return { karts: s.karts, items: s };
-    const karts = [lerpKart(a.s.karts[0], n.s.karts[0], f), lerpKart(a.s.karts[1], n.s.karts[1], f)];
+    const karts = n.s.karts.map((k, i) => (a.s.karts[i] ? lerpKart(a.s.karts[i], k, f) : k));
     if (NET.PREDICTION && this.pred.k) {
       this.pred.decay(dt);
       const k = this.pred.k;
@@ -472,6 +539,35 @@ class DogKartGame {
     return { karts, items: { boxes: s.boxes, proj, bananas: n.s.bananas } };
   }
 
+  /** 車ごとの追加演出（ドリフトの火花・着地の土煙・ブースト煙など） */
+  _kartEffects(karts, dt) {
+    const fx = this.world.effects;
+    karts.forEach((k, i) => {
+      const fxx = Math.sin(k.h);
+      const fzz = Math.cos(k.h);
+      const sp = Math.abs(k.sp);
+      // 着地
+      const py = this._prevY[i] ?? k.y;
+      if (py > 0.6 && k.y <= 0.05) fx.puff(k.x, 0.3, k.z, { n: 6, size: 0.8, spread: 2.5, up: 1, color: k.grass ? 0xc8e6a0 : 0xffffff });
+      this._prevY[i] = k.y;
+      if (k.boost > 0 && Math.random() < 0.5) {
+        fx.puff(k.x - fxx * 2.4, 0.6, k.z - fzz * 2.4, { color: 0xffd27a, size: 0.35, up: 0.5, life: 0.25, alpha: 0.5 });
+        if (Math.random() < 0.5) fx.sparks(k.x - fxx * 2.2, 0.6, k.z - fzz * 2.2, 2, 0xffe066, 0.5);
+      } else if (k.grass && sp > 8 && Math.random() < 0.3) {
+        fx.puff(k.x - fxx * 1.6, 0.3, k.z - fzz * 1.6, { color: 0xc8e6a0, size: 0.5, up: 0.8 });
+      } else if (k.spin > 0 && Math.random() < 0.4) {
+        fx.puff(k.x, 0.3, k.z, { color: 0xffffff, size: 0.6, up: 1 });
+      }
+      // 高速で大きくハンドルを切るとタイヤから火花
+      if (!k.grass && sp > KART.MAX_SPEED * 0.7 && Math.abs(k.st) > 0.75 && k.y < 0.1 && Math.random() < 0.6) {
+        const side = k.st > 0 ? -1 : 1; // 外側のタイヤ
+        const rx = k.x - fxx * 1.0 + fzz * side * 1.0;
+        const rz = k.z - fzz * 1.0 - fxx * side * 1.0;
+        fx.sparks(rx, 0.15, rz, 2, sp > KART.MAX_SPEED * 0.95 ? 0x7ad7ff : 0xffb347, 0.4);
+      }
+    });
+  }
+
   render(alpha, dt) {
     const s = this.sim.s;
     if (!this.isHost && !this.paused && this.clockInit) this.clock += dt;
@@ -480,7 +576,7 @@ class DogKartGame {
     if (this.isHost) {
       karts = s.karts.map((k, i) => {
         const p = this.prev[i];
-        if (this.paused) return k;
+        if (this.paused || !p) return k;
         return { ...k, x: lerp(p.x, k.x, alpha), z: lerp(p.z, k.z, alpha), y: lerp(p.y, k.y, alpha), h: lerpAngle(p.h, k.h, alpha) };
       });
     }
@@ -500,18 +596,23 @@ class DogKartGame {
       this.hud.flash('GO!', 'go', 1000);
     }
 
+    const firstPerson = this.cameraMode === 'first';
     if (this.world) {
       const w = this.world;
       const winner = s.winner;
-      karts.forEach((k, i) => w.karts[i].update(k, dt, winner < 0 ? 0 : winner === i ? 1 : -1));
+      w.ensureKarts(karts.length);
+      karts.forEach((k, i) => {
+        const mood = winner < 0 ? 0 : i >= 2 ? (k.fin ? 1 : 0) : winner === i ? 1 : -1;
+        w.karts[i].setFirstPerson(firstPerson && i === this.me);
+        w.karts[i].update(k, dt, mood);
+      });
       w.updateItems(st.items, dt);
-      // ブースト中・芝生の土煙
-      for (const k of karts) {
-        if (k.boost > 0 && Math.random() < 0.5) w.effects.puff(k.x - Math.sin(k.h) * 2.4, 0.6, k.z - Math.cos(k.h) * 2.4, { color: 0xffd27a, size: 0.35, up: 0.5, life: 0.25, alpha: 0.5 });
-        else if (k.grass && Math.abs(k.sp) > 8 && Math.random() < 0.3) w.effects.puff(k.x - Math.sin(k.h) * 1.6, 0.3, k.z - Math.cos(k.h) * 1.6, { color: 0xc8e6a0, size: 0.5, up: 0.8 });
-        else if (k.spin > 0 && Math.random() < 0.4) w.effects.puff(k.x, 0.3, k.z, { color: 0xffffff, size: 0.6, up: 1 });
+      if (!this.paused) {
+        this._kartEffects(karts, dt);
+        // 飛んでいるホネのキラキラの軌跡
+        for (const p of st.items.proj) if (Math.random() < 0.35) w.effects.sparks(p.x, 1.1, p.z, 1, 0xfff6c8, 0.3);
       }
-      this.cam.update({ x: mine.x, y: mine.y, z: mine.z, h: mine.h, sp: mine.sp, boost: mine.boost }, dt);
+      this.cam.update({ x: mine.x, y: mine.y, z: mine.z, h: mine.h, sp: mine.sp, boost: mine.boost, st: mine.st, spinAngle: spinAngleOf(mine) }, dt, this.cameraMode);
       w.followSun(mine.x, mine.z);
       w.effects.update(dt, w.camera);
       w.updateAmbient(dt);
@@ -521,11 +622,11 @@ class DogKartGame {
     // HUD
     const info = this.ctx.getNetInfo();
     const rtt = info.rtt != null ? `${Math.round(info.rtt)}ms` : '';
-    const leader = this.sim.leaderIndex();
     const sk = s.karts[this.me]; // 周回・アイテムは確定状態を表示
     this.hud.update(
       {
-        rank: leader === this.me ? 1 : 2,
+        rank: this.sim.rankOf(this.me),
+        total: s.karts.length,
         lap: sk.lap,
         time: s.phase === 'countdown' ? raceT : sk.fin ? sk.ft : raceT,
         speed: mine.sp,
@@ -536,7 +637,7 @@ class DogKartGame {
         phase: s.phase,
         karts,
         netText: this.paused ? '⏸ 一時停止中' : `📶 ${this.isHost ? 'ゲスト' : 'ホスト'}と接続中 ${rtt}`,
-        netTone: this.paused ? 'warn' : 'ok',
+        netTone: this.paused ? 'warn' : info.rtt != null && info.rtt > 250 ? 'warn' : 'ok',
       },
       dt,
     );

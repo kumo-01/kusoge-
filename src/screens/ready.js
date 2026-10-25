@@ -63,6 +63,7 @@ export function mount(el, app) {
           h(
             'div.ready-side',
             null,
+            optionsCard(def, s, isHost),
             h('div.players-row.compact', null,
               playerCard('host', { me: isHost, status: hostStatusFor(app), ready: s.ready.host }),
               playerCard('guest', { me: !isHost, status: guest, ready: s.ready.guest })),
@@ -79,6 +80,24 @@ export function mount(el, app) {
       ),
     );
     tickCountdown();
+  }
+
+  function optionsCard(def, s, isHost) {
+    if (!def?.options?.length) return null;
+    return h('div.card.options-card', null,
+      def.options.map((opt) =>
+        h('div.option-row', null,
+          h('div.option-label', null, '⚙ ', opt.label),
+          h('div.chips', null,
+            opt.choices.map((c) => {
+              const on = s.options?.[opt.key] === c.value;
+              return h(`button.chip${on ? '.on' : ''}`, {
+                disabled: !isHost && !on,
+                'aria-pressed': on ? 'true' : 'false',
+                onclick: isHost && !on ? () => { app.sound.play('click'); app.room.setOption(opt.key, c.value); } : null,
+              }, c.label);
+            })),
+          isHost ? null : h('div.small.muted', null, '設定はホストが決めます'))));
   }
 
   render();

@@ -35,6 +35,12 @@ export function createKart(index, pos) {
     ft: 0,
     lapStart: 0,
     best: 0,
+    bc: 0, // 体当たり演出のクールダウン
+    npc: index >= 2 ? 1 : 0,
+    ms: 1, // 最高速の倍率（NPC の手加減・追い上げ用）
+    al: 0, // NPC: 目標の走行ライン（横位置）
+    at: 0, // NPC: 走行ラインを変えるまでの時間
+    as: 0, // NPC: 止まっている時間（引っかかり検出）
     stats: { bumps: 0, hits: 0, hitBy: 0, walls: 0, items: 0, boosts: 0 },
   };
 }
@@ -43,7 +49,7 @@ export function createKart(index, pos) {
 export const PHYS_KEYS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'spin', 'boost', 'slow', 'inv', 'rc'];
 
 export function maxSpeedOf(k) {
-  let m = k.boost > 0 ? KART.BOOST_SPEED : KART.MAX_SPEED;
+  let m = (k.boost > 0 ? KART.BOOST_SPEED : KART.MAX_SPEED) * (k.ms || 1);
   if (k.slow > 0) m *= KART.SLOW_FACTOR;
   if (k.grass && k.boost <= 0) m *= KART.GRASS_FACTOR;
   return m;
@@ -75,7 +81,8 @@ export function setVelocity(k, vx, vz) {
  * @returns {number} 壁への衝突速度（0 なら衝突なし）
  */
 export function stepKart(k, input, dt, track, active) {
-  const control = active && k.spin <= 0 && !k.fin;
+  // ゴールした人間は操作終了。NPC はゴール後も走り続ける（コース上で止まって邪魔にならないように）
+  const control = active && k.spin <= 0 && (!k.fin || k.npc);
   const up = control && input & IN.UP;
   const down = control && input & IN.DOWN;
   const steerIn = control ? (input & IN.LEFT ? 1 : 0) - (input & IN.RIGHT ? 1 : 0) : 0;
@@ -132,6 +139,7 @@ export function stepKart(k, input, dt, track, active) {
   k.inv = Math.max(0, k.inv - dt);
   k.bump = Math.max(0, k.bump - dt);
   k.rc = Math.max(0, k.rc - dt);
+  k.bc = Math.max(0, k.bc - dt);
 
   return collideWalls(k, track);
 }

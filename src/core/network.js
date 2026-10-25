@@ -9,7 +9,7 @@
 
 import Peer from 'peerjs';
 import { Emitter, randomHex, randomToken, safeEqual, now } from './util.js';
-import { PROTOCOL_VERSION, FROM_GUEST, FROM_HOST, encode, decode } from './protocol.js';
+import { PROTOCOL_VERSION, FROM_GUEST, FROM_HOST, FAST_FROM_GUEST, FAST_FROM_HOST, encode, decode } from './protocol.js';
 import { buildInviteUrl, saveGuestSession, backoffDelay } from './reconnect.js';
 
 export const NET_CONFIG = {
@@ -168,10 +168,71 @@ export class Link extends Emitter {
     }
   }
 
+  /**
+   * 高速チャンネル（順不同の DataConnection）を付ける。
+   * 位置の定期配信・連続入力をここに流すと、1 パケットの遅れで後続が詰まる（ヘッドオブラインブロッキング）のを避けられる。
+   * 開けなかった・切れた場合は通常の接続で送る。
+   */
+  attachFast(conn, allowedTypes) {
+    this.fast?.close();
+    const f = { conn, open: !!conn.open };
+    const onData = (raw) => {
+      if (this.closed) return;
+      const msg = decode(raw, allowedTypes);
+      if (!msg) return;
+      this.lastRecv = now();
+      this.emit('message', msg);
+    };
+    const onOpen = () => (f.open = true);
+    const onEnd = () => f.close();
+    f.close = () => {
+      if (f.closed) return;
+      f.closed = true;
+      f.open = false;
+      conn.off('data', onData);
+      conn.off('open', onOpen);
+      conn.off('close', onEnd);
+      conn.off('error', onEnd);
+      try {
+        conn.close();
+      } catch {
+        /* noop */
+      }
+      if (this.fast === f) this.fast = null;
+    };
+    conn.on('data', onData);
+    conn.on('open', onOpen);
+    conn.on('close', onEnd);
+    conn.on('error', onEnd);
+    this.fast = f;
+  }
+
+  get fastOpen() {
+    return !!this.fast?.open;
+  }
+
+  /** 高速チャンネルがあればそちらで送る */
+  sendFast(msg) {
+    const f = this.fast;
+    if (f?.open && !this.closed) {
+      const dc = f.conn.dataChannel;
+      if (!dc || dc.bufferedAmount < NET_CONFIG.CONGESTED_BYTES) {
+        try {
+          f.conn.send(encode(msg));
+          return true;
+        } catch {
+          f.close();
+        }
+      }
+    }
+    return this.send(msg);
+  }
+
   close(reason = 'closed') {
     if (this.closed) return;
     this.closed = true;
     this.open = false;
+    this.fast?.close();
     clearInterval(this._timer);
     document.removeEventListener('visibilitychange', this._onVisibility);
     this.conn.off('data', this._onData);
@@ -298,6 +359,20 @@ export class HostNetwork extends Emitter {
   }
 
   _onConnection(conn) {
+    // ゲストの高速チャンネル: join_accepted で渡した使い捨て ID が一致するときだけ受け入れる
+    const fastId = conn.metadata && typeof conn.metadata.fast === 'string' ? conn.metadata.fast : null;
+    if (fastId) {
+      const g = this.guest;
+      if (!this.destroyed && g && g.fastId && safeEqual(fastId, g.fastId)) g.attachFast(conn, FAST_FROM_GUEST);
+      else {
+        try {
+          conn.close();
+        } catch {
+          /* noop */
+        }
+      }
+      return;
+    }
     if (this.destroyed || this.pending.size >= NET_CONFIG.PENDING_LIMIT) {
       try {
         conn.close();
@@ -351,7 +426,8 @@ export class HostNetwork extends Emitter {
       this.guest = null;
       this.emit('guest-disconnected', reason);
     });
-    link.send({ type: 'join_accepted', token: this.guestToken, rejoin, room: this.getRoomState() });
+    link.fastId = randomToken(12);
+    link.send({ type: 'join_accepted', token: this.guestToken, rejoin, room: this.getRoomState(), fast: link.fastId });
     this.emit('guest-connected', { rejoin, replaced: !!old });
   }
 
@@ -379,6 +455,10 @@ export class HostNetwork extends Emitter {
 
   send(msg) {
     return this.guest ? this.guest.send(msg) : false;
+  }
+
+  sendFast(msg) {
+    return this.guest ? this.guest.sendFast(msg) : false;
   }
 
   get congested() {
@@ -573,6 +653,7 @@ export class GuestNetwork extends Emitter {
     saveGuestSession({ room: this.roomId, key: this.inviteKey, token: msg.token });
     if (this._gameMode) link.setGameMode(true);
     link.on('message', (m) => this.emit('message', m));
+    if (msg.fast) this._openFast(link, msg.fast);
     link.on('close', (reason) => {
       if (this.link !== link) return;
       this.link = null;
@@ -584,6 +665,17 @@ export class GuestNetwork extends Emitter {
     });
     this._setState('connected');
     this.emit('joined', msg);
+  }
+
+  /** 高速チャンネルを開く（失敗しても通常の接続で続行できる） */
+  _openFast(link, fastId) {
+    try {
+      if (!this.peer?.open) return;
+      const conn = this.peer.connect(this.roomId, { serialization: 'raw', reliable: false, metadata: { fast: fastId } });
+      if (conn) link.attachFast(conn, FAST_FROM_HOST);
+    } catch {
+      /* 通常の接続だけで続行 */
+    }
   }
 
   _scheduleRetry() {
@@ -609,6 +701,10 @@ export class GuestNetwork extends Emitter {
 
   send(msg) {
     return this.link ? this.link.send(msg) : false;
+  }
+
+  sendFast(msg) {
+    return this.link ? this.link.sendFast(msg) : false;
   }
 
   close() {
