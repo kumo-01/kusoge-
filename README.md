@@ -110,9 +110,9 @@ npm test         # レースシミュレーション・通信プロトコルの�
 
 このリポジトリには GitHub Actions のワークフロー（`.github/workflows/deploy.yml`）が含まれています。
 
-1. GitHub にリポジトリを作成してこのコードを push する（既定ブランチは `main` を想定）
+1. GitHub にリポジトリを作成してこのコードを push する
 2. リポジトリの **Settings → Pages** を開き、**Build and deployment → Source** を **「GitHub Actions」** にする
-3. `main` ブランチに push する（または Actions タブから「Deploy to GitHub Pages」を手動実行）
+3. リポジトリの**既定ブランチ**に push する（または Actions タブから「Deploy to GitHub Pages」を既定ブランチで手動実行）
 4. 数分後、`https://<ユーザー名>.github.io/<リポジトリ名>/` で公開されます
 
 補足:
@@ -122,7 +122,8 @@ npm test         # レースシミュレーション・通信プロトコルの�
 - 招待URLは「現在のページのURL」を基準に `URL` オブジェクトで組み立てるため、サブパス配信でも正しいURLになります
 - 画面遷移は独自パスではなくクエリパラメータだけを使うので、ページを更新しても 404 になりません
 - 秘密情報（APIキー等）は使っていません。PeerJS Cloud はキー不要です
-- 既定ブランチが `main` 以外の場合は `deploy.yml` の `branches` を変更してください
+- ワークフローは既定ブランチ（Settings → General の Default branch）への push のときだけ公開します。
+  GitHub Pages の環境は既定で既定ブランチからのデプロイだけを許可するためです
 
 ### 自前の PeerServer を使う場合（任意）
 
