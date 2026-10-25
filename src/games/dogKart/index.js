@@ -130,6 +130,7 @@ class DogKartGame {
     this.guestHeld = 0;
     this.lastQueuedSeq = 0;
     this.starved = true;
+    this.starveTicks = 0;
     this.carryOneshot = 0;
     this.netEvents = [];
     // ゲスト用
@@ -168,9 +169,12 @@ class DogKartGame {
     }
     if (!q.length || (this.starved && q.length < 2)) {
       this.starved = true;
+      // 入力が途切れた（タブが裏に回った・通信が詰まった）ら、押しっぱなし扱いを解除する
+      if (++this.starveTicks > 15) this.guestHeld = 0;
       return this.guestHeld;
     }
     this.starved = false;
+    this.starveTicks = 0;
     const e = q.shift();
     this.guestHeld = e.bits & IN.HELD;
     this.sim.s.ack = e.seq;
@@ -503,7 +507,7 @@ class DogKartGame {
       w.updateItems(st.items, dt);
       // ブースト中・芝生の土煙
       for (const k of karts) {
-        if (k.boost > 0 && Math.random() < 0.6) w.effects.puff(k.x - Math.sin(k.h) * 2.2, 0.6, k.z - Math.cos(k.h) * 2.2, { color: 0xffd27a, size: 0.5, up: 0.5 });
+        if (k.boost > 0 && Math.random() < 0.5) w.effects.puff(k.x - Math.sin(k.h) * 2.4, 0.6, k.z - Math.cos(k.h) * 2.4, { color: 0xffd27a, size: 0.35, up: 0.5, life: 0.25, alpha: 0.5 });
         else if (k.grass && Math.abs(k.sp) > 8 && Math.random() < 0.3) w.effects.puff(k.x - Math.sin(k.h) * 1.6, 0.3, k.z - Math.cos(k.h) * 1.6, { color: 0xc8e6a0, size: 0.5, up: 0.8 });
         else if (k.spin > 0 && Math.random() < 0.4) w.effects.puff(k.x, 0.3, k.z, { color: 0xffffff, size: 0.6, up: 1 });
       }

@@ -502,7 +502,9 @@ p {
 .me-badge.inline {
   position: static;
   transform: none;
-  margin-left: 6px;
+}
+.player-name {
+  white-space: nowrap;
 }
 .avatar svg {
   display: block;
@@ -1238,10 +1240,17 @@ body[data-screen='game'] .toasts {
   .ready-layout {
     grid-template-columns: 1fr;
   }
+  .players-row,
+  .players-row.compact {
+    gap: 10px;
+  }
   .players-row.compact .player-card,
   .player-card {
-    width: min(230px, 44vw);
+    width: min(200px, 42vw);
     padding: 14px 8px;
+  }
+  .player-name {
+    font-size: 1.05rem;
   }
   .player-card .avatar svg {
     width: 64px;

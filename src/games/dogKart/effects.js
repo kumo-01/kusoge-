@@ -97,6 +97,7 @@ export class Effects {
       spin: o.spin ?? 0,
       face: !!o.face,
       drag: o.drag ?? 0,
+      alpha: o.alpha ?? 1,
     };
     obj.scale.setScalar(p.s0);
     this.active.push(p);
@@ -113,9 +114,9 @@ export class Effects {
   }
 
   /** 土煙・煙 */
-  puff(x, y, z, { color = 0xffffff, size = 0.6, n = 1, spread = 0.5, up = 1.5 } = {}) {
+  puff(x, y, z, { color = 0xffffff, size = 0.6, n = 1, spread = 0.5, up = 1.5, life = 0.6, alpha = 0.75 } = {}) {
     for (let i = 0; i < n; i++) {
-      this._spawn('puff', x + (Math.random() - 0.5) * spread, y, z + (Math.random() - 0.5) * spread, { life: 0.5 + Math.random() * 0.3, vy: up * (0.5 + Math.random()), vx: (Math.random() - 0.5), vz: (Math.random() - 0.5), s0: size * 0.5, s1: size * 1.6, color, drag: 2 });
+      this._spawn('puff', x + (Math.random() - 0.5) * spread, y, z + (Math.random() - 0.5) * spread, { life: life * (0.8 + Math.random() * 0.5), vy: up * (0.5 + Math.random()), vx: (Math.random() - 0.5), vz: (Math.random() - 0.5), s0: size * 0.5, s1: size * 1.6, color, drag: 2, alpha });
     }
   }
 
@@ -208,7 +209,7 @@ export class Effects {
       } else {
         const s = p.s0 + (p.s1 - p.s0) * k;
         o.scale.setScalar(Math.max(0.001, s));
-        o.material.opacity = k > 0.6 ? (1 - k) / 0.4 : 1;
+        o.material.opacity = p.alpha * (k > 0.6 ? (1 - k) / 0.4 : 1);
         if (p.spin) {
           o.rotation.x += p.spin * dt;
           o.rotation.y += p.spin * 0.7 * dt;

@@ -20,7 +20,8 @@ export function mount(el, app) {
       h(`div.result-player.player-${PLAYERS[who].color}${r?.winner === who ? '.is-winner' : ''}`, null,
         r?.winner === who ? h('div.crown', null, '👑') : null,
         h('div.avatar', { html: dogAvatar(PLAYERS[who].kind, 96) }),
-        h('div.player-name', null, `${PLAYERS[who].name}（${PLAYERS[who].role}）`, who === me ? h('span.me-badge.inline', null, 'あなた') : null),
+        who === me ? h('span.me-badge.inline', null, 'あなた') : null,
+        h('div.player-name', null, `${PLAYERS[who].name}（${PLAYERS[who].role}）`),
         h('div.result-headline', null, r?.[who]?.headline || ''),
         h('div.small', null, r?.[who]?.detail || ''));
 

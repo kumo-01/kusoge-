@@ -50,7 +50,8 @@ const ERROR_TEXT = {
   'unavailable-id': '部屋IDが重複しました。もう一度お試しください。',
   'peer-unavailable': '部屋が見つかりません。ホストが部屋を閉じた可能性があります。',
   webrtc: 'WebRTC の接続でエラーが発生しました。',
-  timeout: '接続がタイムアウトしました。',
+  timeout: '接続がタイムアウトしました。ネットワークが P2P 接続を通していない可能性があります。',
+  closed: 'ホストとの接続を確立できませんでした。部屋が閉じられたか、ネットワークが P2P 接続を通していない可能性があります。',
 };
 export const describePeerError = (type) => ERROR_TEXT[type] || `接続エラー (${type || '不明'})`;
 
@@ -479,10 +480,12 @@ export class GuestNetwork extends Emitter {
         this.peer = new Peer(peerOptions());
         this.peer.on('error', (err) => {
           this.lastError = err?.type;
+          if (err?.type === 'peer-unavailable') this.sawUnavailable = true;
         });
         await waitPeerOpen(this.peer, NET_CONFIG.PEER_OPEN_TIMEOUT_MS);
       }
       if (my !== this.attemptId || this.destroyed) return;
+      this.sawUnavailable = false;
       await this._connectOnce(my);
     } catch (err) {
       if (my !== this.attemptId || this.destroyed) return;
@@ -594,6 +597,7 @@ export class GuestNetwork extends Emitter {
 
   _fail(kind, reason) {
     clearTimeout(this._retryTimer);
+    if (kind === 'unreachable' && this.sawUnavailable) reason = 'peer-unavailable';
     this._setState('failed');
     this.emit('failed', { kind, reason });
   }

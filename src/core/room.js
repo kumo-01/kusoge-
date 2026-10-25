@@ -108,7 +108,6 @@ export class HostRoom extends Emitter {
   _guestConnected({ rejoin, replaced }) {
     this.sound.play('join');
     this._toast(rejoin ? 'ゲストが戻ってきました！' : 'ゲストが参加しました！');
-    this.lastGuestMsgAt = now();
     const s = this.state;
     if (s.screen === 'lobby') s.screen = 'home';
     if (s.screen === 'ready') this._resetReady();
@@ -120,6 +119,7 @@ export class HostRoom extends Emitter {
     } else {
       s.guest = 'connected';
     }
+    this.lastGuestMsgAt = now(); // 巻き戻し（古い接続の最終受信時刻を使う）の後で更新する
     this._changed();
   }
 
