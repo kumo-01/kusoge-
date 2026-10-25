@@ -1,0 +1,20 @@
+{
+  "name": "wanwan-minigames",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "2人専用オンラインミニゲーム集「わんわん爆走カート」",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test \"tests/**/*.test.js\""
+  },
+  "dependencies": {
+    "peerjs": "^1.5.5",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
+  }
+}
