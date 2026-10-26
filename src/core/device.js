@@ -22,10 +22,10 @@ function detect() {
     phone,
     tablet: coarse && !phone,
     // 「かるい」構成で始める端末（シーンの密度を下げ、影も小さくする）
-    low: phone || weak,
+    low: coarse || weak,
     // 描画解像度の上限（CSS ピクセルに対する倍率）
-    maxPixelRatio: phone || weak ? 1 : coarse ? 1.25 : 1.5,
-    shadowSize: phone || weak ? 512 : 1024,
+    maxPixelRatio: coarse || weak ? 1 : 1.5,
+    shadowSize: coarse || weak ? 512 : 1024,
   };
 }
 

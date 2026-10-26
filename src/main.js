@@ -192,8 +192,20 @@ class App {
 
 const app = new App(document.getElementById('app'));
 // iOS Safari のピンチ拡大・縮小はゲーム中は止める（画面が勝手に拡大されないように）
-document.addEventListener('gesturestart', (e) => {
-  if (document.body.dataset.screen === 'game') e.preventDefault();
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+// ダブルタップでの拡大を止める（連続タップを検出して既定動作を止める。入力欄は除く）
+let lastTouchEnd = 0;
+document.addEventListener(
+  'touchend',
+  (e) => {
+    const t = performance.now();
+    if (t - lastTouchEnd < 350 && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) e.preventDefault();
+    lastTouchEnd = t;
+  },
+  { passive: false },
+);
+document.addEventListener('dblclick', (e) => {
+  if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
 });
 app.boot();
 // 動作確認用の読み取り専用フック（招待キーや再参加トークンは含めない）

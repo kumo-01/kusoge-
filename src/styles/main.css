@@ -1893,3 +1893,24 @@ body[data-screen='game'] {
     font-size: 0.85rem;
   }
 }
+
+/* 文字の選択・長押しメニュー・ダブルタップ拡大を止める（入力欄だけは選択・コピーできる） */
+html,
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+img,
+svg,
+canvas {
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+}

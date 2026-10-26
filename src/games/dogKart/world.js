@@ -135,7 +135,7 @@ export class World {
     this._buildItemViews();
     this._buildWeather();
 
-    this.setQualityLevel(this.qualityPref === 'light' ? 2 : 0);
+    this.setQualityLevel(this.startLevel());
 
     this.karts = [];
     this.ensureKarts(2);
@@ -1204,7 +1204,14 @@ export class World {
     this.qualityPref = pref;
     setQualityPref(pref);
     this._slowTime = 0;
-    this.setQualityLevel(pref === 'light' ? 2 : 0);
+    this.setQualityLevel(this.startLevel());
+  }
+
+  /** 最初の画質: スマホ・タブレットは影なしから（影は重いので、余裕があれば「高」で戻せる） */
+  startLevel() {
+    if (this.qualityPref === 'light') return 2;
+    if (this.qualityPref === 'high') return 0;
+    return device.low ? 2 : 0;
   }
 
   /** 描画が重い端末では画質を段階的に下げる */
@@ -1217,7 +1224,7 @@ export class World {
     this._ft = this._ft ? this._ft * 0.95 + ft * 0.05 : ft;
     if (this._ft > 24 && this.quality < 4) this._slowTime += ft;
     else this._slowTime = Math.max(0, this._slowTime - ft * 0.5);
-    if (this._slowTime > 2500) {
+    if (this._slowTime > 1500) {
       this._slowTime = 0;
       this._ft = 16; // 変えた直後の様子を見直す
       this.setQualityLevel(this.quality + 1);
