@@ -18,6 +18,9 @@ class Sound {
     const unlock = () => this._ensure();
     window.addEventListener('pointerdown', unlock, { capture: true });
     window.addEventListener('keydown', unlock, { capture: true });
+    // iOS は touchend / click の中でないと音が出せるようにならない
+    window.addEventListener('touchend', unlock, { capture: true });
+    window.addEventListener('click', unlock, { capture: true });
   }
 
   _ensure() {

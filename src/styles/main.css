@@ -50,6 +50,7 @@ body[data-screen='game'] {
 
 #app {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -1310,10 +1311,14 @@ body[data-screen='game'] .toasts {
   background: repeating-conic-gradient(from 0deg at 50% 55%, rgba(255, 255, 255, 0.22) 0deg 1.2deg, transparent 1.2deg 9deg);
   -webkit-mask-image: radial-gradient(ellipse at 50% 55%, transparent 42%, #000 85%);
   mask-image: radial-gradient(ellipse at 50% 55%, transparent 42%, #000 85%);
-  animation: speedlines 0.25s steps(3) infinite;
+  will-change: opacity;
 }
 .hud-speedlines.on {
   opacity: 0.8;
+  animation: speedlines 0.25s steps(3) infinite;
+}
+.is-touch .hud-speedlines.on {
+  animation: none; /* スマホでは全面の再描画を避ける */
 }
 .hud-speedlines.boost {
   opacity: 1;
@@ -1503,6 +1508,388 @@ body[data-screen='game'] .toasts {
     transform: scale(0.8);
   }
   .hud-rain-btn {
+    font-size: 0.85rem;
+  }
+}
+
+/* ---------- スマホ・タブレット対応 ---------- */
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+body {
+  overscroll-behavior: none;
+}
+button,
+.btn,
+.chip,
+a,
+input,
+select {
+  touch-action: manipulation;
+}
+body[data-screen='game'] {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.game-root {
+  touch-action: none;
+}
+.hud-item-tap,
+.touch-steer,
+.touch-pedals,
+.touch-tools,
+.hud-rotate {
+  display: none;
+}
+.touch-steer,
+.touch-pedals,
+.touch-tools,
+.touch-small,
+.touch-pedal,
+.hud-rotate {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.kart-hud.is-touch {
+  --edge-l: max(14px, env(safe-area-inset-left));
+  --edge-r: max(14px, env(safe-area-inset-right));
+  --edge-b: max(14px, env(safe-area-inset-bottom));
+  --edge-t: max(10px, env(safe-area-inset-top));
+  --pedal: min(104px, 26vh);
+}
+.is-touch .touch-steer {
+  position: absolute;
+  left: var(--edge-l);
+  bottom: var(--edge-b);
+  width: min(310px, 44vw);
+  height: min(128px, 31vh);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  pointer-events: auto;
+}
+.touch-key {
+  pointer-events: none;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.26);
+  border: 4px solid rgba(255, 255, 255, 0.8);
+  display: grid;
+  place-items: center;
+  font-size: 2.6rem;
+  line-height: 1;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.15);
+  transition: transform 0.05s;
+}
+.touch-key.down {
+  background: rgba(255, 210, 63, 0.85);
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+}
+.is-touch .touch-pedals {
+  position: absolute;
+  right: var(--edge-r);
+  bottom: var(--edge-b);
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  pointer-events: auto;
+}
+.touch-pedal {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 5px solid rgba(255, 255, 255, 0.9);
+  font-size: 0.95rem;
+  text-align: center;
+  line-height: 1.2;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.15);
+  transition: transform 0.05s;
+}
+.tp-accel {
+  width: var(--pedal);
+  height: var(--pedal);
+  background: rgba(34, 181, 115, 0.78);
+}
+.tp-brake {
+  width: calc(var(--pedal) * 0.76);
+  height: calc(var(--pedal) * 0.76);
+  background: rgba(255, 77, 94, 0.75);
+}
+.touch-pedals.auto .tp-accel {
+  display: none;
+}
+.touch-pedals.auto .tp-brake {
+  width: calc(var(--pedal) * 0.9);
+  height: calc(var(--pedal) * 0.9);
+}
+.touch-pedal.down {
+  transform: translateY(4px);
+  filter: brightness(1.25);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+}
+.is-touch .touch-tools {
+  position: absolute;
+  left: var(--edge-l);
+  top: 82px;
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+.touch-small {
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: rgba(40, 30, 60, 0.5);
+  border: 3px solid rgba(255, 255, 255, 0.75);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+.touch-small small {
+  font-size: 0.55rem;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+.touch-small.on {
+  background: rgba(34, 181, 115, 0.8);
+}
+.touch-small.down {
+  background: rgba(255, 210, 63, 0.9);
+}
+
+/* タッチ時の HUD の配置 */
+.is-touch .hud-tl {
+  top: var(--edge-t);
+  left: var(--edge-l);
+  gap: 8px;
+}
+.is-touch .hud-rank-wrap {
+  width: 62px;
+  height: 62px;
+}
+.is-touch .hud-rank {
+  font-size: 2.2rem;
+}
+.is-touch .hud-rank small {
+  font-size: 0.8rem;
+}
+.is-touch .hud-lt {
+  padding: 3px 10px;
+}
+.is-touch .hud-lap {
+  font-size: 1.1rem;
+}
+.is-touch .hud-time {
+  font-size: 0.85rem;
+}
+.is-touch .hud-bl {
+  left: 50%;
+  bottom: auto;
+  top: var(--edge-t);
+  transform: translateX(-50%);
+  min-width: 0;
+  padding: 2px 12px 4px;
+  border-radius: 14px;
+}
+.is-touch .hud-speed {
+  font-size: 1.5rem;
+}
+.is-touch .hud-speed-bar {
+  display: none;
+}
+.is-touch .hud-tr {
+  top: 58px;
+  right: var(--edge-r);
+  gap: 6px;
+}
+.is-touch .hud-map {
+  width: 90px;
+  height: 90px;
+  border-radius: 14px;
+}
+.is-touch .hud-net {
+  font-size: 0.65rem;
+}
+.hud-cam-btn .ic {
+  margin-right: 0.3em;
+}
+.touch-tools .hud-cam-btn .ic {
+  margin: 0 0 3px;
+  font-size: 1.25rem;
+}
+.touch-tools .hud-cam-btn {
+  width: 62px;
+  height: 54px;
+  padding: 0 2px;
+  border-radius: 16px;
+  font-size: 0.58rem;
+  line-height: 1;
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  background: rgba(40, 30, 60, 0.5);
+  color: #fff;
+  border: 3px solid rgba(255, 255, 255, 0.75);
+}
+.is-touch .hud-br {
+  right: var(--edge-r);
+  bottom: calc(var(--edge-b) + var(--pedal) + 14px);
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: flex-end;
+  gap: 10px;
+}
+.is-touch .hud-item {
+  width: min(82px, 21vh);
+  height: min(82px, 21vh);
+  pointer-events: auto;
+  touch-action: none;
+  border-width: 4px;
+}
+.is-touch .hud-item-icon {
+  font-size: 2.2rem;
+}
+.is-touch .hud-item-name {
+  font-size: 0.6rem;
+}
+.is-touch .hud-item-key {
+  display: none;
+}
+.is-touch .hud-item-tap {
+  display: block;
+  position: absolute;
+  bottom: -10px;
+  background: var(--ink);
+  border-radius: 999px;
+  padding: 0 0.6em;
+  font-size: 0.65rem;
+  text-shadow: none;
+}
+.is-touch .hud-bc {
+  display: none;
+}
+.is-touch .hud-rain-btn {
+  pointer-events: auto;
+}
+.is-touch .hud-rain-btn small {
+  display: none;
+}
+.is-phone .hud-cam-btn {
+  padding: 0.2em 0.7em;
+  font-size: 0.7rem;
+}
+.hud-rotate {
+  position: absolute;
+  top: 150px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 28px);
+  padding: 0.4em 1em;
+  border-radius: 999px;
+  background: rgba(40, 30, 60, 0.75);
+  font-size: 0.8rem;
+  pointer-events: auto;
+  text-align: center;
+}
+.hud-rotate[hidden] {
+  display: none !important;
+}
+@media (orientation: portrait) {
+  .is-touch .hud-rotate:not([hidden]) {
+    display: block;
+  }
+}
+
+/* 縦長・小さい画面 */
+@media (max-width: 720px) {
+  .game-topbar {
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 62vw;
+    gap: 6px;
+  }
+  .game-topbar .btn-small {
+    padding: 0.25em 0.7em;
+    font-size: 0.78rem;
+  }
+}
+@media (orientation: portrait) and (max-width: 720px) {
+  .is-touch .hud-tr {
+    top: 146px;
+  }
+  .is-touch .hud-map {
+    width: 96px;
+    height: 96px;
+  }
+  .is-touch .touch-steer {
+    width: min(300px, 52vw);
+  }
+  .is-touch .touch-tools {
+    top: 82px;
+  }
+  .is-touch .hud-bl {
+    left: var(--edge-l);
+    top: 146px;
+    transform: none;
+  }
+  .is-touch .hud-rotate {
+    top: 284px;
+  }
+}
+@media (max-height: 430px) {
+  .hud-countdown {
+    font-size: 5rem;
+  }
+  .hud-flash {
+    font-size: 1.6rem;
+  }
+  .resume-countdown {
+    font-size: 6rem;
+  }
+}
+@media (max-width: 720px), (max-height: 430px) {
+  .hud-countdown {
+    font-size: 5.5rem;
+    -webkit-text-stroke-width: 3px;
+  }
+  .hud-flash {
+    font-size: 1.9rem;
+    -webkit-text-stroke-width: 2px;
+    white-space: normal;
+    text-wrap: balance;
+    text-align: center;
+    max-width: 94vw;
+    font-size: clamp(1.3rem, 6vw, 1.9rem);
+  }
+  .hud-flash.go {
+    font-size: 4.5rem;
+  }
+  .hud-flash.goal {
+    font-size: 3rem;
+  }
+  .hud-flash.good,
+  .hud-flash.bad {
+    font-size: 1.6rem;
+  }
+  .hud-cd,
+  .hud-center {
+    top: 20%;
+  }
+  .hud-warn {
     font-size: 0.85rem;
   }
 }

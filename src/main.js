@@ -191,6 +191,10 @@ class App {
 }
 
 const app = new App(document.getElementById('app'));
+// iOS Safari のピンチ拡大・縮小はゲーム中は止める（画面が勝手に拡大されないように）
+document.addEventListener('gesturestart', (e) => {
+  if (document.body.dataset.screen === 'game') e.preventDefault();
+});
 app.boot();
 // 動作確認用の読み取り専用フック（招待キーや再参加トークンは含めない）
 window.__wanwan = {

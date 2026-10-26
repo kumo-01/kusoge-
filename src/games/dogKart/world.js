@@ -6,6 +6,7 @@ import { KartView } from './kart.js';
 import { Effects } from './effects.js';
 import { buildDog } from './dog.js';
 import { PAD } from './constants.js';
+import { device, getQualityPref, setQualityPref } from '../../core/device.js';
 
 // 背景配置用の決定的な乱数（ホストとゲストで同じ景色になる）
 function seeded(seed) {
@@ -88,16 +89,16 @@ export class World {
     this.disposables = [];
     this.container = container;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    // 軽量化: 高解像度画面でも描画解像度は 1.5 倍まで。重ければ render() で自動的に下げる
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
-    renderer.setPixelRatio(this.pixelRatio);
+    // 画質: 端末に合わせて始め、重ければ render() で自動的に下げる（'high' のときは下げない）
+    this.qualityPref = getQualityPref();
+    this.lite = device.low || this.qualityPref === 'light'; // シーンの密度を下げる（木・雲・応援犬・天気の粒）
+    const renderer = new THREE.WebGLRenderer({ antialias: this.qualityPref !== 'light', powerPreference: 'high-performance' });
     this.quality = 0;
     this._slowTime = 0;
     this._lastRender = 0;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.shadowMap.type = device.low ? THREE.BasicShadowMap : THREE.PCFShadowMap;
     renderer.domElement.className = 'game-canvas';
     container.append(renderer.domElement);
     this.renderer = renderer;
@@ -115,7 +116,7 @@ export class World {
     scene.add(this.hemi);
     const sun = new THREE.DirectionalLight(0xfff4e0, 1.7);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(device.shadowSize, device.shadowSize);
     const sc = sun.shadow.camera;
     sc.left = -45;
     sc.right = 45;
@@ -133,6 +134,8 @@ export class World {
     this._buildScenery();
     this._buildItemViews();
     this._buildWeather();
+
+    this.setQualityLevel(this.qualityPref === 'light' ? 2 : 0);
 
     this.karts = [];
     this.ensureKarts(2);
@@ -183,7 +186,7 @@ export class World {
     this.cloudMat = cloudMat;
     const puff = this._track(new THREE.IcosahedronGeometry(1, 1));
     this.clouds = [];
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < (this.lite ? 7 : 16); i++) {
       const g = new THREE.Group();
       const n = 3 + Math.floor(rnd() * 4);
       for (let j = 0; j < n; j++) {
@@ -356,33 +359,37 @@ export class World {
       this.scene.add(sh);
     }
 
-    // 壁: 丸いクッションブロックを並べる（InstancedMesh）
-    const blockGeo = this._track(new RoundedBoxGeometry(2.7, 1.2, 0.9, 2, 0.3));
+    // 壁: 丸いクッションブロックを並べる。画面外のかたまりを描かないよう 20 個ずつの InstancedMesh に分ける（影は落とさない）
+    const blockGeo = this._track(new RoundedBoxGeometry(2.7, 1.2, 0.9, 1, 0.3));
     const blockMat = this._track(new THREE.MeshToonMaterial({ color: 0xffffff }));
-    const count = t.n * 2;
-    const blocks = new THREE.InstancedMesh(blockGeo, blockMat, count);
-    blocks.castShadow = true;
-    blocks.receiveShadow = true;
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
+    const one = new THREE.Vector3(1, 1, 1);
+    const pos = new THREE.Vector3();
     const col = new THREE.Color();
     const wallColors = [0xffffff, 0xff7a8a, 0xffffff, 0x6fb6ff];
-    let n = 0;
+    const CHUNK = 20;
     for (const side of [1, -1]) {
-      for (let i = 0; i < t.n; i++) {
-        const nx = t.tz[i];
-        const nz = -t.tx[i];
-        const d = t.wallDist + 0.45;
-        q.setFromAxisAngle(up, Math.atan2(t.tx[i], t.tz[i]) + Math.PI / 2);
-        m4.compose(new THREE.Vector3(t.x[i] + nx * d * side, 0.6, t.z[i] + nz * d * side), q, new THREE.Vector3(1, 1, 1));
-        blocks.setMatrixAt(n, m4);
-        blocks.setColorAt(n, col.set(wallColors[Math.floor(i / 2) % wallColors.length]));
-        n++;
+      for (let i0 = 0; i0 < t.n; i0 += CHUNK) {
+        const cnt = Math.min(CHUNK, t.n - i0);
+        const blocks = new THREE.InstancedMesh(blockGeo, blockMat, cnt);
+        blocks.receiveShadow = true;
+        for (let j = 0; j < cnt; j++) {
+          const i = i0 + j;
+          const nx = t.tz[i];
+          const nz = -t.tx[i];
+          const d = t.wallDist + 0.45;
+          q.setFromAxisAngle(up, Math.atan2(t.tx[i], t.tz[i]) + Math.PI / 2);
+          m4.compose(pos.set(t.x[i] + nx * d * side, 0.6, t.z[i] + nz * d * side), q, one);
+          blocks.setMatrixAt(j, m4);
+          blocks.setColorAt(j, col.set(wallColors[Math.floor(i / 2) % wallColors.length]));
+        }
+        blocks.instanceMatrix.needsUpdate = true;
+        blocks.computeBoundingSphere();
+        this.scene.add(blocks);
       }
     }
-    blocks.instanceMatrix.needsUpdate = true;
-    this.scene.add(blocks);
 
     // スタートライン（チェッカー）
     const checker = this._track(
@@ -545,7 +552,7 @@ export class World {
 
     // 木（草原: 丸い木 / 海: ヤシの木 / 雪山: もみの木）
     const spots = [];
-    for (let tries = 0; tries < 3000 && spots.length < 240; tries++) {
+    for (let tries = 0; tries < 3000 && spots.length < (this.lite ? 90 : 180); tries++) {
       const [x, z] = inArea(100);
       if (!this._farFromTrack(x, z, 6) || !this._onLand(x, z, 8)) continue;
       if (spots.some(([a, b]) => (a - x) ** 2 + (b - z) ** 2 < 64)) continue;
@@ -663,7 +670,7 @@ export class World {
 
     // 応援する犬たち（スタート付近の外側）
     this.fans = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < (this.lite ? 2 : 4); i++) {
       const p = t.pointAt(-20 + i * 12, -(t.wallDist + 4.5));
       const dog = buildDog(th.fans[i]);
       dog.group.position.set(p.x, 0, p.z);
@@ -1072,7 +1079,7 @@ export class World {
     this._wbox = box;
     const rnd = seeded(99);
     // 雨: 細い線を落とす。描く本数は雨の強さで変える
-    const N = 900;
+    const N = this.lite ? 450 : 900;
     this._drops = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) this._drops.set([(rnd() - 0.5) * box.w, rnd() * box.h, (rnd() - 0.5) * box.w], i * 3);
     const geo = this._track(new THREE.BufferGeometry());
@@ -1084,7 +1091,7 @@ export class World {
     this.scene.add(this.rainLines);
     // 雪: ゆっくり舞う点
     if (this.theme.snowfall) {
-      const M = 700;
+      const M = this.lite ? 350 : 700;
       this._flakes = new Float32Array(M * 3);
       for (let i = 0; i < M; i++) this._flakes.set([(rnd() - 0.5) * box.w * 1.4, rnd() * box.h, (rnd() - 0.5) * box.w * 1.4], i * 3);
       const fg = this._track(new THREE.BufferGeometry());
@@ -1180,22 +1187,40 @@ export class World {
     }
   }
 
-  /** 描画が重い端末では画質を段階的に下げる（解像度 → 影 → さらに解像度） */
+  /** 画質の段階: 0 = 端末の上限の解像度＋影 / 1 = 解像度 1 / 2 = 影なし / 3 = 解像度 0.75 / 4 = 解像度 0.6 */
+  setQualityLevel(level) {
+    this.quality = level;
+    const cap = this.qualityPref === 'high' ? 2 : device.maxPixelRatio; // 高画質を選んだときは端末の標準より細かく描く
+    const dpr = window.devicePixelRatio || 1;
+    const pr = [Math.min(dpr, cap), Math.min(dpr, cap, 1), Math.min(dpr, 1), 0.75, 0.6][level];
+    this.pixelRatio = pr;
+    this.renderer.setPixelRatio(pr);
+    this.sun.castShadow = level < 2;
+    this.resize();
+  }
+
+  /** 画質の設定を切り替える（'auto' / 'high' / 'light'）。設定は端末に保存する */
+  setQualityPref(pref) {
+    this.qualityPref = pref;
+    setQualityPref(pref);
+    this._slowTime = 0;
+    this.setQualityLevel(pref === 'light' ? 2 : 0);
+  }
+
+  /** 描画が重い端末では画質を段階的に下げる */
   _adaptQuality() {
     const t = performance.now();
     const ft = this._lastRender ? t - this._lastRender : 16;
     this._lastRender = t;
     if (ft > 200) return; // タブ切り替え直後などは数えない
+    if (this.qualityPref === 'high') return;
     this._ft = this._ft ? this._ft * 0.95 + ft * 0.05 : ft;
-    if (this._ft > 24 && this.quality < 3) this._slowTime += ft;
+    if (this._ft > 24 && this.quality < 4) this._slowTime += ft;
     else this._slowTime = Math.max(0, this._slowTime - ft * 0.5);
-    if (this._slowTime > 3000) {
+    if (this._slowTime > 2500) {
       this._slowTime = 0;
-      this.quality++;
-      if (this.quality === 1) this.renderer.setPixelRatio((this.pixelRatio = 1));
-      if (this.quality === 2) this.sun.castShadow = false;
-      if (this.quality === 3) this.renderer.setPixelRatio((this.pixelRatio = 0.75));
-      this.resize();
+      this._ft = 16; // 変えた直後の様子を見直す
+      this.setQualityLevel(this.quality + 1);
     }
   }
 

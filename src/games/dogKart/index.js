@@ -14,6 +14,7 @@ import { RACE, NET, IN, ITEMS, KART, RAIN } from './constants.js';
 import { lerp, lerpAngle, angleDiff } from '../../core/util.js';
 import { spinAngleOf } from './kart.js';
 import { stepTiming } from './timing.js';
+import { keepAwake, getQualityPref } from '../../core/device.js';
 
 const CAMERA_KEY = 'wanwan.kartCamera';
 
@@ -128,6 +129,15 @@ class DogKartGame {
       this.rainPressed = true;
     };
     this.world = null;
+    this.hud.setQualityLabel(getQualityPref());
+    this.hud.onQuality = () => {
+      const order = ['auto', 'high', 'light'];
+      const next = order[(order.indexOf(this.world?.qualityPref || getQualityPref()) + 1) % order.length];
+      this.world?.setQualityPref(next);
+      this.hud.setQualityLabel(next);
+      this.hud.flash(next === 'high' ? '高画質（自動で下げません）' : next === 'light' ? 'かるい画質（影なし・低解像度）' : '画質: 自動（端末に合わせて調整）', 'plain', 1400);
+    };
+    this._releaseAwake = keepAwake(); // 遊んでいる間は画面が暗くならないように
     try {
       this.world = new World(ctx.container, this.track, this.sim.boxPos);
       this.cam = new ChaseCamera(this.world.camera);
@@ -174,7 +184,7 @@ class DogKartGame {
     // 画面を押す（クリック・タップ）とタイミングブースト。ボタンの上は除く
     this._onPointer = (e) => {
       if (this.paused || e.button > 0) return;
-      if (e.target instanceof Element && e.target.closest('button, a, input')) return;
+      if (e.target instanceof Element && e.target.closest('button, a, input, [data-ctl]')) return;
       this.tapPressed = true;
     };
     ctx.container.addEventListener('pointerdown', this._onPointer);
@@ -208,6 +218,7 @@ class DogKartGame {
     this.tapPressed = false;
     this.rainPressed = false;
     if (i.consume('KeyC')) this.toggleCamera();
+    b |= this.hud.touch.bits();
     return b;
   }
 
@@ -701,7 +712,7 @@ class DogKartGame {
     const rainReady = s.phase === 'racing' && !s.ru && onFinal && !sk.fin && rank === s.karts.length;
     if (rainReady && !this.rainReady && !this.paused) {
       this.sound.play('rainReady');
-      this.hud.flash('☔ 最下位の特権！ Q か ☔ で豪雨をよべる', 'final', 1800);
+      this.hud.flash(this.hud.touch.visible ? '☔ 最下位の特権！ ボタンで豪雨をよべる' : '☔ 最下位の特権！ Q か ☔ で豪雨をよべる', 'final', 1800);
     }
     this.rainReady = rainReady;
     // 雨の強さ（降り始めと止み際はなめらかに）
@@ -744,6 +755,7 @@ class DogKartGame {
     this.sound.setEngine(false);
     this.sound.setRain(0);
     this.ctx.container.removeEventListener('pointerdown', this._onPointer);
+    this._releaseAwake?.();
     this.world?.dispose();
     this.world = null;
     this.hud.dispose();

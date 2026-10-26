@@ -67,6 +67,8 @@ class Music {
     const unlock = () => this.wanted && !this._timer && this.play(this.wanted);
     window.addEventListener('pointerdown', unlock, { capture: true });
     window.addEventListener('keydown', unlock, { capture: true });
+    window.addEventListener('touchend', unlock, { capture: true });
+    window.addEventListener('click', unlock, { capture: true });
   }
 
   setMuted(m) {

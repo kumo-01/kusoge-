@@ -1,6 +1,7 @@
 // カートのモデルと見た目のアニメーション（犬が運転席に乗る）
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildDog } from './dog.js';
 import { KART } from './constants.js';
 
@@ -72,13 +73,28 @@ export class KartView {
       return o;
     };
 
+    // 動かない部品は材質ごとに 1 つのメッシュにまとめる（描画の呼び出しを減らす）
+    const statics = new Map();
+    const tmpM = new THREE.Matrix4();
+    const tmpQ = new THREE.Quaternion();
+    const tmpE = new THREE.Euler();
+    const tmpV = new THREE.Vector3();
+    const tmpS = new THREE.Vector3(1, 1, 1);
+    const addS = (geo, mat, pos, rot) => {
+      const g = geo.index ? geo.toNonIndexed() : geo.clone();
+      tmpE.set(...(rot || [0, 0, 0]));
+      g.applyMatrix4(tmpM.compose(tmpV.set(...pos), tmpQ.setFromEuler(tmpE), tmpS));
+      if (!statics.has(mat)) statics.set(mat, []);
+      statics.get(mat).push(g);
+    };
+
     // 車体
-    add(once('g-chassis', () => new RoundedBoxGeometry(1.9, 0.55, 2.9, 3, 0.22)), main, [0, 0.55, 0]);
-    add(once('g-nose', () => new RoundedBoxGeometry(1.5, 0.42, 0.9, 3, 0.18)), main, [0, 0.5, 1.55]);
-    add(once('g-bumper', () => new RoundedBoxGeometry(1.7, 0.28, 0.32, 2, 0.12)), black, [0, 0.36, 2.0]);
-    add(once('g-stripe', () => new THREE.BoxGeometry(0.4, 0.05, 2.6)), accent, [0, 0.84, 0.05]);
-    add(once('g-sidepod', () => new RoundedBoxGeometry(0.35, 0.4, 1.8, 2, 0.14)), dark, [-1.02, 0.5, -0.1]);
-    add(once('g-sidepod', () => null), dark, [1.02, 0.5, -0.1]);
+    addS(once('g-chassis', () => new RoundedBoxGeometry(1.9, 0.55, 2.9, 3, 0.22)), main, [0, 0.55, 0]);
+    addS(once('g-nose', () => new RoundedBoxGeometry(1.5, 0.42, 0.9, 3, 0.18)), main, [0, 0.5, 1.55]);
+    addS(once('g-bumper', () => new RoundedBoxGeometry(1.7, 0.28, 0.32, 2, 0.12)), black, [0, 0.36, 2.0]);
+    addS(once('g-stripe', () => new THREE.BoxGeometry(0.4, 0.05, 2.6)), accent, [0, 0.84, 0.05]);
+    addS(once('g-sidepod', () => new RoundedBoxGeometry(0.35, 0.4, 1.8, 2, 0.14)), dark, [-1.02, 0.5, -0.1]);
+    addS(once('g-sidepod', () => null), dark, [1.02, 0.5, -0.1]);
     // ボンネットの肉球エンブレム
     const emblem = new THREE.Mesh(once('g-emblem', () => new THREE.CircleGeometry(0.32, 24)), new THREE.MeshBasicMaterial({ map: pawTexture(pal.css), transparent: true }));
     emblem.rotation.x = -Math.PI / 2 + 0.25;
@@ -86,18 +102,18 @@ export class KartView {
     this.body.add(emblem);
     this._mats.push(emblem.material);
     // シート
-    add(once('g-seat', () => new RoundedBoxGeometry(1.1, 0.9, 0.3, 2, 0.12)), dark, [0, 1.1, -0.95], [-0.15, 0, 0]);
-    add(once('g-cushion', () => new RoundedBoxGeometry(1.0, 0.2, 0.9, 2, 0.08)), dark, [0, 0.86, -0.45]);
+    addS(once('g-seat', () => new RoundedBoxGeometry(1.1, 0.9, 0.3, 2, 0.12)), dark, [0, 1.1, -0.95], [-0.15, 0, 0]);
+    addS(once('g-cushion', () => new RoundedBoxGeometry(1.0, 0.2, 0.9, 2, 0.08)), dark, [0, 0.86, -0.45]);
     // スポイラー
-    add(once('g-post', () => new THREE.CylinderGeometry(0.05, 0.05, 0.5, 6)), black, [-0.55, 1.0, -1.35]);
-    add(once('g-post', () => null), black, [0.55, 1.0, -1.35]);
-    add(once('g-wing', () => new RoundedBoxGeometry(1.9, 0.1, 0.5, 2, 0.04)), accent, [0, 1.26, -1.4]);
+    addS(once('g-post', () => new THREE.CylinderGeometry(0.05, 0.05, 0.5, 6)), black, [-0.55, 1.0, -1.35]);
+    addS(once('g-post', () => null), black, [0.55, 1.0, -1.35]);
+    addS(once('g-wing', () => new RoundedBoxGeometry(1.9, 0.1, 0.5, 2, 0.04)), accent, [0, 1.26, -1.4]);
     // マフラー
-    for (const sx of [-0.45, 0.45]) add(once('g-pipe', () => new THREE.CylinderGeometry(0.11, 0.13, 0.5, 10)), chrome, [sx, 0.55, -1.6], [Math.PI / 2, 0, 0]);
+    for (const sx of [-0.45, 0.45]) addS(once('g-pipe', () => new THREE.CylinderGeometry(0.11, 0.13, 0.5, 10)), chrome, [sx, 0.55, -1.6], [Math.PI / 2, 0, 0]);
     // ライト
-    for (const sx of [-0.5, 0.5]) add(once('g-light', () => new THREE.SphereGeometry(0.14, 10, 8)), once('m-light', () => new THREE.MeshBasicMaterial({ color: 0xfff6b0 })), [sx, 0.6, 1.98]);
+    for (const sx of [-0.5, 0.5]) addS(once('g-light', () => new THREE.SphereGeometry(0.14, 10, 8)), once('m-light', () => new THREE.MeshBasicMaterial({ color: 0xfff6b0 })), [sx, 0.6, 1.98]);
     // ハンドル
-    add(once('g-column', () => new THREE.CylinderGeometry(0.05, 0.05, 0.6, 6)), black, [0, 0.95, 0.55], [0.9, 0, 0]);
+    addS(once('g-column', () => new THREE.CylinderGeometry(0.05, 0.05, 0.6, 6)), black, [0, 0.95, 0.55], [0.9, 0, 0]);
     this.wheel = add(once('g-steer', () => new THREE.TorusGeometry(0.3, 0.06, 8, 18)), black, [0, 1.08, 0.33], [-0.65, 0, 0]);
     add(once('g-hub', () => new THREE.CylinderGeometry(0.08, 0.08, 0.06, 8)), accent, [0, 0, 0], [Math.PI / 2, 0, 0], this.wheel);
 
@@ -126,6 +142,16 @@ export class KartView {
       tire.receiveShadow = false;
       this.wheels.push(spin);
       if (sz > 0) this.frontPivots.push(pivot);
+    }
+
+    this._geos = [];
+    for (const [mat, list] of statics) {
+      const merged = mergeGeometries(list);
+      for (const g of list) g.dispose();
+      this._geos.push(merged);
+      const m = new THREE.Mesh(merged, mat);
+      m.castShadow = true;
+      this.body.add(m);
     }
 
     // ブーストの炎
@@ -275,5 +301,6 @@ export class KartView {
 
   dispose() {
     for (const m of this._mats) m.dispose();
+    for (const g of this._geos) g.dispose();
   }
 }

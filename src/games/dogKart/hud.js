@@ -2,6 +2,8 @@
 import { h, formatTime } from '../../core/util.js';
 import { ITEM_INFO } from './items.js';
 import { RACE, TIMING } from './constants.js';
+import { TouchControls } from './touch.js';
+import { device } from '../../core/device.js';
 
 export const KART_COLORS = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#ffc93c', '#22b573', '#8a63ff'];
 
@@ -18,15 +20,22 @@ export class Hud {
     this.speedBar = h('div.hud-speed-bar-fill');
     this.itemIcon = h('div.hud-item-icon', null, '');
     this.itemName = h('div.hud-item-name', null, 'アイテムなし');
-    this.itemSlot = h('div.hud-item', null, this.itemIcon, this.itemName, h('div.hud-item-key', null, 'Space'));
+    this.itemSlot = h('div.hud-item', { 'data-ctl': '', onpointerdown: (e) => { e.preventDefault(); this.touch?.pressItem(); } }, this.itemIcon, this.itemName, h('div.hud-item-key', null, 'Space'), h('div.hud-item-tap', null, 'タップ'));
     this.net = h('div.hud-net', null, '');
     this.center = h('div.hud-center');
     this.cdBox = h('div.hud-cd');
     this.warn = h('div.hud-warn', { hidden: true }, '⚠ 逆走してるワン！');
     this.boostEdge = h('div.hud-boost-edge');
     this.speedLines = h('div.hud-speedlines');
-    this.camBtn = h('button.hud-cam-btn', { onclick: () => this.onCameraToggle?.(), title: 'カメラ切り替え（C）' }, '🎥 三人称');
+    this.camBtn = h('button.hud-cam-btn', { onclick: () => this.onCameraToggle?.(), title: 'カメラ切り替え（C）' }, '');
+    this.camBtn.append(h('span.ic', null, '🎥'), (this.camLabel = h('span.lb', null, '三人称')));
     this.rankTotal = h('div.hud-rank-total', null, '/2');
+    this.qualityBtn = h('button.hud-cam-btn.hud-quality-btn', { onclick: () => this.onQuality?.(), title: '画質の切り替え' }, '');
+    this.qualityBtn.append(h('span.ic', null, '⚙'), (this.qualityLabel = h('span.lb', null, '画質: 自動')));
+    this.fsBtn = document.fullscreenEnabled || document.webkitFullscreenEnabled
+      ? h('button.hud-cam-btn.hud-fs-btn', { onclick: () => this._toggleFullscreen(), title: '全画面' }, h('span.ic', null, '⛶'), h('span.lb', null, '全画面'))
+      : null;
+    this.rotateHint = h('div.hud-rotate', { 'data-ctl': '', onpointerdown: (e) => { e.preventDefault(); this.rotateHint.hidden = true; } }, '📱 横向きにすると遊びやすいワン！（タップで閉じる）');
     this.mapCanvas = h('canvas.hud-map', { width: 180, height: 180 });
     // タイミングブースト: 外側のリングが縮んで的に重なったら押す
     this.timingRing = h('div.hud-timing-ring');
@@ -42,14 +51,16 @@ export class Hud {
     this.thunderEl = h('div.hud-thunder');
     this.fallback = h('div.hud-fallback', { hidden: true }, '3D表示を開始できなかったため、簡易表示で遊んでいます');
 
+    this.trBox = h('div.hud-tr', null, this.net, this.mapCanvas, this.camBtn, this.qualityBtn, this.fsBtn);
     this.root.append(
       this.speedLines,
       this.boostEdge,
       h('div.hud-tl', null, h('div.hud-rank-wrap', null, this.rank, this.rankTotal), h('div.hud-lt', null, this.lap, this.time)),
-      h('div.hud-tr', null, this.net, this.mapCanvas, this.camBtn),
+      this.trBox,
       h('div.hud-bl', null, h('div.hud-speed', null, this.speed, h('span', null, 'わんkm/h')), h('div.hud-speed-bar', null, this.speedBar)),
       h('div.hud-br', null, this.rainBtn, this.itemSlot),
       h('div.hud-bc', null, 'W/↑ アクセル　S/↓ ブレーキ　A D/← → ハンドル　Space アイテム　R 復帰　C カメラ　Enter/タップ タイミング　Q 豪雨'),
+      this.rotateHint,
       this.thunderEl,
       this.wetBadge,
       this.timing,
@@ -58,9 +69,43 @@ export class Hud {
       this.warn,
       this.fallback,
     );
+    // タッチ操作（スマホ・タブレット。PC でも画面を触ったら出す）
+    this.touch = new TouchControls(this.root);
+    this.setTouch(device.coarse);
+    this._onTouchPointer = (e) => {
+      if (e.pointerType === 'touch' && !this.touch.visible) this.setTouch(true);
+    };
+    window.addEventListener('pointerdown', this._onTouchPointer, { capture: true });
     container.append(this.root);
     this._buildMapBase();
     this._mapTimer = 0;
+  }
+
+  setTouch(on) {
+    this.touch.setVisible(on);
+    this.root.classList.toggle('is-touch', on);
+    // タッチ操作のときはカメラ・画質・全画面のボタンを左上の道具列へ（右側は地図とアイテムで埋まるため）
+    const host = on ? this.touch.tools : this.trBox;
+    for (const b of [this.camBtn, this.qualityBtn, this.fsBtn]) if (b) host.append(b);
+    this.root.classList.toggle('is-phone', on && device.phone);
+  }
+
+  _toggleFullscreen() {
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      else {
+        const el = document.documentElement;
+        Promise.resolve((el.requestFullscreen || el.webkitRequestFullscreen).call(el))
+          .then(() => screen.orientation?.lock?.('landscape')) // 対応端末では横向きに固定
+          .catch(() => {});
+      }
+    } catch {
+      /* 全画面にできなくても遊べる */
+    }
+  }
+
+  setQualityLabel(pref) {
+    this.qualityLabel.textContent = `画質:${pref === 'high' ? '高' : pref === 'light' ? 'かるい' : '自動'}`;
   }
 
   _buildMapBase() {
@@ -123,7 +168,11 @@ export class Hud {
     this._set('time', this.time, formatTime(Math.max(0, d.time)));
     const kmh = Math.round(Math.abs(d.speed) * 3.6);
     this._set('speed', this.speed, String(kmh));
-    this.speedBar.style.width = `${Math.min(100, (Math.abs(d.speed) / 40) * 100)}%`;
+    const bar = Math.round(Math.min(100, (Math.abs(d.speed) / 40) * 100));
+    if (bar !== this._last.bar) {
+      this._last.bar = bar;
+      this.speedBar.style.width = `${bar}%`;
+    }
     this.speedBar.classList.toggle('boost', d.boost > 0);
     this.boostEdge.classList.toggle('on', d.boost > 0);
 
@@ -143,7 +192,10 @@ export class Hud {
     this.itemSlot.classList.toggle('rolling', d.roll > 0);
 
     this._set('net', this.net, d.netText);
-    this.net.className = `hud-net tone-${d.netTone}`;
+    if (d.netTone !== this._last.tone) {
+      this._last.tone = d.netTone;
+      this.net.className = `hud-net tone-${d.netTone}`;
+    }
     this.warn.hidden = !(d.wrong > 1);
     this.wetBadge.hidden = !(d.wet > 0);
     this.rainBtn.hidden = !d.rainReady;
@@ -153,7 +205,7 @@ export class Hud {
     this.timing.hidden = !(tw > 0);
     if (tw > 0) {
       const scale = 1 + ((tw - TIMING.SWEET) / (TIMING.WINDOW - TIMING.SWEET)) * 1.6;
-      this.timingRing.style.transform = `scale(${Math.max(0.15, scale).toFixed(3)})`;
+      this.timingRing.style.transform = `scale(${Math.max(0.15, scale).toFixed(2)})`;
       this.timing.classList.toggle('near', Math.abs(tw - TIMING.SWEET) <= TIMING.GOOD);
       this.timing.classList.toggle('just', Math.abs(tw - TIMING.SWEET) <= TIMING.PERFECT);
     }
@@ -172,7 +224,7 @@ export class Hud {
 
     this._mapTimer -= dt;
     if (this._mapTimer <= 0) {
-      this._mapTimer = 1 / 15;
+      this._mapTimer = device.low ? 1 / 8 : 1 / 15;
       this._drawMap(d.karts);
     }
   }
@@ -195,7 +247,7 @@ export class Hud {
   }
 
   setCameraMode(mode) {
-    this.camBtn.textContent = mode === 'first' ? '🎥 一人称' : '🎥 三人称';
+    this.camLabel.textContent = mode === 'first' ? '一人称' : '三人称';
   }
 
   /** タイミングブーストの結果。q: 2 ジャスト / 1 ナイス / 0 ずれた / -1 押さなかった */
@@ -222,6 +274,8 @@ export class Hud {
   }
 
   dispose() {
+    window.removeEventListener('pointerdown', this._onTouchPointer, { capture: true });
+    this.touch.destroy();
     this.root.remove();
   }
 }

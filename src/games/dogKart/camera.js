@@ -44,7 +44,9 @@ export class ChaseCamera {
     }
     this.shake *= Math.exp(-dt * 6);
     const base = mode === 'first' ? 72 : 62;
-    const fovTarget = base + sr * 6 + (target.boost > 0 ? 10 : 0);
+    let fovTarget = base + sr * 6 + (target.boost > 0 ? 10 : 0);
+    // 縦長の画面（スマホの縦持ち）では横が狭くなるので、視野を広げて前方が見えるようにする
+    if (cam.aspect < 1) fovTarget = Math.min(88, fovTarget * (1 + (1 - cam.aspect) * 0.55));
     this.fov += (fovTarget - this.fov) * (1 - Math.exp(-dt * 4));
     if (Math.abs(cam.fov - this.fov) > 0.05) {
       cam.fov = this.fov;

@@ -23,6 +23,7 @@ export const LOOP_CONFIG = {
   MAX_FRAME_DT: 0.25, // 長いフレームでも物理が暴走しないように
   MAX_STEPS: 8,
   HISTORY_SEC: 6, // 切断時に巻き戻せる範囲
+  MIN_RENDER_MS: 14, // 描画は最大 60fps（120Hz の画面では 1 フレームおきに描いて電池と発熱を抑える）
 };
 
 export class GameManager extends Emitter {
@@ -106,6 +107,7 @@ export class GameManager extends Emitter {
     this._last = now();
     this._acc = 0;
     this._netAcc = 0;
+    this._renderDt = 1;
     // 最初のフレームの描画（シェーダーのコンパイル等で重い）が終わるまで待てるようにする
     // （タブが非表示で描画されない場合に備えて、一定時間で打ち切る）
     this.firstFrame = new Promise((resolve) => {
@@ -229,8 +231,12 @@ export class GameManager extends Emitter {
       }
     }
     if (this.game !== game) return;
+    this._renderDt += dt;
+    if (this._renderDt * 1000 < LOOP_CONFIG.MIN_RENDER_MS) return;
+    const frameDt = this._renderDt;
+    this._renderDt = 0;
     try {
-      game.render(this.running ? this._acc / FIXED : 1, dt);
+      game.render(this.running ? this._acc / FIXED : 1, frameDt);
       this._renderErrors = 0;
     } catch (err) {
       // 描画が失敗してもゲーム進行（ホストの正本）は止めない
