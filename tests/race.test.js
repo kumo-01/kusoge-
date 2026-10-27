@@ -293,8 +293,8 @@ test('NPC 2 台入りのレース: NPC が自分で走って周回し、人間�
   assert.equal(other.s.karts[3].npc, 1);
 });
 
-test('3 コースとも: 閉じていて離れた区間が十分離れ、内側が lat < 0、6 台のスタート位置が道路上', () => {
-  assert.equal(COURSES.length, 3);
+test('全コース: 閉じていて離れた区間が十分離れ、内側が lat < 0、6 台のスタート位置が道路上', () => {
+  assert.equal(COURSES.length, 5);
   COURSES.forEach((c, ci) => {
     const t = new Track(ci);
     assert.equal(t.name, c.name);
@@ -322,7 +322,7 @@ test('3 コースとも: 閉じていて離れた区間が十分離れ、内側�
   });
 });
 
-test('3 コースとも: NPC 4 台（6 台）でレースが決着し、NPC も周回する', () => {
+test('全コース: NPC 4 台（6 台）でレースが決着し、NPC も周回する', () => {
   COURSES.forEach((c, ci) => {
     const t = new Track(ci);
     const sim = new RaceSim(t, { npcs: 4 });
@@ -476,7 +476,7 @@ test('定期配信の形式でタイミング・豪雨の状態も復元でき�
   assert.equal(back.karts[5].npc, 1);
 });
 
-test('ブーストパッド: 3 コースとも道路上にあり、踏むとブーストして加速する', () => {
+test('ブーストパッド: 全コース道路上にあり、踏むとブーストして加速する', () => {
   COURSES.forEach((c, ci) => {
     const t = new Track(ci);
     assert.equal(t.pads.length, 6);

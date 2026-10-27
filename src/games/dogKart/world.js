@@ -62,6 +62,35 @@ const THEMES = {
     signs: ['しっぽフリフリ海岸', '波に注意！', 'カニ横断中', 'ヤシの実注意', '体当たり上等！', 'がんばれ〜！'],
     fans: ['poodle', 'pug', 'corgi', 'shiba'],
   },
+  autumn: {
+    sky: [0xf08a4b, 0xffe6c2],
+    fog: 0xffd9a8,
+    hemi: [0xfff0d8, 0xc98a4a],
+    ground: ['#d9a35a', 'rgba(190,100,40,0.35)', 'rgba(240,200,110,0.4)'],
+    shoulder: 0xc58a45,
+    mountains: { colors: [0xd9803f, 0xc96b34, 0xe0a050, 0xb85a2e], count: 22, size: 1 },
+    trees: 'round',
+    leaves: [0xe8602c, 0xf08a2e, 0xd9441f, 0xf2b134, 0xc2381a],
+    deco: { colors: [0xe8602c, 0xf2b134, 0xc2381a, 0xffd27a], scale: 1, y: 0.2, count: 500 },
+    landmarks: 'dog',
+    signs: ['ひらひら紅葉の森', '落ち葉ですべる！', 'どんぐり注意', '体当たり上等！', 'がんばれ〜！', 'ホネ注意！'],
+    fans: ['corgi', 'dachs', 'shiba', 'pug'],
+  },
+  night: {
+    sky: [0x0b1038, 0x3a3f7a],
+    fog: 0x23285a,
+    hemi: [0x8fa0ff, 0x2a2f5c],
+    sun: 0.9,
+    sunColor: 0xbfc8ff,
+    ground: ['#2f3f6a', 'rgba(90,120,200,0.3)', 'rgba(20,30,70,0.4)'],
+    shoulder: 0x38487a,
+    mountains: { colors: [0x2a3566, 0x333f78, 0x242c58], count: 22, size: 1.1 },
+    trees: 'pine',
+    deco: { colors: [0xfff2a8, 0xa8e4ff, 0xffb8ec, 0xffffff], scale: 0.8, y: 0.3, count: 400 },
+    landmarks: 'dog',
+    signs: ['きらきらスタジアム', 'ナイトGP', '夜道に注意', '体当たり上等！', 'がんばれ〜！', 'ホネ注意！'],
+    fans: ['husky', 'poodle', 'shiba', 'husky'],
+  },
   snow: {
     sky: [0x7fa8d8, 0xf2f7ff],
     fog: 0xe3edf8,
@@ -114,7 +143,7 @@ export class World {
     // 光
     this.hemi = new THREE.HemisphereLight(this.theme.hemi[0], this.theme.hemi[1], 1.25);
     scene.add(this.hemi);
-    const sun = new THREE.DirectionalLight(0xfff4e0, 1.7);
+    const sun = new THREE.DirectionalLight(this.theme.sunColor || 0xfff4e0, this.theme.sun ?? 1.7);
     sun.castShadow = true;
     sun.shadow.mapSize.set(device.shadowSize, device.shadowSize);
     const sc = sun.shadow.camera;
@@ -564,7 +593,7 @@ export class World {
       const trunks = new THREE.InstancedMesh(this._track(new THREE.CylinderGeometry(0.5, 0.7, 3, 6)), this._track(new THREE.MeshToonMaterial({ color: 0x9a6a3a })), spots.length);
       const crowns = new THREE.InstancedMesh(this._track(new THREE.IcosahedronGeometry(2.6, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length * 2);
       trunks.castShadow = crowns.castShadow = true;
-      const greens = [0x4cb944, 0x5fcf55, 0x3fa34d, 0x7ad35a, 0x9be070];
+      const greens = th.leaves || [0x4cb944, 0x5fcf55, 0x3fa34d, 0x7ad35a, 0x9be070];
       spots.forEach(([x, z], i) => {
         const sc = 0.8 + rnd() * 0.8;
         q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6);
