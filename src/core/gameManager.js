@@ -26,6 +26,8 @@ export const LOOP_CONFIG = {
   MIN_RENDER_MS: 14, // 描画は最大 60fps（120Hz の画面では 1 フレームおきに描いて電池と発熱を抑える）
 };
 
+const NET_EVERY = Math.max(1, Math.round(1 / LOOP_CONFIG.FIXED_DT / LOOP_CONFIG.SNAPSHOT_HZ)); // 60Hz ÷ 30Hz = 2 tick ごと
+
 export class GameManager extends Emitter {
   constructor({ role, net, input, sound, music, layer }) {
     super();
@@ -217,18 +219,11 @@ export class GameManager extends Emitter {
         game.update(FIXED);
         this._acc -= FIXED;
         steps++;
+        // 配信は「2 tick ごと」に、その tick の状態で送る（描画のタイミングで送ると配信の間隔が不揃いになり、相手の動きが揺れる）
+        if (this.isHost && this.running && this.game === game && (this._netTick = (this._netTick | 0) + 1) % NET_EVERY === 0) this._sendSnapshot();
         if (this.game !== game || !this.running) break;
       }
       if (steps >= LOOP_CONFIG.MAX_STEPS) this._acc = 0;
-
-      if (this.isHost && this.running && this.game === game) {
-        this._netAcc += dt;
-        const interval = 1 / LOOP_CONFIG.SNAPSHOT_HZ;
-        if (this._netAcc >= interval) {
-          this._netAcc = Math.min(this._netAcc - interval, interval);
-          this._sendSnapshot();
-        }
-      }
     }
     if (this.game !== game) return;
     // 画面の更新間隔を測り、120Hz などの高リフレッシュの画面だけ描画を間引く
