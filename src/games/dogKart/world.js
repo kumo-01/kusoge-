@@ -478,6 +478,9 @@ export class World {
 
     // 壁: 丸いクッションブロックを並べる。画面外のかたまりを描かないよう 20 個ずつの InstancedMesh に分ける（影は落とさない）
     const blockGeo = this._track(new RoundedBoxGeometry(2.7, 1.2, 0.9, 1, 0.3));
+    this._blockFar = this._track(new THREE.BoxGeometry(2.7, 1.2, 0.9)); // 遠くは四角いだけの形（三角形 12 個）にして軽くする
+    this._blockNear = blockGeo;
+    this.wallChunks = [];
     const blockMat = this._track(new THREE.MeshToonMaterial({ color: 0xffffff }));
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -505,6 +508,8 @@ export class World {
         blocks.instanceMatrix.needsUpdate = true;
         blocks.computeBoundingSphere();
         this.scene.add(blocks);
+        const mid = Math.min(t.n - 1, i0 + (cnt >> 1));
+        this.wallChunks.push({ mesh: blocks, x: t.x[mid], z: t.z[mid], near: true });
       }
     }
 
@@ -677,19 +682,35 @@ export class World {
       if (spots.some(([a, b]) => (a - x) ** 2 + (b - z) ** 2 < 64)) continue;
       spots.push([x, z]);
     }
-    if (th.trees === 'palm') this._palmTrees(spots, rnd);
-    else if (th.trees === 'pine') this._pineTrees(spots, rnd);
-    else if (th.trees === 'crystal') this._crystals(spots, rnd);
-    else if (th.trees === 'building') this._buildings(spots, rnd);
-    else if (th.trees === 'rock') this._rocks(spots, rnd);
-    else if (th.trees === 'cactus') this._cacti(spots, rnd);
-    else if (th.trees === 'lollipop') this._lollipops(spots, rnd);
-    else {
-      const trunks = new THREE.InstancedMesh(this._track(new THREE.CylinderGeometry(0.5, 0.7, 3, 6)), this._track(new THREE.MeshToonMaterial({ color: 0x9a6a3a })), spots.length);
-      const crowns = new THREE.InstancedMesh(this._track(new THREE.IcosahedronGeometry(2.6, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length * 2);
+    // 背景は区画ごとに別のメッシュにする（見えない区画は描かれないので、大きなコースでも軽い）
+    const cells = (list, size = 170) => {
+      const m = new Map();
+      for (const p of list) {
+        const key = `${Math.floor(p[0] / size)},${Math.floor(p[1] / size)}`;
+        if (!m.has(key)) m.set(key, []);
+        m.get(key).push(p);
+      }
+      return [...m.values()];
+    };
+    const buildTrees = {
+      palm: (g) => this._palmTrees(g, rnd),
+      pine: (g) => this._pineTrees(g, rnd),
+      crystal: (g) => this._crystals(g, rnd),
+      building: (g) => this._buildings(g, rnd),
+      rock: (g) => this._rocks(g, rnd),
+      cactus: (g) => this._cacti(g, rnd),
+      lollipop: (g) => this._lollipops(g, rnd),
+    }[th.trees];
+    for (const group of cells(spots)) {
+      if (buildTrees) {
+        buildTrees(group);
+        continue;
+      }
+      const trunks = new THREE.InstancedMesh(this._track(new THREE.CylinderGeometry(0.5, 0.7, 3, 6)), this._track(new THREE.MeshToonMaterial({ color: 0x9a6a3a })), group.length);
+      const crowns = new THREE.InstancedMesh(this._track(new THREE.IcosahedronGeometry(2.6, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), group.length * 2);
       trunks.castShadow = crowns.castShadow = true;
       const greens = th.leaves || [0x4cb944, 0x5fcf55, 0x3fa34d, 0x7ad35a, 0x9be070];
-      spots.forEach(([x, z], i) => {
+      group.forEach(([x, z], i) => {
         const sc = 0.8 + rnd() * 0.8;
         q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6);
         m4.compose(v.set(x, 1.5 * sc, z), q, s.set(sc, sc, sc));
@@ -713,15 +734,21 @@ export class World {
       const [x, z] = inArea(50);
       if (this._farFromTrack(x, z, 1.5 + deco.scale * 0.4) && this._onLand(x, z, 4)) decoSpots.push([x, z]);
     }
-    const decos = new THREE.InstancedMesh(this._track(new THREE.IcosahedronGeometry(0.35, deco.scale > 1 ? 1 : 0)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), decoSpots.length);
-    decoSpots.forEach(([x, z], i) => {
-      const sc = deco.scale * (0.6 + rnd() * 0.8);
-      m4.compose(v.set(x, deco.y, z), q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6), s.set(sc, deco.scale > 1 ? sc * 0.55 : sc, sc));
-      decos.setMatrixAt(i, m4);
-      decos.setColorAt(i, col.set(deco.colors[i % deco.colors.length]));
-    });
-    decos.receiveShadow = true;
-    scene.add(decos);
+    const decoGeo = this._track(new THREE.IcosahedronGeometry(0.35, deco.scale > 1 ? 1 : 0));
+    const decoMat = this._track(new THREE.MeshToonMaterial({ color: 0xffffff }));
+    let di = 0;
+    for (const group of cells(decoSpots, 220)) {
+      const decos = new THREE.InstancedMesh(decoGeo, decoMat, group.length);
+      group.forEach(([x, z], i) => {
+        const sc = deco.scale * (0.6 + rnd() * 0.8);
+        q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6);
+        m4.compose(v.set(x, deco.y, z), q, s.set(sc, deco.scale > 1 ? sc * 0.55 : sc, sc));
+        decos.setMatrixAt(i, m4);
+        decos.setColorAt(i, col.set(deco.colors[di++ % deco.colors.length]));
+      });
+      decos.receiveShadow = true;
+      scene.add(decos);
+    }
 
     // 看板
     const signs = th.signs;
@@ -951,11 +978,11 @@ export class World {
   /** 砂漠: サボテン（幹と 2 本の腕を 1 つの形にまとめて並べる） */
   _cacti(spots, rnd) {
     const parts = [
-      new THREE.CapsuleGeometry(0.85, 5, 4, 8).translate(0, 3.3, 0),
-      new THREE.CylinderGeometry(0.45, 0.45, 1.8, 8).rotateZ(Math.PI / 2).translate(1.5, 3.2, 0),
-      new THREE.CapsuleGeometry(0.5, 2.2, 4, 8).translate(2.3, 4.5, 0),
-      new THREE.CylinderGeometry(0.45, 0.45, 1.6, 8).rotateZ(Math.PI / 2).translate(-1.4, 4.4, 0),
-      new THREE.CapsuleGeometry(0.5, 1.8, 4, 8).translate(-2.1, 5.4, 0),
+      new THREE.CapsuleGeometry(0.85, 5, 2, 6).translate(0, 3.3, 0),
+      new THREE.CylinderGeometry(0.45, 0.45, 1.8, 6).rotateZ(Math.PI / 2).translate(1.5, 3.2, 0),
+      new THREE.CapsuleGeometry(0.5, 2.2, 2, 6).translate(2.3, 4.5, 0),
+      new THREE.CylinderGeometry(0.45, 0.45, 1.6, 6).rotateZ(Math.PI / 2).translate(-1.4, 4.4, 0),
+      new THREE.CapsuleGeometry(0.5, 1.8, 2, 6).translate(-2.1, 5.4, 0),
     ];
     const geo = this._track(mergeGeometries(parts.map((g) => g.toNonIndexed())));
     parts.forEach((g) => g.dispose());
@@ -985,7 +1012,7 @@ export class World {
     const sc = new THREE.Vector3();
     const col = new THREE.Color();
     const sticks = new THREE.InstancedMesh(this._track(new THREE.CylinderGeometry(0.28, 0.28, 7, 6).translate(0, 3.5, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xfff6ee })), spots.length);
-    const heads = new THREE.InstancedMesh(this._track(new THREE.SphereGeometry(2.4, 14, 8).scale(1, 1, 0.45)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length);
+    const heads = new THREE.InstancedMesh(this._track(new THREE.SphereGeometry(2.4, 10, 6).scale(1, 1, 0.45)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length);
     sticks.castShadow = heads.castShadow = true;
     const candy = [0xff6fae, 0xffd23f, 0x6fd0ff, 0x9be070, 0xb197fc, 0xff9a5a];
     spots.forEach(([x, z], i) => {
@@ -1320,7 +1347,7 @@ export class World {
     const kibble = this._track(new THREE.DodecahedronGeometry(0.62, 0).scale(1, 0.75, 1));
     this.foodMesh = new THREE.InstancedMesh(kibble, this._track(new THREE.MeshBasicMaterial({ color: 0xffffff })), foods.length);
     this.foodHalo = new THREE.InstancedMesh(
-      this._track(new THREE.SphereGeometry(1.15, 8, 6)),
+      this._track(new THREE.SphereGeometry(0.95, 8, 6)),
       this._track(new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.3, depthWrite: false })),
       foods.length,
     );
@@ -1616,6 +1643,18 @@ export class World {
     }
   }
 
+  /** 近くの壁だけ丸い形、遠くは四角い形にする（見分けがつかない距離の三角形を減らす） */
+  _lodWalls() {
+    const cam = this.camera.position;
+    for (const c of this.wallChunks) {
+      const near = (c.x - cam.x) ** 2 + (c.z - cam.z) ** 2 < 100 * 100;
+      if (near !== c.near) {
+        c.near = near;
+        c.mesh.geometry = near ? this._blockNear : this._blockFar;
+      }
+    }
+  }
+
   /** 影を落とすライトを注目点に合わせて動かす */
   followSun(x, z) {
     this.sun.position.set(x + 40, 80, z + 25);
@@ -1679,6 +1718,7 @@ export class World {
 
   render() {
     this._adaptQuality();
+    if (((this._lodTick = (this._lodTick | 0) + 1) & 7) === 1) this._lodWalls();
     this.renderer.render(this.scene, this.camera);
   }
 

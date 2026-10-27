@@ -12,7 +12,7 @@ function m(color, opts = {}) {
   return mats[key] || (mats[key] = new THREE.MeshToonMaterial({ color, ...opts }));
 }
 
-const SPHERE = () => g('sphere', () => new THREE.SphereGeometry(1, 20, 14));
+const SPHERE = () => g('sphere', () => new THREE.SphereGeometry(1, 16, 11));
 const SPHERE_LO = () => g('sphereLo', () => new THREE.SphereGeometry(1, 12, 8));
 const CONE = () => g('cone', () => new THREE.ConeGeometry(1, 1, 4, 1));
 const CAPSULE = () => g('capsule', () => new THREE.CapsuleGeometry(0.16, 0.5, 4, 8));
