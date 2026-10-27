@@ -231,8 +231,11 @@ export class GameManager extends Emitter {
       }
     }
     if (this.game !== game) return;
+    // 画面の更新間隔を測り、120Hz などの高リフレッシュの画面だけ描画を間引く
+    // （60Hz の画面で間引くと、揺れた拍に 2 フレーム分あいてカクつくので、間引かない）
+    this._rafAvg = this._rafAvg ? this._rafAvg * 0.95 + dt * 0.05 : dt;
     this._renderDt += dt;
-    if (this._renderDt * 1000 < LOOP_CONFIG.MIN_RENDER_MS) return;
+    if (this._rafAvg < 0.0105 && this._renderDt * 1000 < LOOP_CONFIG.MIN_RENDER_MS) return;
     const frameDt = this._renderDt;
     this._renderDt = 0;
     try {

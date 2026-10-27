@@ -163,6 +163,8 @@ class DogKartGame {
     this.buffer = [];
     this.clock = 0;
     this.clockInit = false;
+    this.lateMax = 0;
+    this.interp = NET.INTERP_DELAY; // 今の補間遅延（通信の揺れに合わせて増減）
     this.pred = new Predictor();
     this.seq = 0;
     this.pending = [];
@@ -308,6 +310,8 @@ class DogKartGame {
         const active = s.phase === 'racing' || (s.phase === 'countdown' && raceT >= 0);
         // タイミングブーストのリングは自分の車の予測で出す（判定はホストが入力の順番どおりに行う）
         if (active && s.phase !== 'finished') stepTiming(this.pred.k, this.sim.progressOf(this.pred.k), s.tc, !!(bits & IN.TAP), dt, null);
+        const pk = this.pred.k;
+        this.predPrev = { x: pk.x, z: pk.z, y: pk.y, h: pk.h };
         stepKart(this.pred.k, bits, dt, this.track, active && s.phase !== 'finished');
         this.pred.record(this.seq);
       }
@@ -389,7 +393,14 @@ class DogKartGame {
     if (!this.clockInit || Math.abs(this.clock - t) > 0.5) {
       this.clock = t;
       this.clockInit = true;
+      this.lateMax = 0;
     } else {
+      // 配信が遅れて届いた分（ローカル時計が配信時刻より先に進んでいた量）を覚え、表示の遅延を自動で増やす。
+      // 揺れが収まればゆっくり戻す（遅延を増やすと滑らかになるが、相手の車の表示が少し遅れる）
+      const lead = Math.max(0, this.clock - t);
+      this.lateMax = Math.max(lead, this.lateMax * 0.97);
+      const target = Math.min(NET.INTERP_MAX, NET.INTERP_DELAY + this.lateMax * 1.2);
+      this.interp += (target - this.interp) * (target > this.interp ? 0.3 : 0.03);
       this.clock += (t - this.clock) * 0.08;
     }
     this.sim.s = s;
@@ -577,12 +588,12 @@ class DogKartGame {
   }
 
   // ---- 描画 ----
-  _renderState(dt) {
+  _renderState(dt, alpha = 1) {
     const s = this.sim.s;
     if (this.isHost) {
       return { karts: s.karts, items: s };
     }
-    const renderT = this.clock - NET.INTERP_DELAY;
+    const renderT = this.clock - this.interp;
     const b = this.buffer;
     let a = b[b.length - 1];
     let n = a;
@@ -600,10 +611,26 @@ class DogKartGame {
     }
     if (!a) return { karts: s.karts, items: s };
     const karts = n.s.karts.map((k, i) => (a.s.karts[i] ? lerpKart(a.s.karts[i], k, f) : k));
+    // 配信が途切れて最新の状態より先を描くときは、止めずに速度で少し先まで進める（カクッと止まって飛ぶのを防ぐ）
+    const over = renderT - n.t;
+    if (n === b[b.length - 1] && over > 0) {
+      const ex = Math.min(over, 0.25);
+      for (let i = 0; i < karts.length; i++) {
+        const k = karts[i];
+        karts[i] = { ...k, x: k.x + (Math.sin(k.h) * k.sp + k.kx) * ex, z: k.z + (Math.cos(k.h) * k.sp + k.kz) * ex };
+      }
+    }
     if (NET.PREDICTION && this.pred.k) {
       this.pred.decay(dt);
       const k = this.pred.k;
-      karts[1] = { ...k, x: k.x + this.pred.off.x, z: k.z + this.pred.off.z, h: k.h + this.pred.off.h };
+      // 画面の更新と 60Hz の更新はずれるので、直前の位置との間を補間して動きを滑らかにする
+      const p = this.predPrev;
+      const al = p && !this.paused ? Math.max(0, Math.min(1, alpha)) : 1;
+      const px = p ? lerp(p.x, k.x, al) : k.x;
+      const pz = p ? lerp(p.z, k.z, al) : k.z;
+      const py = p ? lerp(p.y, k.y, al) : k.y;
+      const ph = p ? lerpAngle(p.h, k.h, al) : k.h;
+      karts[1] = { ...k, x: px + this.pred.off.x, z: pz + this.pred.off.z, y: py, h: ph + this.pred.off.h };
     }
     // 飛んでいるホネは id で対応付けて補間
     const prevProj = new Map(a.s.proj.map((p) => [p.id, p]));
@@ -654,7 +681,7 @@ class DogKartGame {
   render(alpha, dt) {
     const s = this.sim.s;
     if (!this.isHost && !this.paused && this.clockInit) this.clock += dt;
-    const st = this._renderState(dt);
+    const st = this._renderState(dt, alpha);
     let karts = st.karts;
     if (this.isHost) {
       karts = s.karts.map((k, i) => {

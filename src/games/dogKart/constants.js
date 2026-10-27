@@ -61,6 +61,7 @@ export const ITEMS = {
 
 export const NET = {
   INPUT_SEND_EVERY: 2, // ゲストは 2 tick ごと（30Hz）に入力をまとめて送る
+  INTERP_MAX: 0.3, // 通信が揺れるときに増やす補間遅延の上限
   INTERP_DELAY: 0.08, // 相手の車の表示遅延（補間用。配信間隔 1/30 秒の 2 倍強）
   INPUT_REDUNDANCY: 8, // 入力を送るとき直近何 tick 分を重ねて送るか（取りこぼし対策）
   PREDICTION: true, // ゲスト自身の車をクライアント予測する
