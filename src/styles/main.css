@@ -787,6 +787,19 @@ kbd {
   text-align: left;
   color: var(--ink-soft);
 }
+.stats tr.is-total th,
+.stats tr.is-total td {
+  font-weight: 900;
+  font-size: 1.15rem;
+  color: var(--orange-d);
+  border-bottom: none;
+  background: #fff6e0;
+}
+.result-sub {
+  margin: 14px 0 6px;
+  font-size: 1.05rem;
+  color: var(--ink-soft);
+}
 .confetti {
   pointer-events: none;
   position: fixed;
@@ -941,6 +954,28 @@ body[data-screen='game'] .app-main {
   font-size: 1.05rem;
   font-variant-numeric: tabular-nums;
   opacity: 0.95;
+}
+.hud-round {
+  font-size: 0.8rem;
+  line-height: 1.3;
+  color: #ffe9a8;
+  letter-spacing: 0.04em;
+}
+.hud-food {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 1.25rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.hud-food small {
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+.hud-food.is-max b {
+  color: #ffd23f;
 }
 .hud-tr {
   position: absolute;
@@ -1704,6 +1739,13 @@ body[data-screen='game'] {
 }
 .is-touch .hud-speed-bar {
   display: none;
+}
+.is-touch .hud-food {
+  margin-top: 1px;
+  font-size: 0.95rem;
+}
+.is-touch .hud-round {
+  font-size: 0.7rem;
 }
 .is-touch .hud-tr {
   top: 58px;

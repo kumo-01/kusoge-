@@ -1,5 +1,5 @@
 // アイテム: ホネアタック / バナナトラップ / わんわんブースト（判定はホストのみ）
-import { ITEMS, KART } from './constants.js';
+import { ITEMS, KART, FOOD } from './constants.js';
 
 export const ITEM_INFO = {
   [ITEMS.BONE]: { name: 'ホネアタック', icon: '🦴' },
@@ -42,6 +42,7 @@ export function spinKart(k, dur) {
     k.inv = 0.8;
     return false;
   }
+  k.fd = Math.max(0, (k.fd || 0) - FOOD.HIT_LOSS); // ぶつけられるとドッグフードを落とす
   k.spin = dur;
   k.spinDur = dur;
   k.inv = dur + ITEMS.INVULN_AFTER_SPIN;

@@ -5,12 +5,12 @@
 //         ホストの確定状態との誤差を少しずつ補正する。
 
 import { Track } from './track.js';
-import { RaceSim, sanitizeSnapshot, packNet, unpackNet, KART_NAMES } from './race.js';
+import { RaceSim, sanitizeSnapshot, packNet, unpackNet, kartName } from './race.js';
 import { stepKart, PHYS_KEYS } from './physics.js';
 import { World } from './world.js';
 import { ChaseCamera } from './camera.js';
 import { Hud } from './hud.js';
-import { RACE, NET, IN, ITEMS, KART, RAIN } from './constants.js';
+import { RACE, NET, IN, ITEMS, KART, RAIN, FOOD } from './constants.js';
 import { lerp, lerpAngle, angleDiff } from '../../core/util.js';
 import { spinAngleOf } from './kart.js';
 import { stepTiming } from './timing.js';
@@ -22,13 +22,13 @@ export function createGame() {
   return new DogKartGame();
 }
 
-const EVENT_TYPES = new Set(['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain']);
+const EVENT_TYPES = new Set(['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food']);
 
 function cleanEvent(e) {
   if (!e || typeof e !== 'object' || !EVENT_TYPES.has(e.t)) return null;
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const idx = (v) => (Number.isInteger(v) && v >= 0 && v < RACE.HUMANS + RACE.MAX_NPCS ? v : 0);
-  return { id: n(e.id), t: e.t, k: idx(e.k), by: idx(e.by), r: idx(e.r), v: idx(e.v), x: n(e.x), z: n(e.z), s: n(e.s), b: Math.max(0, Math.min(64, n(e.b) | 0)), item: n(e.item) | 0, lap: n(e.lap) | 0, q: Math.max(-1, Math.min(2, n(e.q) | 0)), grant: !!e.grant, big: !!e.big };
+  return { id: n(e.id), t: e.t, k: idx(e.k), by: idx(e.by), r: idx(e.r), v: idx(e.v), x: n(e.x), z: n(e.z), s: n(e.s), b: Math.max(0, Math.min(64, n(e.b) | 0)), item: n(e.item) | 0, lap: n(e.lap) | 0, q: Math.max(-1, Math.min(2, n(e.q) | 0)), grant: !!e.grant, big: !!e.big, n: Math.max(0, Math.min(99, n(e.n) | 0)) };
 }
 
 /** ゲスト自身の車のクライアント予測 */
@@ -58,7 +58,7 @@ class Predictor {
       this.reset(server);
       return;
     }
-    for (const f of ['lap', 'cp', 'item', 'roll', 'fin', 'ft', 'lapStart', 'best', 'stats', 'spinDur', 'wrong', 'bump']) this.k[f] = server[f];
+    for (const f of ['lap', 'cp', 'item', 'roll', 'fin', 'ft', 'lapStart', 'best', 'stats', 'spinDur', 'wrong', 'bump', 'fd']) this.k[f] = server[f];
     // タイミングブーストは自分の画面（予測）で進める。ホストのほうが先に進んでいたら合わせる
     if (server.tb > this.k.tb) {
       this.k.tb = server.tb;
@@ -121,15 +121,19 @@ class DogKartGame {
     this.me = ctx.playerIndex;
     this.sound = ctx.sound;
     this.track = new Track(ctx.options?.course ?? 0);
-    this.sim = new RaceSim(this.track, { npcs: ctx.options?.npcs ?? 0 });
+    this.sim = new RaceSim(this.track, { npcs: ctx.options?.npcs ?? 0, boss: ctx.options?.boss ?? 0 });
     this.paused = true;
     this.finished = false;
-    this.hud = new Hud(ctx.container, this.track, this.me);
+    this.hud = new Hud(ctx.container, this.track, this.me, { round: ctx.options?.round, races: ctx.options?.races });
     this.hud.onRain = () => {
       this.rainPressed = true;
     };
     this.world = null;
     this.hud.setQualityLabel(getQualityPref());
+    // 何戦目かとコース名、ボス犬の参戦をカウントダウン中に知らせる
+    const races = ctx.options?.races ?? 1;
+    this.hud.flash(races > 1 ? `第${ctx.options?.round || 1}戦 / 全${races}戦　${this.track.name}` : this.track.name, 'plain', 3200);
+    if (this.sim.boss) setTimeout(() => this.hud.flash('👑 ボス犬 ドーベルマン参戦！', 'final', 2200), 3300);
     this.hud.onQuality = () => {
       const order = ['auto', 'high', 'light'];
       const next = order[(order.indexOf(this.world?.qualityPref || getQualityPref()) + 1) % order.length];
@@ -451,6 +455,13 @@ class DogKartGame {
         case 'item':
           if (e.k === me) snd.play('itemReady');
           break;
+        case 'food': {
+          // ドッグフードを拾った（拾った本人は音も鳴らす）
+          fx?.sparkle(e.x, 1.2, e.z, 5);
+          if (e.k === me) snd.play('food');
+          if (e.k === me && e.n >= FOOD.MAX) this.hud.flash('🍖 ドッグフードいっぱい！ スピードアップ', 'good', 1400);
+          break;
+        }
         case 'use': {
           const k = kartPos(e.k);
           if (!k) break;
@@ -537,7 +548,7 @@ class DogKartGame {
             snd.play('lose');
             this.hud.flash('あいてが先にゴール…', 'bad', 3500);
           } else {
-            this.hud.flash(`${KART_NAMES[e.k]}がゴール！`, 'plain', 1500);
+            this.hud.flash(`${kartName(kartPos(e.k))}がゴール！`, 'plain', 1500);
           }
           break;
         }
@@ -573,7 +584,7 @@ class DogKartGame {
           snd.play('thunder');
           this.hud.thunder();
           fx?.text('ゴロゴロ…', k.x, 5, k.z, 4.5);
-          const who = KART_NAMES[e.k] || '';
+          const who = kartName(kartPos(e.k));
           if (e.k === me) this.hud.flash('☔ 豪雨をよんだ！ みんなおそくなるワン', 'good', 2200);
           else this.hud.flash(`☔ ${who}が豪雨をよんだ！ スピードダウン…`, 'bad', 2200);
           break;
@@ -638,7 +649,7 @@ class DogKartGame {
       const q = prevProj.get(p.id);
       return q ? { ...p, x: lerp(q.x, p.x, f), z: lerp(q.z, p.z, f) } : p;
     });
-    return { karts, items: { boxes: s.boxes, proj, bananas: n.s.bananas } };
+    return { karts, items: { boxes: s.boxes, proj, bananas: n.s.bananas, foods: s.foods } };
   }
 
   /** 車ごとの追加演出（ドリフトの火花・着地の土煙・ブースト煙など） */
@@ -710,7 +721,7 @@ class DogKartGame {
     if (this.world) {
       const w = this.world;
       const winner = s.winner;
-      w.ensureKarts(karts.length);
+      w.ensureKarts(karts.length, karts.findIndex((k) => k.boss));
       karts.forEach((k, i) => {
         const mood = winner < 0 ? 0 : i >= 2 ? (k.fin ? 1 : 0) : winner === i ? 1 : -1;
         w.karts[i].setFirstPerson(firstPerson && i === this.me);
@@ -768,6 +779,7 @@ class DogKartGame {
         tw,
         rainReady,
         wet: mine.wet || 0,
+        food: sk.fd || 0,
         karts,
         netText: this.paused ? '⏸ 一時停止中' : `📶 ${this.isHost ? 'ゲスト' : 'ホスト'}と接続中 ${rtt}`,
         netTone: this.paused ? 'warn' : info.rtt != null && info.rtt > 250 ? 'warn' : 'ok',

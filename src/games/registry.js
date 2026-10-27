@@ -9,7 +9,7 @@ export const GAMES = [
     emoji: '🏎️',
     tagline: '柴犬とコーギーが爆走！体当たりとアイテムで邪魔しあう3周レース',
     description:
-      '小さなカートに乗った犬たちが5つのコースで3周勝負。ホネを投げ、バナナを置き、ブーストで追い抜き、体当たりで相手をはじき飛ばそう。タイミングブーストと、最終ラップの豪雨で大逆転も！先に3周したほうの勝ち！',
+      '小さなカートに乗った犬たちが10のコース（トンネルや洞窟もあるよ）で3周勝負。ホネを投げ、バナナを置き、ブーストで追い抜き、体当たりで相手をはじき飛ばそう。道のドッグフードを拾うほど少し速くなる！タイミングブーストと、最終ラップの豪雨で大逆転も！2〜6連戦のポイント勝負にも。',
     players: '2人対戦',
     controls: [
       ['W / ↑', 'アクセル'],
@@ -29,13 +29,31 @@ export const GAMES = [
         key: 'course',
         label: 'コース',
         choices: [
+          { value: 99, label: '🎲 ランダム', random: true },
           { value: 0, label: '🌼 わんわん草原サーキット' },
           { value: 1, label: '🏖️ しっぽフリフリ海岸' },
           { value: 2, label: '❄️ もこもこ雪山' },
           { value: 3, label: '🍁 ひらひら紅葉の森' },
           { value: 4, label: '🌃 きらきら夜のスタジアム' },
+          { value: 5, label: '💎 ひんやり水晶の洞窟（トンネル）' },
+          { value: 6, label: '🚇 ガタゴト地下鉄トンネル（地下）' },
+          { value: 7, label: '🌋 ぐつぐつ火山（トンネル）' },
+          { value: 8, label: '🏜️ からから砂漠の大砂丘（岩のトンネル）' },
+          { value: 9, label: '🍭 ふわふわおかしの国（チョコのトンネル）' },
         ],
         default: 0,
+      },
+      {
+        key: 'races',
+        label: 'レース数（連戦はポイント制）',
+        choices: [
+          { value: 1, label: '1レースだけ' },
+          { value: 2, label: '2連戦' },
+          { value: 3, label: '3連戦' },
+          { value: 4, label: '4連戦' },
+          { value: 6, label: '6連戦' },
+        ],
+        default: 1,
       },
       {
         key: 'npcs',
@@ -49,6 +67,15 @@ export const GAMES = [
         ],
         default: 2,
       },
+      {
+        key: 'boss',
+        label: 'ボス犬（かなり強いNPC）',
+        choices: [
+          { value: 1, label: '出す（ドーベルマン）' },
+          { value: 0, label: '出さない' },
+        ],
+        default: 1,
+      },
     ],
     tips: [
       '🦴 ホネアタック: 前に骨を投げる。当たるとクルクル回る（壁で跳ね返るので自爆注意）',
@@ -60,6 +87,10 @@ export const GAMES = [
       '📦 アイテムは1つまで。持っている間はアイテムボックスをすり抜ける',
       '⚡ タイミングブースト: レース中に1〜2回、リングが出る。縮んだリングが真ん中に重なった瞬間に画面を押すとブースト',
       '☔ 豪雨: 最終ラップで最下位の人だけ☔ボタンが出る。1レース1回、呼んだ人以外はしばらく遅くなる大逆転の切り札',
+      '🍖 ドッグフード: 道に落ちている。最大15個まで持てて、多いほど少し速い（ぶつけられると3個落とす）。取られても少しするとまた出る',
+      '🌑 トンネル: 中は暗くて雨も降らない。ランプの光とミニマップの暗い線が目印',
+      '👑 ボス犬ドーベルマン: かなり強いNPC。ホネやフリスビーで足止めしよう（ゴールしても勝敗には関係なし）',
+      '🏆 連戦: 毎レース、順位ポイント + ドッグフード + 体当たり + アイテム命中 + ファステストラップのポイントがつき、合計が高いほうがシリーズ優勝',
       '🐩 NPC（プードル・パグ・ダックス・ハスキー）は最大4台（順位は全員の中で表示。勝敗はホストとゲストのどちらが先にゴールしたか）',
     ],
     load: () => import('./dogKart/index.js'),
@@ -74,6 +105,23 @@ export function getGame(id) {
 export function defaultOptions(def) {
   const o = {};
   for (const opt of def?.options || []) o[opt.key] = opt.default;
+  return o;
+}
+
+/**
+ * 1 レースぶんの設定を確定する。ランダム（random: true の選択肢）は、連戦の中でまだ使っていないものから選ぶ。
+ * @param {Record<string, number[]>} used 連戦でこれまでに使った値（キーごと）
+ */
+export function resolveMatchOptions(def, options, used = {}) {
+  const o = validOptions(def, options);
+  for (const opt of def?.options || []) {
+    const rnd = opt.choices.find((c) => c.random);
+    if (!rnd || o[opt.key] !== rnd.value) continue;
+    const all = opt.choices.filter((c) => !c.random).map((c) => c.value);
+    const fresh = all.filter((v) => !(used[opt.key] || []).includes(v));
+    const pool = fresh.length ? fresh : all;
+    o[opt.key] = pool[Math.floor(Math.random() * pool.length)];
+  }
   return o;
 }
 

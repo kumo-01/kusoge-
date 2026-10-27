@@ -1,14 +1,16 @@
 // ゲーム中の HUD（DOM）。周回・順位・速度・アイテム・時間・接続状態・ミニマップ
 import { h, formatTime } from '../../core/util.js';
 import { ITEM_INFO } from './items.js';
-import { RACE, TIMING } from './constants.js';
+import { RACE, TIMING, FOOD } from './constants.js';
 import { TouchControls } from './touch.js';
 import { device } from '../../core/device.js';
 
 export const KART_COLORS = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#ffc93c', '#22b573', '#8a63ff'];
+const BOSS_COLOR = '#2b2b3a';
 
 export class Hud {
-  constructor(container, track, me) {
+  /** @param {{ round?: number, races?: number }} series 連戦のとき、何戦目か */
+  constructor(container, track, me, series = {}) {
     this.track = track;
     this.me = me;
     this._last = {};
@@ -30,6 +32,9 @@ export class Hud {
     this.camBtn = h('button.hud-cam-btn', { onclick: () => this.onCameraToggle?.(), title: 'カメラ切り替え（C）' }, '');
     this.camBtn.append(h('span.ic', null, '🎥'), (this.camLabel = h('span.lb', null, '三人称')));
     this.rankTotal = h('div.hud-rank-total', null, '/2');
+    this.round = series.races > 1 ? h('div.hud-round', null, `第${series.round || 1}戦 / 全${series.races}戦`) : null;
+    this.foodNum = h('b', null, '0');
+    this.food = h('div.hud-food', { title: 'ドッグフード（多いほど少し速い）' }, h('span.hud-food-ic', null, '🍖'), this.foodNum, h('small', null, `/${FOOD.MAX}`));
     this.qualityBtn = h('button.hud-cam-btn.hud-quality-btn', { onclick: () => this.onQuality?.(), title: '画質の切り替え' }, '');
     this.qualityBtn.append(h('span.ic', null, '⚙'), (this.qualityLabel = h('span.lb', null, '画質: 自動')));
     this.fsBtn = document.fullscreenEnabled || document.webkitFullscreenEnabled
@@ -55,9 +60,9 @@ export class Hud {
     this.root.append(
       this.speedLines,
       this.boostEdge,
-      h('div.hud-tl', null, h('div.hud-rank-wrap', null, this.rank, this.rankTotal), h('div.hud-lt', null, this.lap, this.time)),
+      h('div.hud-tl', null, h('div.hud-rank-wrap', null, this.rank, this.rankTotal), h('div.hud-lt', null, this.round, this.lap, this.time)),
       this.trBox,
-      h('div.hud-bl', null, h('div.hud-speed', null, this.speed, h('span', null, 'わんkm/h')), h('div.hud-speed-bar', null, this.speedBar)),
+      h('div.hud-bl', null, h('div.hud-speed', null, this.speed, h('span', null, 'わんkm/h')), h('div.hud-speed-bar', null, this.speedBar), this.food),
       h('div.hud-br', null, this.rainBtn, this.itemSlot),
       h('div.hud-bc', null, 'W/↑ アクセル　S/↓ ブレーキ　A D/← → ハンドル　Space アイテム　R 復帰　C カメラ　Enter/タップ タイミング　Q 豪雨'),
       this.rotateHint,
@@ -138,6 +143,20 @@ export class Hud {
     x.strokeStyle = '#8a86a3';
     x.lineWidth = 6;
     x.stroke();
+    // トンネルの区間は暗く描く
+    x.strokeStyle = '#3b3560';
+    for (const tn of t.tunnels) {
+      x.beginPath();
+      let first = true;
+      for (let i = 0; i < t.n; i++) {
+        if (t.cum[i] < tn.a || t.cum[i] > tn.b) continue;
+        const [px, py] = this._map(t.x[i], t.z[i]);
+        if (first) x.moveTo(px, py);
+        else x.lineTo(px, py);
+        first = false;
+      }
+      x.stroke();
+    }
     const [sx, sy] = this._map(t.x[0], t.z[0]);
     x.fillStyle = '#222';
     x.fillRect(sx - 4, sy - 4, 8, 8);
@@ -168,6 +187,8 @@ export class Hud {
     this._set('time', this.time, formatTime(Math.max(0, d.time)));
     const kmh = Math.round(Math.abs(d.speed) * 3.6);
     this._set('speed', this.speed, String(kmh));
+    this._set('food', this.foodNum, String(d.food || 0));
+    this.food.classList.toggle('is-max', (d.food || 0) >= FOOD.MAX);
     const bar = Math.round(Math.min(100, (Math.abs(d.speed) / 40) * 100));
     if (bar !== this._last.bar) {
       this._last.bar = bar;
@@ -238,7 +259,7 @@ export class Hud {
       const [px, py] = this._map(k.x, k.z);
       x.beginPath();
       x.arc(px, py, i === this.me ? 7 : 6, 0, Math.PI * 2);
-      x.fillStyle = KART_COLORS[i] || '#999';
+      x.fillStyle = k.boss ? BOSS_COLOR : KART_COLORS[i] || '#999';
       x.fill();
       x.lineWidth = 2.5;
       x.strokeStyle = '#fff';

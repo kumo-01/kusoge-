@@ -5,6 +5,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { KartView } from './kart.js';
 import { Effects } from './effects.js';
 import { buildDog } from './dog.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PAD } from './constants.js';
 import { device, getQualityPref, setQualityPref } from '../../core/device.js';
 
@@ -91,6 +92,82 @@ const THEMES = {
     signs: ['きらきらスタジアム', 'ナイトGP', '夜道に注意', '体当たり上等！', 'がんばれ〜！', 'ホネ注意！'],
     fans: ['husky', 'poodle', 'shiba', 'husky'],
   },
+  cave: {
+    sky: [0x0a0618, 0x2a1850],
+    fog: 0x1a1033,
+    hemi: [0x9a8cff, 0x3a2a66],
+    sun: 0.6,
+    sunColor: 0xb8a8ff,
+    ground: ['#2b2442', 'rgba(120,90,200,0.25)', 'rgba(10,5,30,0.4)'],
+    shoulder: 0x3a3058,
+    mountains: { colors: [0x2f2648, 0x3a2f5a, 0x241c3a], count: 22, size: 1.1 },
+    trees: 'crystal',
+    deco: { colors: [0x7ff0ff, 0xff7fe6, 0x9dff9d, 0xffffff], scale: 0.8, y: 0.3, count: 500 },
+    landmarks: 'dog',
+    signs: ['ひんやり水晶の洞窟', '天井に注意！', 'コウモリ出没', '水晶がきれいワン', '体当たり上等！', 'がんばれ〜！'],
+    fans: ['husky', 'poodle', 'shiba', 'corgi'],
+    tunnel: { rock: 0x3c3358, rib: 0x6a5c9a, lamp: 0x9ff3ff, fog: 0x0d0820 },
+  },
+  subway: {
+    sky: [0x10162e, 0x39446d],
+    fog: 0x1b2240,
+    hemi: [0xa8b8e8, 0x2a3050],
+    sun: 0.7,
+    sunColor: 0xc8d4ff,
+    ground: ['#3b3f4f', 'rgba(255,255,255,0.08)', 'rgba(0,0,0,0.2)'],
+    shoulder: 0x4a4f63,
+    mountains: { colors: [0x2c3350, 0x353d5e, 0x262c48], count: 22, size: 1.0 },
+    trees: 'building',
+    deco: { colors: [0xffd27a, 0x7ad7ff, 0xff9ad5], scale: 0.7, y: 0.25, count: 360 },
+    landmarks: 'dog',
+    signs: ['ガタゴト地下鉄', '次は〜ホネ駅', '白線の内側をはしるワン', 'ドアに注意ワン', '体当たり上等！', 'がんばれ〜！'],
+    fans: ['pug', 'husky', 'dachs', 'corgi'],
+    tunnel: { rock: 0x6c7185, rib: 0x9aa1ba, lamp: 0xfff2b0, fog: 0x0b0e1a },
+  },
+  volcano: {
+    sky: [0x3a0f10, 0xff8a3d],
+    fog: 0x7a2a18,
+    hemi: [0xffc9a0, 0x6a2a1a],
+    sun: 1.2,
+    sunColor: 0xffb070,
+    ground: ['#4a2a22', 'rgba(255,110,40,0.25)', 'rgba(20,8,6,0.45)'],
+    shoulder: 0x5a3326,
+    mountains: { colors: [0x4a2a24, 0x5a3228, 0x3a201c], count: 22, size: 1.4, caps: true, capColor: 0xff6a1a },
+    trees: 'rock',
+    deco: { colors: [0xff6a1a, 0xffa21a, 0xff3d1a], scale: 3, y: 0.05, count: 260 },
+    landmarks: 'dog',
+    signs: ['ぐつぐつ火山', '溶岩に注意！', 'あっちっち！', '岩が落ちるワン', '体当たり上等！', 'がんばれ〜！'],
+    fans: ['dachs', 'shiba', 'pug', 'husky'],
+    tunnel: { rock: 0x4a2c26, rib: 0xff7a2e, lamp: 0xff9a4a, fog: 0x1a0805 },
+  },
+  desert: {
+    sky: [0x2f9cff, 0xffe9b8],
+    fog: 0xf3dcae,
+    hemi: [0xfff4d8, 0xd9b36f],
+    ground: ['#e8c680', 'rgba(255,240,200,0.35)', 'rgba(190,140,70,0.3)'],
+    shoulder: 0xd9b36a,
+    mountains: { colors: [0xd6a25a, 0xc9914a, 0xe0b46f], count: 22, size: 0.9 },
+    trees: 'cactus',
+    deco: { colors: [0xb88a4a, 0xa07838, 0xd9b36a], scale: 3, y: 0.05, count: 200 },
+    landmarks: 'dog',
+    signs: ['からから砂漠', 'ラクダ横断中', 'サボテン注意', 'あついワン…', '体当たり上等！', 'がんばれ〜！'],
+    fans: ['pug', 'shiba', 'dachs', 'corgi'],
+    tunnel: { rock: 0xc99a58, rib: 0xe6c080, lamp: 0xffe9a8, fog: 0x2a1c10 },
+  },
+  candy: {
+    sky: [0xff9ad5, 0xfff0fa],
+    fog: 0xffd6ee,
+    hemi: [0xfff5fb, 0xffb3dc],
+    ground: ['#bff0d4', 'rgba(255,150,200,0.35)', 'rgba(255,255,255,0.45)'],
+    shoulder: 0x9fe3be,
+    mountains: { colors: [0xff9ad5, 0x9ad7ff, 0xffe08a, 0xc5a8ff], count: 22, size: 1.0 },
+    trees: 'lollipop',
+    deco: { colors: [0xff6fae, 0xffd23f, 0x6fd0ff, 0x9be070, 0xb197fc], scale: 1, y: 0.4, count: 420 },
+    landmarks: 'dog',
+    signs: ['ふわふわおかしの国', 'あまいワン！', 'ソーダの川に注意', 'キャンディ工場', '体当たり上等！', 'がんばれ〜！'],
+    fans: ['poodle', 'corgi', 'shiba', 'poodle'],
+    tunnel: { rock: 0x6b4128, rib: 0xffd1e6, lamp: 0xffffff, fog: 0x2a1220 },
+  },
   snow: {
     sky: [0x7fa8d8, 0xf2f7ff],
     fog: 0xe3edf8,
@@ -115,6 +192,11 @@ export class World {
     const bb = track.bounds();
     this.bb = bb;
     this.center = { x: (bb.minX + bb.maxX) / 2, z: (bb.minZ + bb.maxZ) / 2 };
+    const spanX = bb.maxX - bb.minX;
+    const spanZ = bb.maxZ - bb.minZ;
+    this.span = Math.max(spanX, spanZ); // コースの大きさ
+    this.ringR = Math.max(430, Math.hypot(spanX, spanZ) / 2 + 150); // 遠くの山・雲を並べる半径
+    this.dens = Math.min(2.6, Math.max(1, Math.sqrt(spanX * spanZ) / 410)); // 大きなコースほど背景を増やす
     this.disposables = [];
     this.container = container;
 
@@ -166,6 +248,8 @@ export class World {
 
     this.setQualityLevel(this.startLevel());
 
+    this._tun = 0; // トンネルの中の暗さ 0..1
+    this._tunTarget = 0;
     this.karts = [];
     this.ensureKarts(2);
     this.effects = new Effects(scene);
@@ -215,7 +299,9 @@ export class World {
     this.cloudMat = cloudMat;
     const puff = this._track(new THREE.IcosahedronGeometry(1, 1));
     this.clouds = [];
-    for (let i = 0; i < (this.lite ? 7 : 16); i++) {
+    const rk = this.ringR / 430;
+    this.cloudRange = 420 * rk;
+    for (let i = 0; i < Math.round((this.lite ? 7 : 16) * Math.min(2, this.dens)); i++) {
       const g = new THREE.Group();
       const n = 3 + Math.floor(rnd() * 4);
       for (let j = 0; j < n; j++) {
@@ -225,8 +311,8 @@ export class World {
         g.add(m);
       }
       const a = rnd() * Math.PI * 2;
-      const r = 150 + rnd() * 250;
-      g.position.set(Math.cos(a) * r, 70 + rnd() * 50, Math.sin(a) * r);
+      const r = (150 + rnd() * 250) * rk;
+      g.position.set(this.center.x + Math.cos(a) * r, 70 + rnd() * 50, this.center.z + Math.sin(a) * r);
       g.userData.speed = 0.6 + rnd();
       this.scene.add(g);
       this.clouds.push(g);
@@ -235,12 +321,13 @@ export class World {
     // 遠くの山（海のコースでは小さな島、雪山では雪をかぶった山）
     const mountainGeo = this._track(new THREE.ConeGeometry(1, 1, 7));
     const mt = this.theme.mountains;
-    const capMat = mt.caps ? this._track(new THREE.MeshToonMaterial({ color: 0xffffff })) : null;
-    for (let i = 0; i < mt.count; i++) {
-      const a = (i / mt.count) * Math.PI * 2 + rnd() * 0.2;
-      const r = 430 + rnd() * 80;
+    const capMat = mt.caps ? this._track(new THREE.MeshToonMaterial({ color: mt.capColor || 0xffffff })) : null;
+    const mCount = this.lite ? mt.count : Math.round(mt.count * Math.min(1.6, this.dens));
+    for (let i = 0; i < mCount; i++) {
+      const a = (i / mCount) * Math.PI * 2 + rnd() * 0.2;
+      const r = this.ringR + rnd() * 80;
       const m = new THREE.Mesh(mountainGeo, this._track(new THREE.MeshToonMaterial({ color: mt.colors[i % mt.colors.length] })));
-      const s = (60 + rnd() * 70) * mt.size;
+      const s = (60 + rnd() * 70) * mt.size * Math.min(2.2, this.ringR / 430);
       m.scale.set(s * 1.3, s, s * 1.3);
       m.position.set(this.center.x + Math.cos(a) * r, s / 2 - 2, this.center.z + Math.sin(a) * r);
       this.scene.add(m);
@@ -272,7 +359,7 @@ export class World {
       // 砂浜の島（楕円）と、まわりの海
       const bb = this.bb;
       this.island = { rx: (bb.maxX - bb.minX) / 2 + 95, rz: (bb.maxZ - bb.minZ) / 2 + 95 };
-      tex.repeat.set(60, 60);
+      tex.repeat.set(60 * Math.min(2.4, this.dens), 60 * Math.min(2.4, this.dens));
       ground = new THREE.Mesh(this._track(new THREE.CircleGeometry(1, 72)), mat);
       ground.scale.set(this.island.rx, this.island.rz, 1);
       // 波打ち際の白い縁
@@ -282,15 +369,16 @@ export class World {
       surf.position.set(this.center.x, -0.1, this.center.z);
       this.surf = surf;
       this.scene.add(surf);
-      const sea = new THREE.Mesh(this._track(new THREE.PlaneGeometry(2400, 2400)), this._track(new THREE.MeshToonMaterial({ color: 0x35b4e8 })));
+      const sea = new THREE.Mesh(this._track(new THREE.PlaneGeometry(Math.max(2400, this.span * 2.4), Math.max(2400, this.span * 2.4))), this._track(new THREE.MeshToonMaterial({ color: 0x35b4e8 })));
       sea.rotation.x = -Math.PI / 2;
       sea.position.set(this.center.x, -0.4, this.center.z);
       sea.receiveShadow = true;
       this.scene.add(sea);
       ground.position.set(this.center.x, 0, this.center.z);
     } else {
-      tex.repeat.set(120, 120);
-      ground = new THREE.Mesh(this._track(new THREE.PlaneGeometry(1400, 1400)), mat);
+      const gsize = Math.max(1400, this.span + 1000);
+      tex.repeat.set((120 * gsize) / 1400, (120 * gsize) / 1400);
+      ground = new THREE.Mesh(this._track(new THREE.PlaneGeometry(gsize, gsize)), mat);
       ground.position.set(this.center.x, 0, this.center.z);
     }
     ground.rotation.x = -Math.PI / 2;
@@ -489,6 +577,7 @@ export class World {
     this.scene.add(gate);
 
     this._buildPads();
+    this._buildTunnels();
 
     // チェックポイントの旗（進み具合の目印）
     const flagGeo = this._track(new THREE.ConeGeometry(0.9, 2.2, 3).rotateZ(-Math.PI / 2).translate(1.1, 0, 0));
@@ -581,7 +670,8 @@ export class World {
 
     // 木（草原: 丸い木 / 海: ヤシの木 / 雪山: もみの木）
     const spots = [];
-    for (let tries = 0; tries < 3000 && spots.length < (this.lite ? 90 : 180); tries++) {
+    const treeN = Math.round((this.lite ? 90 : 180) * this.dens);
+    for (let tries = 0; tries < treeN * 20 && spots.length < treeN; tries++) {
       const [x, z] = inArea(100);
       if (!this._farFromTrack(x, z, 6) || !this._onLand(x, z, 8)) continue;
       if (spots.some(([a, b]) => (a - x) ** 2 + (b - z) ** 2 < 64)) continue;
@@ -589,6 +679,11 @@ export class World {
     }
     if (th.trees === 'palm') this._palmTrees(spots, rnd);
     else if (th.trees === 'pine') this._pineTrees(spots, rnd);
+    else if (th.trees === 'crystal') this._crystals(spots, rnd);
+    else if (th.trees === 'building') this._buildings(spots, rnd);
+    else if (th.trees === 'rock') this._rocks(spots, rnd);
+    else if (th.trees === 'cactus') this._cacti(spots, rnd);
+    else if (th.trees === 'lollipop') this._lollipops(spots, rnd);
     else {
       const trunks = new THREE.InstancedMesh(this._track(new THREE.CylinderGeometry(0.5, 0.7, 3, 6)), this._track(new THREE.MeshToonMaterial({ color: 0x9a6a3a })), spots.length);
       const crowns = new THREE.InstancedMesh(this._track(new THREE.IcosahedronGeometry(2.6, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length * 2);
@@ -613,7 +708,8 @@ export class World {
     // 小物（花 / 貝がら / 雪のかたまり）
     const deco = th.deco;
     const decoSpots = [];
-    for (let tries = 0; tries < deco.count * 8 && decoSpots.length < deco.count; tries++) {
+    const decoN = Math.round(deco.count * this.dens * (this.lite ? 0.6 : 1));
+    for (let tries = 0; tries < decoN * 8 && decoSpots.length < decoN; tries++) {
       const [x, z] = inArea(50);
       if (this._farFromTrack(x, z, 1.5 + deco.scale * 0.4) && this._onLand(x, z, 4)) decoSpots.push([x, z]);
     }
@@ -651,8 +747,9 @@ export class World {
     const postGeo = this._track(new THREE.CylinderGeometry(0.25, 0.25, 4, 6));
     const boardGeo = this._track(new THREE.BoxGeometry(8, 4, 0.4));
     const t = this.track;
-    for (let i = 0; i < 9; i++) {
-      const sPos = ((i + 0.55) / 9) * t.length;
+    const signN = Math.round(9 * this.dens);
+    for (let i = 0; i < signN; i++) {
+      const sPos = ((i + 0.55) / signN) * t.length;
       const side = i % 2 ? 1 : -1;
       const p = t.pointAt(sPos, side * (t.wallDist + 6));
       // 別の区間のコースに近すぎる場所には置かない
@@ -676,7 +773,8 @@ export class World {
 
     // 内側のランドマーク
     const places = [];
-    for (let tries = 0; tries < 3000 && places.length < 4; tries++) {
+    const placeN = Math.round(4 * this.dens);
+    for (let tries = 0; tries < 6000 && places.length < placeN; tries++) {
       const [x, z] = inArea(0);
       if (!this._farFromTrack(x, z, 18)) continue;
       // コースの内側だけに置く（どのコースも中心線の右側 = lat < 0 が内側）
@@ -771,6 +869,230 @@ export class World {
       });
     });
     this.scene.add(trunks, cones);
+  }
+
+  /** 洞窟: 光る水晶のかたまり（暗くても光って見えるよう、光の影響を受けない材質） */
+  _crystals(spots, rnd) {
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    const col = new THREE.Color();
+    const mesh = new THREE.InstancedMesh(this._track(new THREE.ConeGeometry(0.9, 1, 5).translate(0, 0.5, 0)), this._track(new THREE.MeshBasicMaterial({ color: 0xffffff })), spots.length * 3);
+    const colors = [0x7ff0ff, 0xff7fe6, 0x9dff9d, 0xb497ff];
+    spots.forEach(([x, z], i) => {
+      for (let j = 0; j < 3; j++) {
+        const k = 0.8 + rnd() * 1.1;
+        q.setFromEuler(e.set((rnd() - 0.5) * 0.5, rnd() * 6, (rnd() - 0.5) * 0.5));
+        m4.compose(v.set(x + (rnd() - 0.5) * 4, 0, z + (rnd() - 0.5) * 4), q, sc.set(k * 1.2, (5 + rnd() * 9) * k, k * 1.2));
+        mesh.setMatrixAt(i * 3 + j, m4);
+        mesh.setColorAt(i * 3 + j, col.set(colors[(i + j) % colors.length]));
+      }
+    });
+    this.scene.add(mesh);
+  }
+
+  /** 地下鉄: 街のビル（窓あかりのある四角い塔）。コースにかからない場所だけ */
+  _buildings(spots, rnd) {
+    spots = spots.filter(([x, z]) => this._farFromTrack(x, z, 22));
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    const col = new THREE.Color();
+    const tex = this._track(
+      canvasTexture(64, 128, (x, w, h) => {
+        x.fillStyle = '#ffffff';
+        x.fillRect(0, 0, w, h);
+        const r = seeded(5);
+        for (let yy = 6; yy < h - 4; yy += 12) {
+          for (let xx = 6; xx < w - 4; xx += 12) {
+            x.fillStyle = r() < 0.45 ? '#ffe9a0' : '#5a6488';
+            x.fillRect(xx, yy, 7, 7);
+          }
+        }
+      }),
+    );
+    const mesh = new THREE.InstancedMesh(this._track(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0)), this._track(new THREE.MeshToonMaterial({ map: tex })), spots.length);
+    mesh.castShadow = true;
+    const tints = [0xb8c4e8, 0xe8c4d8, 0xc4e8d8, 0xd8d8f0, 0xf0d8b0];
+    spots.forEach(([x, z], i) => {
+      q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6);
+      m4.compose(v.set(x, 0, z), q, sc.set(12 + rnd() * 12, 25 + rnd() * 55, 12 + rnd() * 12));
+      mesh.setMatrixAt(i, m4);
+      mesh.setColorAt(i, col.set(tints[i % tints.length]));
+    });
+    this.scene.add(mesh);
+  }
+
+  /** 火山: 黒っぽい岩のとげ */
+  _rocks(spots, rnd) {
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    const col = new THREE.Color();
+    const mesh = new THREE.InstancedMesh(this._track(new THREE.ConeGeometry(1, 1, 5).translate(0, 0.5, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length * 2);
+    mesh.castShadow = true;
+    const greys = [0x2a1a18, 0x3a2420, 0x4a2c26];
+    spots.forEach(([x, z], i) => {
+      for (let j = 0; j < 2; j++) {
+        const k = 0.8 + rnd() * 0.9;
+        q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6);
+        m4.compose(v.set(x + j * 2.2, 0, z + j * 1.2), q, sc.set(3.4 * k, (7 + rnd() * 10) * k * (j ? 0.6 : 1), 3.4 * k));
+        mesh.setMatrixAt(i * 2 + j, m4);
+        mesh.setColorAt(i * 2 + j, col.set(greys[(i + j) % greys.length]));
+      }
+    });
+    this.scene.add(mesh);
+  }
+
+  /** 砂漠: サボテン（幹と 2 本の腕を 1 つの形にまとめて並べる） */
+  _cacti(spots, rnd) {
+    const parts = [
+      new THREE.CapsuleGeometry(0.85, 5, 4, 8).translate(0, 3.3, 0),
+      new THREE.CylinderGeometry(0.45, 0.45, 1.8, 8).rotateZ(Math.PI / 2).translate(1.5, 3.2, 0),
+      new THREE.CapsuleGeometry(0.5, 2.2, 4, 8).translate(2.3, 4.5, 0),
+      new THREE.CylinderGeometry(0.45, 0.45, 1.6, 8).rotateZ(Math.PI / 2).translate(-1.4, 4.4, 0),
+      new THREE.CapsuleGeometry(0.5, 1.8, 4, 8).translate(-2.1, 5.4, 0),
+    ];
+    const geo = this._track(mergeGeometries(parts.map((g) => g.toNonIndexed())));
+    parts.forEach((g) => g.dispose());
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    const col = new THREE.Color();
+    const mesh = new THREE.InstancedMesh(geo, this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length);
+    mesh.castShadow = true;
+    const greens = [0x4fae5a, 0x3f9a4f, 0x62bb62];
+    spots.forEach(([x, z], i) => {
+      const k = 0.8 + rnd() * 0.8;
+      q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6);
+      m4.compose(v.set(x, 0, z), q, sc.set(k, k, k));
+      mesh.setMatrixAt(i, m4);
+      mesh.setColorAt(i, col.set(greens[i % greens.length]));
+    });
+    this.scene.add(mesh);
+  }
+
+  /** おかしの国: ぺろぺろキャンディの木 */
+  _lollipops(spots, rnd) {
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    const col = new THREE.Color();
+    const sticks = new THREE.InstancedMesh(this._track(new THREE.CylinderGeometry(0.28, 0.28, 7, 6).translate(0, 3.5, 0)), this._track(new THREE.MeshToonMaterial({ color: 0xfff6ee })), spots.length);
+    const heads = new THREE.InstancedMesh(this._track(new THREE.SphereGeometry(2.4, 14, 8).scale(1, 1, 0.45)), this._track(new THREE.MeshToonMaterial({ color: 0xffffff })), spots.length);
+    sticks.castShadow = heads.castShadow = true;
+    const candy = [0xff6fae, 0xffd23f, 0x6fd0ff, 0x9be070, 0xb197fc, 0xff9a5a];
+    spots.forEach(([x, z], i) => {
+      const k = 0.8 + rnd() * 0.8;
+      q.setFromAxisAngle(v.set(0, 1, 0), rnd() * 6);
+      m4.compose(v.set(x, 0, z), q, sc.set(k, k, k));
+      sticks.setMatrixAt(i, m4);
+      m4.compose(v.set(x, 7.6 * k, z), q, sc.set(k, k, k));
+      heads.setMatrixAt(i, m4);
+      heads.setColorAt(i, col.set(candy[i % candy.length]));
+    });
+    this.scene.add(sticks, heads);
+  }
+
+  /**
+   * トンネル: 半円形のアーチをコースに沿って並べた殻。外側は岩山、内側は暗くてランプが並ぶ。
+   * 暗さ・霧は車がトンネルの中にいる間だけ _updateWeather で切り替える。
+   */
+  _buildTunnels() {
+    const t = this.track;
+    if (!t.tunnels.length) return;
+    const st = this.theme.tunnel || { rock: 0x555566, rib: 0x8888aa, lamp: 0xfff2b0, fog: 0x0b0e1a };
+    const W = t.wallDist + 2.2; // 内側の半幅
+    const SIDE = 4.2; // まっすぐな側壁の高さ
+    const H = 10.5; // 天井の高さ
+    const M = 14;
+    const ring = [[W, 0]];
+    for (let j = 0; j <= M; j++) {
+      const f = (j / M) * Math.PI;
+      ring.push([Math.cos(f) * W, SIDE + Math.sin(f) * (H - SIDE)]);
+    }
+    ring.push([-W, 0]);
+    const rc = ring.length;
+    const rock = new THREE.Color(st.rock);
+    const rib = new THREE.Color(st.rib);
+    const STEP = 2; // 2 セグメントごと（約 5m）に 1 つのアーチ
+    const pos = [];
+    const colors = [];
+    const idx = [];
+    let rings = 0;
+    for (const tn of t.tunnels) {
+      let first = true;
+      let prev = -1;
+      for (let i = 0; i < t.n; i += STEP) {
+        if (t.cum[i] < tn.a || t.cum[i] > tn.b) continue;
+        const k = i;
+        const p = (k - 1 + t.n) % t.n;
+        let tx = t.tx[k] + t.tx[p];
+        let tz = t.tz[k] + t.tz[p];
+        const l = Math.hypot(tx, tz) || 1;
+        tx /= l;
+        tz /= l;
+        const nx = tz;
+        const nz = -tx;
+        const c = rings % 4 === 0 || first ? rib : rock;
+        for (const [lat, y] of ring) {
+          pos.push(t.x[k] + nx * lat, y, t.z[k] + nz * lat);
+          colors.push(c.r, c.g, c.b);
+        }
+        if (prev >= 0) {
+          for (let j = 0; j < rc - 1; j++) {
+            const a = prev * rc + j;
+            const b = rings * rc + j;
+            idx.push(a, b, a + 1, a + 1, b, b + 1);
+          }
+        }
+        prev = rings;
+        rings++;
+        first = false;
+      }
+    }
+    const geo = this._track(new THREE.BufferGeometry());
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, this._track(new THREE.MeshToonMaterial({ vertexColors: true, side: THREE.DoubleSide })));
+    this.scene.add(mesh);
+
+    // 天井と側壁のランプ（光の影響を受けない材質）
+    const lampGeo = this._track(new THREE.BoxGeometry(2.4, 0.3, 0.9));
+    const lampMat = this._track(new THREE.MeshBasicMaterial({ color: st.lamp }));
+    const spots = [];
+    for (const tn of t.tunnels) {
+      for (let s = tn.a + 10; s < tn.b - 6; s += 22) {
+        const c = t.pointAt(s, 0);
+        spots.push({ x: c.x, y: H - 0.35, z: c.z, h: c.h, w: 1 });
+        for (const side of [1, -1]) {
+          const e = t.pointAt(s + 11, side * (W - 0.4));
+          spots.push({ x: e.x, y: 3.3, z: e.z, h: e.h, w: 0.8, side: true });
+        }
+      }
+    }
+    const lamps = new THREE.InstancedMesh(lampGeo, lampMat, spots.length);
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    spots.forEach((l, i) => {
+      q.setFromAxisAngle(up, l.h);
+      m4.compose(v.set(l.x, l.y, l.z), q, sc.set(l.side ? 0.35 : 1, l.side ? 4 : 1, l.side ? 0.5 : 1));
+      lamps.setMatrixAt(i, m4);
+    });
+    lamps.instanceMatrix.needsUpdate = true;
+    lamps.frustumCulled = false;
+    this.scene.add(lamps);
   }
 
   _sandCastle() {
@@ -993,6 +1315,25 @@ export class World {
       return m;
     });
 
+    // ドッグフード（道に落ちている粒。取られると消えて、しばらくするとまた出る）
+    const foods = this.track.foods;
+    const kibble = this._track(new THREE.DodecahedronGeometry(0.62, 0).scale(1, 0.75, 1));
+    this.foodMesh = new THREE.InstancedMesh(kibble, this._track(new THREE.MeshBasicMaterial({ color: 0xffffff })), foods.length);
+    this.foodHalo = new THREE.InstancedMesh(
+      this._track(new THREE.SphereGeometry(1.15, 8, 6)),
+      this._track(new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.3, depthWrite: false })),
+      foods.length,
+    );
+    const fcol = new THREE.Color();
+    for (let i = 0; i < foods.length; i++) {
+      this.foodMesh.setColorAt(i, fcol.set(i % 2 ? 0xd18a3a : 0xa45f1f));
+      this.foodMesh.setMatrixAt(i, this._m0 || (this._m0 = new THREE.Matrix4().makeScale(0, 0, 0)));
+      this.foodHalo.setMatrixAt(i, this._m0);
+    }
+    this.foodMesh.frustumCulled = this.foodHalo.frustumCulled = false;
+    this.scene.add(this.foodMesh, this.foodHalo);
+    this._foodShown = new Array(foods.length).fill(false);
+
     // ホネ
     const boneMat = this._track(new THREE.MeshToonMaterial({ color: 0xfff6e6 }));
     this._boneParts = {
@@ -1098,6 +1439,7 @@ export class World {
         m.position.y = 1.6 + Math.sin(t * 2.5 + i) * 0.25;
       }
     });
+    if (items.foods) this._updateFoods(items.foods, t);
     this._syncViews(items.proj.filter((p) => !p.f), this.projViews, 'bone', () => this._makeBone(), (v, p) => {
       v.position.set(p.x, 1.1, p.z);
       v.rotation.y = t * 18;
@@ -1112,10 +1454,54 @@ export class World {
     });
   }
 
+  /** ドッグフード: 落ちているものだけ、くるくる回りながら少し浮く */
+  _updateFoods(timers, t) {
+    const foods = this.track.foods;
+    const m4 = this._fm || (this._fm = new THREE.Matrix4());
+    const q = this._fq || (this._fq = new THREE.Quaternion());
+    const up = this._fup || (this._fup = new THREE.Vector3(0, 1, 0));
+    const v = this._fv || (this._fv = new THREE.Vector3());
+    const sc = this._fs || (this._fs = new THREE.Vector3());
+    // 遠くのものは毎フレーム動かさない（軽量化）。カメラの近く（約 140m）だけ回す
+    const cam = this.camera.position;
+    for (let i = 0; i < foods.length; i++) {
+      const f = foods[i];
+      const taken = timers[i] > 0;
+      const near = (f.x - cam.x) ** 2 + (f.z - cam.z) ** 2 < 140 * 140;
+      if (taken) {
+        if (this._foodShown[i]) {
+          this.foodMesh.setMatrixAt(i, this._m0);
+          this.foodHalo.setMatrixAt(i, this._m0);
+          this._foodShown[i] = false;
+          this._foodDirty = true;
+        }
+      } else if (near || !this._foodShown[i]) {
+        q.setFromAxisAngle(up, t * 2.2 + i);
+        const y = 0.95 + Math.sin(t * 3 + i * 0.7) * 0.16;
+        // カメラのすぐ下にあるものは小さくして消す（画面いっぱいに大きく映らないように）
+        const d = Math.hypot(f.x - cam.x, f.z - cam.z);
+        const k = d < 10 ? Math.max(0.001, (d - 2.5) / 7.5) : 1;
+        m4.compose(v.set(f.x, y, f.z), q, sc.set(k, k, k));
+        this.foodMesh.setMatrixAt(i, m4);
+        this.foodHalo.setMatrixAt(i, m4);
+        this._foodShown[i] = true;
+        this._foodDirty = true;
+      }
+    }
+    if (this._foodDirty) {
+      this.foodMesh.instanceMatrix.needsUpdate = true;
+      this.foodHalo.instanceMatrix.needsUpdate = true;
+      this._foodDirty = false;
+    }
+  }
+
   updateAmbient(dt) {
+    // 空はカメラについてくる（大きなコースでも端に行かない）
+    this.sky.position.copy(this.camera.position);
+    this._tun += (this._tunTarget - this._tun) * Math.min(1, dt * 3.5);
     for (const c of this.clouds) {
       c.position.x += c.userData.speed * dt;
-      if (c.position.x > 420) c.position.x = -420;
+      if (c.position.x > this.center.x + this.cloudRange) c.position.x = this.center.x - this.cloudRange;
     }
     for (const f of this.fans) f.animate({ dt, speed: 6, steer: Math.sin(performance.now() / 600) * 0.5, spin: 0, boost: 0, bump: 0, mood: 1 });
     const tt = performance.now() / 1000;
@@ -1161,6 +1547,7 @@ export class World {
       sun: this.sun.intensity,
     };
     this._gray = new THREE.Color(0x5d6578);
+    this._tunFog = new THREE.Color((this.theme.tunnel || {}).fog ?? 0x0b0e1a);
   }
 
   /** 豪雨の強さ 0..1 */
@@ -1175,15 +1562,20 @@ export class World {
     const b = this._base;
     // 空を暗くする
     const k = level * 0.6;
+    const tun = this._tun;
     this.scene.fog.color.copy(b.fog).lerp(this._gray, k);
+    if (tun > 0.002) this.scene.fog.color.lerp(this._tunFog, tun);
     this.scene.background.copy(this.scene.fog.color);
+    // トンネルの中は霧が近く、暗くなる（遠くは闇に溶ける）
+    this.scene.fog.near = 160 - tun * 140;
+    this.scene.fog.far = 520 - tun * 300;
     this.sky.material.uniforms.top.value.copy(b.top).lerp(this._gray, k);
     this.sky.material.uniforms.bottom.value.copy(b.bottom).lerp(this._gray, k * 0.8);
-    this.hemi.intensity = b.hemi * (1 - level * 0.3);
-    this.sun.intensity = b.sun * (1 - level * 0.55);
+    this.hemi.intensity = b.hemi * (1 - level * 0.3) * (1 - tun * 0.42);
+    this.sun.intensity = b.sun * (1 - level * 0.55) * (1 - tun * 0.85);
     this.cloudMat.color.setScalar(1 - level * 0.45);
 
-    this.rainLines.visible = level > 0.02;
+    this.rainLines.visible = level > 0.02 && tun < 0.6; // トンネルの中は雨が降らない
     if (this.rainLines.visible) {
       const d = this._drops;
       const n = Math.floor((d.length / 3) * Math.min(1, level));
@@ -1228,12 +1620,14 @@ export class World {
   followSun(x, z) {
     this.sun.position.set(x + 40, 80, z + 25);
     this.sun.target.position.set(x, 0, z);
+    // 見ている車がトンネルの中（入口の少し手前から）なら暗くする
+    if (this.track.tunnels.length) this._tunTarget = this.track.inTunnel(this.track.project(x, z).s, 8) ? 1 : 0;
   }
 
   /** 車の見た目を必要な台数だけ用意する（NPC の数はスナップショットで決まる） */
-  ensureKarts(n) {
+  ensureKarts(n, boss = -1) {
     while (this.karts.length < n) {
-      const k = new KartView(this.karts.length);
+      const k = new KartView(this.karts.length === boss ? 6 : this.karts.length); // 6 = ボス犬の見た目
       this.scene.add(k.group, k.blob);
       this.karts.push(k);
     }

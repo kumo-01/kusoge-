@@ -229,6 +229,11 @@ class Sound {
           this._noise({ dur: 0.25, vol: 0.5, filter: 'bandpass', from: 2500, to: 600, q: 0.7 });
           this._tone({ from: 70, to: 35, dur: 1.2, vol: 0.4 });
           break;
+        case 'food':
+          // ドッグフード: カリッ
+          this._noise({ dur: 0.05, vol: 0.2, filter: 'highpass', from: 2500, to: 5200 });
+          this._tone({ type: 'triangle', from: 880, to: 1320, dur: 0.08, vol: 0.12 });
+          break;
         case 'pad':
           // ブーストパッド: ピュイーン
           this._tone({ type: 'sawtooth', from: 300, to: 1400, dur: 0.3, vol: 0.14 });

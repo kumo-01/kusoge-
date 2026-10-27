@@ -1,7 +1,7 @@
 // NPC（コンピューター）の運転。ホストだけが実行し、入力ビットを作って人間と同じ物理で走らせる。
 // 思考に使う状態（走行ライン・引っかかり時間）は車の状態に入れてあるので、スナップショットで復元できる。
 
-import { IN, ITEMS, KART, NPC, TIMING } from './constants.js';
+import { IN, ITEMS, KART, NPC, TIMING, BOSS } from './constants.js';
 import { nextRandom } from './items.js';
 
 function angleTo(k, x, z) {
@@ -37,13 +37,15 @@ export function npcInput(sim, k, dt) {
   let best = -Infinity;
   for (let i = 0; i < 2 && i < s.karts.length; i++) best = Math.max(best, sim.prog[i]);
   const gap = sim.prog[k.i] - best;
-  k.ms = gap > NPC.RUBBER_DIST ? NPC.SPEED_AHEAD : gap < -NPC.RUBBER_DIST ? NPC.SPEED_BEHIND : NPC.SPEED;
+  const boss = !!k.boss; // ボス犬: 速く、ラインがきれいで、カーブでも減速が少なく、アイテムも上手に使う
+  if (boss) k.ms = gap > BOSS.FAR_DIST ? BOSS.SPEED_FAR : gap < -BOSS.BEHIND_DIST ? BOSS.SPEED_BEHIND : BOSS.SPEED;
+  else k.ms = gap > NPC.RUBBER_DIST ? NPC.SPEED_AHEAD : gap < -NPC.RUBBER_DIST ? NPC.SPEED_BEHIND : NPC.SPEED;
 
   // ときどき走行ラインを変える
   k.at -= dt;
   if (k.at <= 0) {
-    k.al = (nextRandom(s) * 2 - 1) * (track.roadHalf - 3.5);
-    k.at = 1.5 + nextRandom(s) * 3;
+    k.al = (nextRandom(s) * 2 - 1) * (track.roadHalf - 3.5) * (boss ? 0.45 : 1);
+    k.at = (boss ? 2.5 : 1.5) + nextRandom(s) * 3;
   }
   // 前方のバナナはよける
   for (const bn of s.bananas) {
@@ -55,7 +57,7 @@ export function npcInput(sim, k, dt) {
     }
   }
 
-  const look = 10 + Math.max(0, k.sp) * 0.45;
+  const look = (boss ? 12 : 10) + Math.max(0, k.sp) * (boss ? 0.5 : 0.45);
   const tgt = track.pointAt(ps + look, k.al);
   const d = angleTo(k, tgt.x, tgt.z);
   let bits = 0;
@@ -65,8 +67,8 @@ export function npcInput(sim, k, dt) {
   // カーブの手前で減速
   const bend = bendAhead(track, ps, 6, 6 + Math.max(20, k.sp * 1.2));
   const fast = k.sp > KART.MAX_SPEED * k.ms * 0.78;
-  if (bend > 1.25 && fast) bits |= IN.DOWN;
-  else if (!(bend > 0.85 && fast)) bits |= IN.UP;
+  if (bend > (boss ? 1.5 : 1.25) && fast) bits |= IN.DOWN;
+  else if (!(bend > (boss ? 1.05 : 0.85) && fast)) bits |= IN.UP;
   // 芝生に出ていたら道路へ戻る
   if (Math.abs(plat) > track.roadHalf + 0.5) bits |= IN.UP;
 
@@ -80,7 +82,7 @@ export function npcInput(sim, k, dt) {
 
   // タイミングブースト: だいたいのタイミングで押す（ジャストとは限らない）
   if (k.tw > 0) {
-    if (k.tn <= 0) k.tn = TIMING.SWEET + (nextRandom(s) - 0.5) * 0.5;
+    if (k.tn <= 0) k.tn = TIMING.SWEET + (boss ? 0 : (nextRandom(s) - 0.5) * 0.5);
     if (k.tw <= k.tn) {
       bits |= IN.TAP;
       k.tn = 0;
@@ -99,12 +101,13 @@ export function npcInput(sim, k, dt) {
     } else if (k.item === ITEMS.GUARD) {
       use = nextRandom(s) < dt * 0.8; // すぐ使う
     } else if (k.item === ITEMS.FRISBEE) {
-      // 前に誰かがいて、そこそこ近いときに投げる
+      // 前に誰かがいて、そこそこ近いときに投げる（ボス犬は外さないよう、もっと近づいてから）
+      const near = boss ? 60 : 80;
       for (const o of s.karts) {
         if (o === k || sim.prog[o.i] <= sim.prog[k.i]) continue;
-        if (sim.prog[o.i] - sim.prog[k.i] < 80) use = true;
+        if (sim.prog[o.i] - sim.prog[k.i] < near) use = true;
       }
-      if (!use && nextRandom(s) < dt * 0.15) use = true; // 先頭で相手がいなくても持ちっぱなしにしない
+      if (!use && nextRandom(s) < dt * (boss ? 0.05 : 0.15)) use = true; // 先頭で相手がいなくても持ちっぱなしにしない
     } else {
       for (const o of s.karts) {
         if (o === k) continue;
@@ -112,7 +115,7 @@ export function npcInput(sim, k, dt) {
         const dz = o.z - k.z;
         const dist = Math.hypot(dx, dz);
         const dot = (dx * fx + dz * fz) / (dist || 1);
-        if (k.item === ITEMS.BONE && dist < 45 && dot > 0.96) use = true;
+        if (k.item === ITEMS.BONE && dist < (boss ? 60 : 45) && dot > (boss ? 0.97 : 0.96)) use = true;
         if (k.item === ITEMS.BANANA && dist < 26 && dot < -0.8) use = true;
       }
       // 長く持ちすぎたら適当に使う

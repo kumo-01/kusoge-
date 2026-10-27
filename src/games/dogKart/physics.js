@@ -3,9 +3,9 @@
 // 車の速度 = 前方向 × sp（スカラー）＋ 押し出し速度 (kx, kz)
 // 押し出し速度は横滑りやノックバックとして働き、すぐに減衰する。
 
-import { KART, IN, RAIN, PAD } from './constants.js';
+import { KART, IN, RAIN, PAD, FOOD } from './constants.js';
 
-export function createKart(index, pos) {
+export function createKart(index, pos, boss = false) {
   return {
     i: index,
     x: pos.x,
@@ -37,6 +37,8 @@ export function createKart(index, pos) {
     best: 0,
     bc: 0, // 体当たり演出のクールダウン
     npc: index >= 2 ? 1 : 0,
+    boss: boss ? 1 : 0, // ボス犬（かなり強い NPC）
+    fd: 0, // 持っているドッグフードの数（多いほど少し速い）
     ms: 1, // 最高速の倍率（NPC の手加減・追い上げ用）
     al: 0, // NPC: 目標の走行ライン（横位置）
     at: 0, // NPC: 走行ラインを変えるまでの時間
@@ -47,7 +49,7 @@ export function createKart(index, pos) {
     gd: 0, // ガードの残り時間（0 なら無し）
     wet: 0, // 豪雨で遅くなっている残り時間
     rq: 0, // 豪雨を呼ぶ入力の保留時間（最終ラップに入る直前に押した場合）
-    stats: { bumps: 0, hits: 0, hitBy: 0, walls: 0, items: 0, boosts: 0 },
+    stats: { bumps: 0, hits: 0, hitBy: 0, walls: 0, items: 0, boosts: 0, foods: 0 },
   };
 }
 
@@ -55,7 +57,7 @@ export function createKart(index, pos) {
 export const PHYS_KEYS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'spin', 'boost', 'slow', 'inv', 'rc', 'wet'];
 
 export function maxSpeedOf(k) {
-  let m = (k.boost > 0 ? KART.BOOST_SPEED : KART.MAX_SPEED) * (k.ms || 1);
+  let m = (k.boost > 0 ? KART.BOOST_SPEED : KART.MAX_SPEED) * (k.ms || 1) * (1 + (k.fd || 0) * FOOD.SPEED);
   if (k.slow > 0) m *= KART.SLOW_FACTOR;
   if (k.wet > 0) m *= RAIN.FACTOR;
   if (k.grass && k.boost <= 0) m *= KART.GRASS_FACTOR;

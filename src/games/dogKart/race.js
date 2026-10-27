@@ -2,7 +2,7 @@
 // 状態 this.s はシリアライズ可能なデータだけで構成し、Three.js のオブジェクトは一切持たない。
 // 車は 0 = ホスト, 1 = ゲスト, 2 以降 = NPC。
 
-import { RACE, ITEMS, IN, RAIN, TIMING } from './constants.js';
+import { RACE, ITEMS, IN, RAIN, TIMING, FOOD, SCORE } from './constants.js';
 import { createKart, stepKart, collideKarts } from './physics.js';
 import { updateItems, useItem } from './items.js';
 import { npcInput } from './npc.js';
@@ -10,14 +10,19 @@ import { stepTiming, pickChances } from './timing.js';
 import { formatTime } from '../../core/util.js';
 
 export const KART_NAMES = ['柴犬', 'コーギー', 'プードル', 'パグ', 'ダックス', 'ハスキー'];
+export const BOSS_NAME = 'ドーベルマン';
+
+/** 車の名前（ボス犬は台数に関係なく専用の名前） */
+export const kartName = (k) => (k?.boss ? BOSS_NAME : KART_NAMES[k?.i] || '');
 
 export class RaceSim {
-  /** @param {{ npcs?: number }} options */
+  /** @param {{ npcs?: number, boss?: number }} options npcs: ふつうの NPC の台数, boss: ボス犬を出すか */
   constructor(track, options = {}) {
     this.track = track;
     this.boxPos = track.itemBoxes();
     this.events = [];
-    this.npcs = Math.max(0, Math.min(RACE.MAX_NPCS, options.npcs | 0));
+    this.boss = options.boss ? 1 : 0;
+    this.npcs = Math.max(0, Math.min(RACE.MAX_NPCS - 1, options.npcs | 0)) + this.boss;
     this.prog = [];
     this.reset();
   }
@@ -32,8 +37,9 @@ export class RaceSim {
       t: -RACE.COUNTDOWN, // レース時間（0 でスタート）
       endT: 0,
       winner: -1,
-      karts: Array.from({ length: n }, (_, i) => createKart(i, t.startPos(i))),
+      karts: Array.from({ length: n }, (_, i) => createKart(i, t.startPos(i), !!this.boss && i === n - 1)),
       boxes: this.boxPos.map(() => 0),
+      foods: t.foods.map(() => 0), // ドッグフードが次に出るまでの残り時間（0 なら落ちている）
       proj: [],
       bananas: [],
       nextId: 1,
@@ -63,6 +69,7 @@ export class RaceSim {
     this.prog = s.karts.map((k) => this.progressOf(k));
 
     s.rain = Math.max(0, s.rain - dt);
+    for (let i = 0; i < s.foods.length; i++) if (s.foods[i] > 0) s.foods[i] = Math.max(0, s.foods[i] - dt);
 
     for (const k of s.karts) {
       const inp = k.npc ? npcInput(this, k, dt) : inputs[k.i] | 0;
@@ -83,6 +90,7 @@ export class RaceSim {
         ev.push({ t: 'wall', k: k.i, x: k.x, z: k.z, s: wall });
       }
       this.updateProgress(k);
+      if (active) this.collectFood(k);
       // 安全装置: 数値が壊れた・コース外に出すぎたら復帰
       const p = track.project(k.x, k.z);
       if (!Number.isFinite(k.x + k.z + k.h + k.sp) || Math.abs(p.lat) > track.wallDist + 3) {
@@ -127,6 +135,25 @@ export class RaceSim {
     updateItems(s, dt, track, this.boxPos, (i) => this.rankOf(i), ev);
 
     if (s.phase === 'finished') s.endT = Math.max(0, s.endT - dt);
+  }
+
+  /** ドッグフードを拾う。持てる数（FOOD.MAX）まで。いっぱいのときは通り過ぎる（他の車が拾える） */
+  collectFood(k) {
+    if (k.fd >= FOOD.MAX || (k.fin && !k.npc) || k.y > 1.2) return;
+    const s = this.s;
+    const foods = this.track.foods;
+    const r2 = (FOOD.RADIUS + 0.4) ** 2;
+    for (let j = 0; j < foods.length; j++) {
+      if (s.foods[j] > 0) continue;
+      const dx = k.x - foods[j].x;
+      const dz = k.z - foods[j].z;
+      if (dx * dx + dz * dz > r2) continue;
+      s.foods[j] = FOOD.RESPAWN;
+      k.fd++;
+      k.stats.foods++;
+      if (k.i < RACE.HUMANS) this.events.push({ t: 'food', k: k.i, n: k.fd, x: foods[j].x, z: foods[j].z });
+      if (k.fd >= FOOD.MAX) break;
+    }
   }
 
   /** チェックポイントと周回の判定。順番に通らないと周回数は増えない */
@@ -246,6 +273,25 @@ export class RaceSim {
     this.s = sanitizeSnapshot(snap, this.s, this.boxPos.length);
   }
 
+  /** 連戦のポイント: 総合順位ポイント + ドッグフード + 体当たり + アイテム命中 + ファステストラップ（人間 2 人それぞれ） */
+  calcScores(prog = null) {
+    const s = this.s;
+    const pr = prog || s.karts.map((k) => this.progressOf(k));
+    const humans = s.karts.slice(0, RACE.HUMANS);
+    // ベストラップが 2 人のうち速かったほう（周回を終えている人だけ。同じタイムなら無し）
+    const bests = humans.map((k) => (k.best > 0 ? k.best : Infinity));
+    const fastest = bests[0] < bests[1] ? 0 : bests[1] < bests[0] ? 1 : -1;
+    return humans.map((k) => {
+      const rank = this.rankOf(k.i, pr);
+      const rankPts = SCORE.RANK[Math.min(rank, SCORE.RANK.length) - 1] || 0;
+      const foodPts = k.stats.foods * SCORE.FOOD;
+      const bumpPts = k.stats.bumps * SCORE.BUMP;
+      const hitPts = k.stats.hits * SCORE.HIT;
+      const fastPts = fastest === k.i ? SCORE.FAST : 0;
+      return { rank, rankPts, foods: k.stats.foods, foodPts, bumps: k.stats.bumps, bumpPts, hits: k.stats.hits, hitPts, fastPts, total: rankPts + foodPts + bumpPts + hitPts + fastPts };
+    });
+  }
+
   /** 結果画面用の成績 */
   buildResult() {
     const s = this.s;
@@ -265,6 +311,7 @@ export class RaceSim {
       stat('走行時間', (k) => (k.fin ? formatTime(k.ft) : `${formatTime(Math.max(0, s.t))}（未ゴール）`)),
       stat('周回数', (k) => `${Math.min(k.lap, RACE.LAPS)} / ${RACE.LAPS}`),
       stat('ベストラップ', (k) => (k.best ? formatTime(k.best) : '-')),
+      stat('ドッグフード', (k) => `${k.stats.foods} 個`),
       stat('体当たり成功', (k) => `${k.stats.bumps} 回`),
       stat('アイテム命中', (k) => `${k.stats.hits} 回`),
       stat('くらった回数', (k) => `${k.stats.hitBy} 回`),
@@ -273,17 +320,31 @@ export class RaceSim {
     ];
     if (total > 2) {
       const order = s.karts.map((k) => k.i).sort((x, y) => this.rankOf(x, prog) - this.rankOf(y, prog));
-      const names = order.map((i, n) => `${n + 1}.${KART_NAMES[i]}`);
+      const names = order.map((i, n) => `${n + 1}.${kartName(s.karts[i])}`);
       const half = Math.ceil(names.length / 2);
       stats.push({ label: '着順', host: names.slice(0, half).join(' '), guest: names.slice(half).join(' ') });
     }
+    // ポイントの内訳
+    const [ha, gu] = this.calcScores(prog);
+    const row = (label, f) => ({ label, host: f(ha), guest: f(gu) });
+    const score = [
+      row('🏁 順位ポイント', (p) => `${p.rank}位 → ${p.rankPts}`),
+      row('🍖 ドッグフード', (p) => `${p.foods}個 → ${p.foodPts}`),
+      row('💥 体当たり成功', (p) => `${p.bumps}回 → ${p.bumpPts}`),
+      row('🎯 アイテム命中', (p) => `${p.hits}回 → ${p.hitPts}`),
+      row('⏱ ファステストラップ', (p) => (p.fastPts ? `+${p.fastPts}` : '-')),
+      row('今回の合計', (p) => `${p.total} pt`),
+    ];
     return {
       gameId: 'dogKart',
       winner,
       title: `${name[winner]}の勝ち！ワン！`,
+      course: this.track.name,
       host: line(a),
       guest: line(b),
       stats,
+      score,
+      points: { host: ha.total, guest: gu.total },
     };
   }
 }
@@ -311,11 +372,22 @@ function sanitizeKart(r, i, prev) {
   k.cp = int(r.cp, 0, 0, RACE.CHECKPOINTS - 1);
   k.item = int(r.item, 0, 0, 5);
   k.gd = num(r.gd, 0, 0, ITEMS.GUARD_TIME);
+  k.fd = int(r.fd, 0, 0, FOOD.MAX);
   // stats は定期配信では省略されることがある（そのときは前回の値を使う）
   const st = r.stats && typeof r.stats === 'object' ? r.stats : prev.stats || {};
   k.stats = {};
-  for (const f of ['bumps', 'hits', 'hitBy', 'walls', 'items', 'boosts']) k.stats[f] = int(st[f], 0, 0, 1e6);
+  for (const f of ['bumps', 'hits', 'hitBy', 'walls', 'items', 'boosts', 'foods']) k.stats[f] = int(st[f], 0, 0, 1e6);
   return k;
+}
+
+/** ドッグフードの状態: 完全な状態は配列、定期配信は「取られている番号の一覧（foodTaken）」で届く */
+function sanitizeFoods(r, prev) {
+  const n = prev.foods?.length || 0;
+  if (Array.isArray(r.foodTaken)) {
+    const taken = new Set(r.foodTaken.filter((v) => Number.isInteger(v) && v >= 0 && v < n));
+    return Array.from({ length: n }, (_, i) => (taken.has(i) ? 1 : 0));
+  }
+  return Array.from({ length: n }, (_, i) => num(Array.isArray(r.foods) ? r.foods[i] : 0, 0, 0, FOOD.RESPAWN));
 }
 
 export function sanitizeSnapshot(r, prev, boxCount) {
@@ -331,6 +403,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
     winner: r.winner === 0 || r.winner === 1 ? r.winner : -1,
     karts: r.karts.map((rk, i) => sanitizeKart(rk, i, prev.karts[i] || createKart(i, { x: 0, z: 0, h: 0 }))),
     boxes: Array.from({ length: boxCount }, (_, i) => num(Array.isArray(r.boxes) ? r.boxes[i] : 0, 0, 0, 60)),
+    foods: sanitizeFoods(r, prev),
     proj: [],
     bananas: [],
     nextId: int(r.nextId, 1),
@@ -357,7 +430,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
 }
 
 // ---- 定期配信用のコンパクトな形式（キー名を省いて配列にする。通信量を約半分に） ----
-const NET_KART_FIELDS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'tw', 'tb', 'wet', 'gd'];
+const NET_KART_FIELDS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'tw', 'tb', 'wet', 'gd', 'fd'];
 const PHASES = ['countdown', 'racing', 'finished'];
 
 /** 定期配信用に詰める（stats や NPC の思考状態は省く） */
@@ -374,6 +447,7 @@ export function packNet(s) {
     rn: [s.rain, s.rk, s.ru],
     k: s.karts.map((k) => NET_KART_FIELDS.map((f) => k[f])),
     b: s.boxes,
+    fo: s.foods.reduce((a, t, i) => (t > 0 && a.push(i), a), []),
     pr: s.proj.map((p) => [p.id, p.o, p.x, p.z, p.vx, p.vz, p.life, p.age, p.b, p.f | 0, p.t ?? -1, p.d || 0]),
     bn: s.bananas.map((b) => [b.id, b.o, b.x, b.z, b.life, b.age]),
   };
@@ -398,8 +472,9 @@ export function unpackNet(p) {
     rain: Array.isArray(p.rn) ? p.rn[0] : 0,
     rk: Array.isArray(p.rn) ? p.rn[1] : -1,
     ru: Array.isArray(p.rn) ? p.rn[2] : 0,
-    karts: p.k.slice(0, 8).map((a) => row(a, NET_KART_FIELDS)),
+    karts: p.k.slice(0, RACE.HUMANS + RACE.MAX_NPCS).map((a) => row(a, NET_KART_FIELDS)),
     boxes: p.b,
+    foodTaken: Array.isArray(p.fo) ? p.fo.slice(0, 400) : [],
     proj: Array.isArray(p.pr) ? p.pr.slice(0, 32).map((a) => row(a, ['id', 'o', 'x', 'z', 'vx', 'vz', 'life', 'age', 'b', 'f', 't', 'd'])) : [],
     bananas: Array.isArray(p.bn) ? p.bn.slice(0, 16).map((a) => row(a, ['id', 'o', 'x', 'z', 'life', 'age'])) : [],
   };

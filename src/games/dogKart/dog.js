@@ -33,6 +33,8 @@ const STYLE = {
   poodle: { fur: 0xfff3f6, dark: 0xf2d4dd, cream: 0xffffff, inner: 0xffd0dc, ears: 'floppy', earSpread: 0.46, scarf: 0xff6fae, pom: true },
   pug: { fur: 0xead1a4, dark: 0x3b2f2a, cream: 0xf6e3c0, inner: 0x3b2f2a, ears: 'fold', earSpread: 0.36, scarf: 0x22b573, muzzle: 0x3b2f2a },
   dachs: { fur: 0xb5622e, dark: 0x7a3b16, cream: 0xe0a070, inner: 0x7a3b16, ears: 'long', earSpread: 0.44, scarf: 0xffd23f, snout: true },
+  // ボス犬
+  doberman: { fur: 0x2d2d38, dark: 0x16161d, cream: 0xc9773a, inner: 0xc9773a, earH: 0.7, earW: 0.2, earSpread: 0.3, earTilt: 0.04, scarf: 0xff3b3b, snout: true },
   husky: { fur: 0x8d97aa, dark: 0x5b6477, cream: 0xffffff, inner: 0xffd2d8, earH: 0.46, earW: 0.26, earSpread: 0.31, earTilt: 0.1, scarf: 0x8a63ff, mask: true },
 };
 

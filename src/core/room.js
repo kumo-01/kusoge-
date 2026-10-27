@@ -4,7 +4,8 @@
 //   screen: 'lobby'（ゲスト待ち） | 'home' | 'select' | 'ready' | 'game' | 'result'
 //   guest:  'none' | 'connected' | 'waiting'（復帰待ち） | 'syncing'（状態復元中）
 //   ready:  { host, guest }
-//   gameId, match: { matchId, gen, status: 'loading'|'running'|'paused'|'resuming', reason, synced, started }
+//   gameId, match: { matchId, gen, status: 'loading'|'running'|'paused'|'resuming', reason, synced, started, opts }
+//   series: 連戦の途中経過 { total, round, host, guest, final, history } または null（1 レースだけのとき）
 //   result
 //
 // 通信状態（guest フィールド・ゲスト側の linkState）は画面状態とは独立して管理する。
@@ -13,7 +14,7 @@
 import { Emitter, randomHex, now } from './util.js';
 import { HostNetwork, GuestNetwork, describePeerError } from './network.js';
 import { GameManager } from './gameManager.js';
-import { getGame, defaultOptions, validOptions } from '../games/registry.js';
+import { getGame, defaultOptions, validOptions, resolveMatchOptions } from '../games/registry.js';
 import { sanitizeRoomState, sanitizeResult, REJECT_REASONS } from './protocol.js';
 import { clearGuestSession } from './reconnect.js';
 
@@ -38,6 +39,7 @@ export class HostRoom extends Emitter {
       gameId: null,
       options: {},
       match: null,
+      series: null,
       result: null,
       hostHidden: document.visibilityState === 'hidden',
     };
@@ -47,6 +49,7 @@ export class HostRoom extends Emitter {
     this._startAt = 0;
     this._startTimer = null;
     this._resumeTimer = null;
+    this._used = {}; // 連戦でこれまでに使った設定（ランダムのコースを重ねないため）
     this.closed = false;
     this.net = new HostNetwork({ getRoomState: () => this.publicState() });
     this.gm = new GameManager({ role: 'host', net: this.net, input, sound, music, layer });
@@ -89,7 +92,8 @@ export class HostRoom extends Emitter {
       ...s,
       ready: { ...s.ready },
       options: { ...s.options },
-      match: s.match ? { ...s.match } : null,
+      match: s.match ? { ...s.match, opts: { ...s.match.opts } } : null,
+      series: s.series ? { ...s.series, history: s.series.history.map((x) => ({ ...x })) } : null,
       startInMs: this._startAt ? Math.max(0, this._startAt - now()) : null,
     };
   }
@@ -210,6 +214,7 @@ export class HostRoom extends Emitter {
     this._resetReady();
     s.screen = 'select';
     s.result = null;
+    s.series = null;
     s.gameId = null;
     this._changed();
   }
@@ -255,13 +260,26 @@ export class HostRoom extends Emitter {
       this._changed();
       return;
     }
+    // 連戦（設定 races が 2 以上）は、結果画面から「次のレースへ」で続ける
+    const races = validOptions(def, s.options).races | 0;
+    s.series = races > 1 ? { total: races, round: 1, host: 0, guest: 0, final: false, history: [] } : null;
+    this._used = {};
+    await this._launchMatch(def);
+  }
+
+  /** 1 レースぶんのゲームを起動する（最初のレースも、連戦の次のレースも同じ） */
+  async _launchMatch(def) {
+    const s = this.state;
     const matchId = randomHex(8);
+    const opts = { ...resolveMatchOptions(def, s.options, this._used), round: s.series?.round ?? 1 };
+    for (const opt of def.options || []) if (opt.choices.some((c) => c.random)) (this._used[opt.key] ||= []).push(opts[opt.key]);
     s.screen = 'game';
     s.ready = { host: false, guest: false };
-    s.match = { matchId, gen: 1, status: 'loading', reason: null, synced: false, started: false };
+    s.result = null;
+    s.match = { matchId, gen: 1, status: 'loading', reason: null, synced: false, started: false, opts };
     this._changed();
     try {
-      await this.gm.create(def, matchId, 1, validOptions(def, s.options));
+      await this.gm.create(def, matchId, 1, opts);
       await this.gm.firstFrame;
     } catch (err) {
       console.error(err);
@@ -272,6 +290,15 @@ export class HostRoom extends Emitter {
     if (s.match?.matchId !== matchId || !this.gm.game) return; // 読み込み中に中止された
     if (this.net.guestConnected) this._sendFullSync();
     this._changed();
+  }
+
+  /** 連戦: 結果画面から次のレースを始める（ホストのみ） */
+  nextRace() {
+    const s = this.state;
+    const def = getGame(s.gameId);
+    if (s.screen !== 'result' || !s.series || s.series.final || !def || s.guest !== 'connected') return;
+    s.series.round++;
+    this._launchMatch(def);
   }
 
   /** ゲストへ完全な状態を送り、ACK を待つ */
@@ -361,6 +388,7 @@ export class HostRoom extends Emitter {
     this.gm.destroy();
     if (matchId) this.net.send({ type: 'game_abort', matchId });
     s.match = null;
+    s.series = null;
     s.screen = 'select';
     s.gameId = null;
     if (s.guest === 'syncing') s.guest = 'connected';
@@ -373,6 +401,14 @@ export class HostRoom extends Emitter {
     const matchId = s.match.matchId;
     this.gm.destroy();
     s.result = sanitizeResult(result);
+    const se = s.series;
+    if (se && s.result?.points) {
+      // 連戦: このレースのポイントを足す
+      se.host += s.result.points.host;
+      se.guest += s.result.points.guest;
+      se.history.push({ name: s.result.course, host: s.result.points.host, guest: s.result.points.guest });
+      se.final = se.round >= se.total;
+    }
     this.net.send({ type: 'game_result', matchId, result: s.result });
     s.match = null;
     s.screen = 'result';
@@ -487,7 +523,7 @@ export class GuestRoom extends Emitter {
         if (!def || this.state?.screen !== 'game') return;
         if (!this.gm.game || this.gm.matchId !== msg.matchId) {
           try {
-            await this.gm.create(def, msg.matchId, msg.gen, validOptions(def, this.state?.options));
+            await this.gm.create(def, msg.matchId, msg.gen, { ...validOptions(def, this.state?.options), ...this.state?.match?.opts });
             await this.gm.firstFrame; // 重い初回描画を済ませてから ACK する
           } catch (err) {
             console.error(err);

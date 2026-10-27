@@ -2,8 +2,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Track, COURSES } from '../src/games/dogKart/track.js';
-import { RaceSim, sanitizeSnapshot, packNet, unpackNet } from '../src/games/dogKart/race.js';
-import { IN, ITEMS, RACE, KART, TIMING, RAIN, PAD } from '../src/games/dogKart/constants.js';
+import { RaceSim, sanitizeSnapshot, packNet, unpackNet, kartName } from '../src/games/dogKart/race.js';
+import { maxSpeedOf as maxSpeedFor } from '../src/games/dogKart/physics.js';
+import { spinKart } from '../src/games/dogKart/items.js';
+import { IN, ITEMS, RACE, KART, TIMING, RAIN, PAD, FOOD, SCORE } from '../src/games/dogKart/constants.js';
+import { getGame, resolveMatchOptions, validOptions } from '../src/games/registry.js';
 import { decode, encode, FROM_GUEST, FROM_HOST, sanitizeRoomState } from '../src/core/protocol.js';
 
 const DT = 1 / 60;
@@ -41,7 +44,7 @@ function bot(k, latOff = 0, tr = track) {
 }
 
 test('コースは閉じていて、離れた区間同士が十分に離れている', () => {
-  assert.ok(track.length > 1200);
+  assert.ok(track.length > 2400);
   let minD = Infinity;
   for (let i = 0; i < track.n; i += 2)
     for (let j = i + 2; j < track.n; j += 2) {
@@ -54,7 +57,7 @@ test('コースは閉じていて、離れた区間同士が十分に離れて�
 test('ボット同士で3周レースが完走し、勝者が決まる', () => {
   const sim = new RaceSim(track);
   let laps = 0;
-  for (let i = 0; i < 60 * 240 && sim.s.phase !== 'finished'; i++) {
+  for (let i = 0; i < 60 * 480 && sim.s.phase !== 'finished'; i++) {
     const [a, b] = sim.s.karts;
     sim.step(DT, [bot(a, 3), bot(b, -3)]);
     for (const e of sim.drainEvents()) if (e.t === 'lap') laps++;
@@ -63,7 +66,7 @@ test('ボット同士で3周レースが完走し、勝者が決まる', () => {
   assert.ok(sim.s.winner === 0 || sim.s.winner === 1);
   const w = sim.s.karts[sim.s.winner];
   assert.equal(w.lap, RACE.LAPS);
-  assert.ok(w.ft > 30 && w.ft < 200, `finish time ${w.ft}`);
+  assert.ok(w.ft > 120 && w.ft < 420, `finish time ${w.ft}`);
   assert.ok(laps >= RACE.LAPS);
   const r = sim.buildResult();
   assert.equal(r.winner, sim.s.winner === 0 ? 'host' : 'guest');
@@ -263,8 +266,8 @@ test('アイテムを持っている車はボックスをすり抜け、箱は�
   assert.ok(sim.s.boxes[0] > 0);
 });
 
-test('アイテムボックスは 1 か所に横 5 列', () => {
-  assert.equal(new RaceSim(track).boxPos.length, 15);
+test('アイテムボックスは 6 か所に横 5 列', () => {
+  assert.equal(new RaceSim(track).boxPos.length, 30);
 });
 
 test('NPC 2 台入りのレース: NPC が自分で走って周回し、人間がゴールすると決着する', () => {
@@ -272,7 +275,7 @@ test('NPC 2 台入りのレース: NPC が自分で走って周回し、人間�
   assert.equal(sim.s.karts.length, 4);
   let npcLaps = 0;
   let npcItems = 0;
-  for (let i = 0; i < 60 * 240 && sim.s.phase !== 'finished'; i++) {
+  for (let i = 0; i < 60 * 480 && sim.s.phase !== 'finished'; i++) {
     const [a, b] = sim.s.karts;
     sim.step(DT, [bot(a, 4), bot(b, -4)]);
     for (const e of sim.drainEvents()) {
@@ -293,19 +296,30 @@ test('NPC 2 台入りのレース: NPC が自分で走って周回し、人間�
   assert.equal(other.s.karts[3].npc, 1);
 });
 
-test('全コース: 閉じていて離れた区間が十分離れ、内側が lat < 0、6 台のスタート位置が道路上', () => {
-  assert.equal(COURSES.length, 5);
+test('全コース: 閉じていて離れた区間が十分離れ、内側が lat < 0、7 台のスタート位置が道路上', () => {
+  assert.equal(COURSES.length, 10);
   COURSES.forEach((c, ci) => {
     const t = new Track(ci);
     assert.equal(t.name, c.name);
-    assert.ok(t.length > 1200 && t.length < 1600, `${c.name} length ${t.length}`);
+    assert.ok(t.length > 2400 && t.length < 3200, `${c.name} length ${t.length}`);
+    // カーブがきつすぎない（15m 離れた 3 点の外接円の半径）
+    const kk = Math.round(15 / (t.length / t.n));
+    let minR = Infinity;
+    for (let i = 0; i < t.n; i++) {
+      const a = [t.x[(i - kk + t.n) % t.n], t.z[(i - kk + t.n) % t.n]];
+      const b = [t.x[i], t.z[i]];
+      const d = [t.x[(i + kk) % t.n], t.z[(i + kk) % t.n]];
+      const cross = Math.abs((b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0]));
+      if (cross > 1e-6) minR = Math.min(minR, (Math.hypot(b[0] - a[0], b[1] - a[1]) * Math.hypot(d[0] - b[0], d[1] - b[1]) * Math.hypot(d[0] - a[0], d[1] - a[1])) / (2 * cross));
+    }
+    assert.ok(minR > 22, `${c.name} min radius ${minR}`);
     let minD = Infinity;
     for (let i = 0; i < t.n; i += 2)
       for (let j = i + 2; j < t.n; j += 2) {
         if (Math.abs(t.wrapDS(t.cum[i] - t.cum[j])) < 70) continue;
         minD = Math.min(minD, Math.hypot(t.x[i] - t.x[j], t.z[i] - t.z[j]));
       }
-    assert.ok(minD > t.wallDist * 2 + 15, `${c.name} min separation ${minD}`);
+    assert.ok(minD > t.wallDist * 2 + 25, `${c.name} min separation ${minD}`);
     // 反時計回り（内側が中心線の右 = lat < 0）
     let area = 0;
     for (let i = 0; i < t.n; i++) {
@@ -313,7 +327,7 @@ test('全コース: 閉じていて離れた区間が十分離れ、内側が la
       area += t.x[i] * t.z[k] - t.x[k] * t.z[i];
     }
     assert.ok(area > 0, `${c.name} orientation`);
-    const starts = Array.from({ length: 6 }, (_, i) => t.startPos(i));
+    const starts = Array.from({ length: 7 }, (_, i) => t.startPos(i));
     for (const [i, p] of starts.entries()) {
       assert.ok(Math.abs(t.project(p.x, p.z).lat) < t.roadHalf - 2, `${c.name} start ${i} on road`);
       for (let j = 0; j < i; j++) assert.ok(Math.hypot(p.x - starts[j].x, p.z - starts[j].z) > KART.RADIUS * 2.5, `${c.name} start ${i}/${j} overlap`);
@@ -328,7 +342,7 @@ test('全コース: NPC 4 台（6 台）でレースが決着し、NPC も周回
     const sim = new RaceSim(t, { npcs: 4 });
     assert.equal(sim.s.karts.length, 6);
     const npcLaps = [0, 0, 0, 0, 0, 0];
-    for (let i = 0; i < 60 * 300 && sim.s.phase !== 'finished'; i++) {
+    for (let i = 0; i < 60 * 480 && sim.s.phase !== 'finished'; i++) {
       const [a, b] = sim.s.karts;
       sim.step(DT, [bot(a, 4, t), bot(b, -4, t)]);
       for (const e of sim.drainEvents()) if (e.t === 'lap') npcLaps[e.k]++;
@@ -479,7 +493,7 @@ test('定期配信の形式でタイミング・豪雨の状態も復元でき�
   k.tb = 1;
   sim.step(DT, [0, IN.RAIN]);
   const snap = JSON.parse(encode(packNet(sim.getSnapshot())));
-  const back = sanitizeSnapshot(unpackNet(snap), new RaceSim(track).s, 15);
+  const back = sanitizeSnapshot(unpackNet(snap), new RaceSim(track).s, 30);
   assert.equal(back.karts.length, 6);
   assert.deepEqual(back.tc.map((v) => Math.round(v)), sim.s.tc.map((v) => Math.round(v)));
   assert.equal(back.ru, 1);
@@ -494,7 +508,7 @@ test('定期配信の形式でタイミング・豪雨の状態も復元でき�
 test('ブーストパッド: 全コース道路上にあり、踏むとブーストして加速する', () => {
   COURSES.forEach((c, ci) => {
     const t = new Track(ci);
-    assert.equal(t.pads.length, 6);
+    assert.equal(t.pads.length, 10);
     for (const p of t.pads) {
       assert.ok(Math.abs(t.project(p.x, p.z).lat) < t.roadHalf - PAD.WIDTH / 2 + 0.5, `${c.name} pad on road`);
       assert.ok(t.onPad(p.x, p.z));
@@ -583,8 +597,217 @@ test('新アイテムの状態も配信形式で復元できる', () => {
   a.gd = 12;
   a.item = ITEMS.FRISBEE;
   sim.s.proj.push({ id: 9, o: 0, x: 1, z: 2, vx: 3, vz: 4, life: 2, age: 0.1, b: 1, f: 1, t: 1, d: 33 });
-  const back = sanitizeSnapshot(unpackNet(JSON.parse(encode(packNet(sim.getSnapshot())))), new RaceSim(track, { npcs: 1 }).s, 15);
+  const back = sanitizeSnapshot(unpackNet(JSON.parse(encode(packNet(sim.getSnapshot())))), new RaceSim(track, { npcs: 1 }).s, 30);
   assert.ok(Math.abs(back.karts[0].gd - 12) < 0.01);
   assert.equal(back.karts[0].item, ITEMS.FRISBEE);
   assert.deepEqual([back.proj[0].f, back.proj[0].t, Math.round(back.proj[0].d)], [1, 1, 33]);
+});
+
+// ---- コース拡張・ドッグフード・ボス犬・連戦 ----
+
+test('project の格子による高速化は、全探索と同じ結果を返す（全コース・コース外も）', () => {
+  const brute = (t, x, z) => {
+    let best = Infinity;
+    let bi = 0;
+    for (let i = 0; i < t.n; i++) {
+      let u = ((x - t.x[i]) * t.tx[i] + (z - t.z[i]) * t.tz[i]) / t.segLen[i];
+      u = Math.max(0, Math.min(1, u));
+      const qx = t.x[i] + t.tx[i] * t.segLen[i] * u;
+      const qz = t.z[i] + t.tz[i] * t.segLen[i] * u;
+      const d = (x - qx) ** 2 + (z - qz) ** 2;
+      if (d < best) {
+        best = d;
+        bi = i;
+      }
+    }
+    return { bi, d: Math.sqrt(best) };
+  };
+  COURSES.forEach((c, ci) => {
+    const t = new Track(ci);
+    const bb = t.bounds();
+    let seed = ci + 1;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    for (let n = 0; n < 400; n++) {
+      // コースの内側・外側・遠く離れた点を混ぜる
+      const x = bb.minX - 300 + rnd() * (bb.maxX - bb.minX + 600);
+      const z = bb.minZ - 300 + rnd() * (bb.maxZ - bb.minZ + 600);
+      const want = brute(t, x, z);
+      const p = t.project(x, z);
+      const got = Math.hypot(x - p.cx, z - p.cz);
+      assert.ok(Math.abs(got - want.d) < 1e-6, `${c.name} (${x.toFixed(0)}, ${z.toFixed(0)}) ${got} vs ${want.d}`);
+    }
+  });
+});
+
+test('トンネル: 新コースにあり、区間はスタートラインを避け、内側かどうかを判定できる', () => {
+  COURSES.forEach((c, ci) => {
+    const t = new Track(ci);
+    assert.equal(t.tunnels.length, c.tunnels.length);
+    if (ci < 5) assert.equal(t.tunnels.length, 0, `${c.name} has no tunnel`);
+    for (const tn of t.tunnels) {
+      assert.ok(tn.a > t.length * 0.03 && tn.b < t.length * 0.97 && tn.b - tn.a > 150, `${c.name} tunnel range`);
+      assert.ok(t.inTunnel((tn.a + tn.b) / 2));
+      assert.ok(!t.inTunnel(tn.a - 40) || t.tunnels.some((o) => o !== tn && o.a <= tn.a - 40 && o.b >= tn.a - 40));
+      assert.ok(t.inTunnel(tn.a - 5, 8), 'margin counts as inside');
+    }
+  });
+  const tunnelCourses = COURSES.filter((c) => c.tunnels.length).map((c) => c.theme);
+  assert.deepEqual(tunnelCourses, ['cave', 'subway', 'volcano', 'desert', 'candy']);
+});
+
+test('ドッグフード: 全コースの道路上にあり、拾うと増えて、速くなり、取られると一定時間なくなる', () => {
+  COURSES.forEach((c, ci) => {
+    const t = new Track(ci);
+    assert.equal(t.foods.length, FOOD.GROUPS * FOOD.PER_GROUP);
+    for (const f of t.foods) assert.ok(Math.abs(t.project(f.x, f.z).lat) < t.roadHalf - 1, `${c.name} food on road`);
+  });
+  const sim = newRace();
+  const [a, b] = sim.s.karts;
+  place(b, 800, 0);
+  const f = track.foods[7];
+  Object.assign(a, { x: f.x, z: f.z, h: track.pointAt(0, 0).h });
+  sim.step(DT, [0, 0]);
+  assert.equal(a.fd, 1);
+  assert.equal(a.stats.foods, 1);
+  assert.ok(sim.s.foods[7] > 0, 'taken');
+  assert.ok(sim.drainEvents().some((e) => e.t === 'food' && e.k === 0 && e.n === 1));
+  // 同じ場所にいても二重に拾わない。時間が経つとまた出る
+  sim.step(DT, [0, 0]);
+  assert.equal(a.fd, 1);
+  place(a, 1500, 0); // 立ち止まったままだと、また出た瞬間に拾ってしまう
+  for (let i = 0; i < 60 * (FOOD.RESPAWN + 1); i++) sim.step(DT, [0, 0]);
+  assert.equal(sim.s.foods[7], 0, 'respawned');
+  // 持っている数が多いほど最高速が少し上がる（15 個で +6%）
+  const base = { ...a, fd: 0 };
+  assert.ok(Math.abs(maxSpeedFor({ ...base, fd: FOOD.MAX }) / maxSpeedFor(base) - 1 - FOOD.MAX * FOOD.SPEED) < 1e-9);
+  assert.ok(maxSpeedFor({ ...base, fd: 8 }) > maxSpeedFor({ ...base, fd: 3 }));
+  // 上限（15）を超えては拾わない（通り過ぎて、他の車が拾える）
+  a.fd = FOOD.MAX;
+  const g = track.foods[20];
+  Object.assign(a, { x: g.x, z: g.z });
+  sim.step(DT, [0, 0]);
+  assert.equal(a.fd, FOOD.MAX);
+  assert.equal(sim.s.foods[20], 0);
+  // ぶつけられてスピンすると 3 個落とす。ガードで防いだときは落とさない
+  a.fd = 10;
+  a.inv = 0;
+  a.gd = 0;
+  assert.ok(spinKart(a, 1));
+  assert.equal(a.fd, 10 - FOOD.HIT_LOSS);
+  a.inv = 0;
+  a.gd = 5;
+  assert.ok(!spinKart(a, 1));
+  assert.equal(a.fd, 10 - FOOD.HIT_LOSS);
+});
+
+test('ドッグフードの状態も定期配信の形式で復元でき、持っている数も同期される', () => {
+  const sim = newRace();
+  sim.s.foods[3] = 5;
+  sim.s.foods[40] = 2;
+  sim.s.karts[1].fd = 9;
+  const back = sanitizeSnapshot(unpackNet(JSON.parse(encode(packNet(sim.getSnapshot())))), new RaceSim(track).s, 30);
+  assert.equal(back.foods.length, track.foods.length);
+  assert.ok(back.foods[3] > 0 && back.foods[40] > 0);
+  assert.equal(back.foods.filter((t) => t > 0).length, 2);
+  assert.equal(back.karts[1].fd, 9);
+  // 完全な状態（再接続時）でも
+  const full = sanitizeSnapshot(JSON.parse(encode(sim.getSnapshot())), new RaceSim(track).s, 30);
+  assert.ok(full.foods[3] > 0 && full.foods[40] > 0);
+});
+
+test('ボス犬: 台数に関係なく最後の NPC、専用の名前、ふつうの NPC より速く、配信でも保たれる', () => {
+  const sim = new RaceSim(track, { npcs: 2, boss: 1 });
+  assert.equal(sim.s.karts.length, 5);
+  assert.equal(sim.s.karts[4].boss, 1);
+  assert.equal(sim.s.karts.filter((k) => k.boss).length, 1);
+  assert.equal(kartName(sim.s.karts[4]), 'ドーベルマン');
+  assert.equal(kartName(sim.s.karts[2]), 'プードル');
+  assert.equal(new RaceSim(track, { npcs: 4, boss: 1 }).s.karts.length, 7);
+  assert.equal(new RaceSim(track, { npcs: 4, boss: 0 }).s.karts.length, 6);
+  assert.equal(new RaceSim(track, { npcs: 0, boss: 1 }).s.karts.length, 3);
+  // 人間のボットと並んで走ると、ボス犬はふつうの NPC を引き離す
+  const race = new RaceSim(track, { npcs: 2, boss: 1 });
+  for (let i = 0; i < 60 * 150; i++) {
+    const [a, b] = race.s.karts;
+    race.step(DT, [bot(a, 4), bot(b, -4)]);
+  }
+  const prog = race.s.karts.map((k) => race.progressOf(k));
+  assert.ok(prog[4] > Math.max(prog[2], prog[3]) + 40, `boss ${prog[4]} vs npc ${prog[2]}, ${prog[3]}`);
+  const back = sanitizeSnapshot(unpackNet(JSON.parse(encode(packNet(race.getSnapshot())))), new RaceSim(track, { npcs: 2, boss: 1 }).s, 30);
+  assert.equal(back.karts[4].boss, 1);
+  assert.equal(back.karts[3].boss, 0);
+});
+
+test('連戦のポイント: 順位・ドッグフード・体当たり・アイテム命中・ファステストラップの合計', () => {
+  const sim = new RaceSim(track, { npcs: 2 });
+  while (sim.s.phase === 'countdown') sim.step(DT, [0, 0]);
+  const [a, b, c, d] = sim.s.karts;
+  // a が 1 位、b が 3 位（c が 2 位）
+  // 進み具合はチェックポイントからの距離で測るので、チェックポイントも合わせて置く
+  const seg = track.length / RACE.CHECKPOINTS;
+  for (const [k, at] of [[a, 900], [c, 700], [b, 500], [d, 100]]) {
+    place(k, at);
+    k.cp = Math.floor(at / seg);
+  }
+  sim.step(DT, [0, 0]);
+  a.stats.foods = 7;
+  a.stats.bumps = 2;
+  a.stats.hits = 1;
+  b.stats.hits = 3;
+  a.best = 0;
+  b.best = 70;
+  const [pa, pb] = sim.calcScores();
+  assert.equal(pa.rank, 1);
+  assert.equal(pb.rank, 3);
+  assert.equal(pa.rankPts, SCORE.RANK[0]);
+  assert.equal(pb.rankPts, SCORE.RANK[2]);
+  assert.equal(pa.total, SCORE.RANK[0] + 7 * SCORE.FOOD + 2 * SCORE.BUMP + 1 * SCORE.HIT);
+  assert.equal(pb.total, SCORE.RANK[2] + 3 * SCORE.HIT + SCORE.FAST, 'only b has a best lap');
+  // 同じ周回タイムなら無し
+  a.best = 70;
+  assert.equal(sim.calcScores()[0].fastPts, 0);
+  assert.equal(sim.calcScores()[1].fastPts, 0);
+  a.best = 60;
+  assert.equal(sim.calcScores()[0].fastPts, SCORE.FAST);
+  // 結果オブジェクトにも載る
+  const r = sim.buildResult();
+  assert.equal(r.points.host, sim.calcScores()[0].total);
+  assert.equal(r.points.guest, sim.calcScores()[1].total);
+  assert.equal(r.course, track.name);
+  assert.ok(r.score.length >= 5 && r.score.at(-1).label === '今回の合計');
+  assert.ok(SCORE.RANK.every((v, i) => i === 0 || v < SCORE.RANK[i - 1]), '順位ポイントは下位ほど少ない');
+});
+
+test('コース設定: ランダムは使っていないコースから選ぶ。連戦・ボス犬の設定も検証される', () => {
+  const def = getGame('dogKart');
+  const course = def.options.find((o) => o.key === 'course');
+  assert.equal(course.choices.filter((c) => !c.random).length, COURSES.length);
+  assert.deepEqual(def.options.find((o) => o.key === 'races').choices.map((c) => c.value), [1, 2, 3, 4, 6]);
+  const random = course.choices.find((c) => c.random).value;
+  const used = [];
+  for (let i = 0; i < COURSES.length; i++) {
+    const o = resolveMatchOptions(def, { course: random, races: 6 }, { course: used });
+    assert.ok(Number.isInteger(o.course) && o.course >= 0 && o.course < COURSES.length, 'random resolved');
+    assert.ok(!used.includes(o.course), 'no repeat until all used');
+    used.push(o.course);
+  }
+  assert.equal(resolveMatchOptions(def, { course: 4 }, {}).course, 4, '固定のコースはそのまま');
+  assert.equal(resolveMatchOptions(def, { course: 4, races: 4, boss: 0 }).boss, 0);
+  assert.equal(validOptions(def, { races: 5 }).races, 1, '不正な値は初期値に戻る');
+  assert.equal(validOptions(def, {}).boss, 1);
+});
+
+test('部屋の状態: 連戦の途中経過とレースごとの設定を検証して受け取る', () => {
+  const base = { rev: 3, screen: 'result', guest: 'connected', ready: { host: false, guest: false }, options: { course: 99, races: 3 }, match: null, result: null };
+  const ok = sanitizeRoomState({ ...base, series: { total: 3, round: 2, host: 31, guest: 22, final: false, history: [{ name: 'A', host: 15, guest: 12 }, { name: 'B', host: 16, guest: 10 }] } });
+  assert.equal(ok.series.round, 2);
+  assert.equal(ok.series.history.length, 2);
+  assert.equal(ok.series.host, 31);
+  assert.equal(sanitizeRoomState({ ...base, series: { total: 99, round: 2 } }).series, null, '範囲外は捨てる');
+  assert.equal(sanitizeRoomState({ ...base, series: 'x' }).series, null);
+  const m = sanitizeRoomState({ ...base, screen: 'game', match: { matchId: 'abc', gen: 1, status: 'running', synced: true, started: true, opts: { course: 7, round: 2, bad: 'x'.repeat(40), npcs: 3 } } });
+  assert.equal(m.match.opts.course, 7);
+  assert.equal(m.match.opts.round, 2);
+  assert.equal(m.match.opts.npcs, 3);
+  assert.equal(m.match.opts.bad, undefined);
 });

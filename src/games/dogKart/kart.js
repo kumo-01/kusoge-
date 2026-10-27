@@ -42,8 +42,9 @@ const PALETTE = {
   3: { main: 0xffc93c, dark: 0xd99a14, accent: 0x5a3e2b, css: '#b07a00', flag: 0x5a3e2b }, // NPC パグ
   4: { main: 0x22b573, dark: 0x168a55, accent: 0xffd23f, css: '#168a55', flag: 0xffd23f }, // NPC ダックス
   5: { main: 0x8a63ff, dark: 0x6340d6, accent: 0xb8f2ff, css: '#6340d6', flag: 0xffffff }, // NPC ハスキー
+  6: { main: 0x2b2b3a, dark: 0x14141c, accent: 0xff3b3b, css: '#c0182b', flag: 0xff3b3b }, // ボス犬 ドーベルマン
 };
-const DOG_KINDS = ['shiba', 'corgi', 'poodle', 'pug', 'dachs', 'husky'];
+const DOG_KINDS = ['shiba', 'corgi', 'poodle', 'pug', 'dachs', 'husky', 'doberman'];
 
 /** スピン中の見た目の回転角（状態から決まるのでホストとゲストで同じ） */
 export function spinAngleOf(r) {
@@ -176,6 +177,7 @@ export class KartView {
     this.dog.group.position.set(0, 0.62, -0.45);
     this.dog.group.scale.setScalar(0.92);
     this.body.add(this.dog.group);
+    if (index === 6) this.group.scale.setScalar(1.12); // ボス犬は少し大きい
 
     // ガード中の泡
     this.shield = new THREE.Mesh(

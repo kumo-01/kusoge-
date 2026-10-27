@@ -130,6 +130,31 @@ const SCREENS = ['lobby', 'home', 'select', 'ready', 'game', 'result'];
 const GUEST_LINK = ['none', 'connected', 'waiting', 'syncing'];
 const MATCH_STATUS = ['loading', 'running', 'paused', 'resuming'];
 
+function cleanOptions(o) {
+  const out = {};
+  if (obj(o)) {
+    for (const [k, v] of Object.entries(o).slice(0, 12)) {
+      if (/^[A-Za-z]{1,16}$/.test(k) && (int(0, 99)(v) || str(16)(v) || bool(v))) out[k] = v;
+    }
+  }
+  return out;
+}
+
+/** 連戦の途中経過（何戦目か・合計ポイント・各レースのポイント） */
+function cleanSeries(r) {
+  if (!obj(r) || !int(2, 12)(r.total) || !int(1, 12)(r.round)) return null;
+  const pt = (v) => (int(0, 99999)(v) ? v : 0);
+  const name = (v) => (typeof v === 'string' ? v.slice(0, 30) : '');
+  return {
+    total: r.total,
+    round: r.round,
+    host: pt(r.host),
+    guest: pt(r.guest),
+    final: r.final === true,
+    history: Array.isArray(r.history) ? r.history.slice(0, 12).filter(obj).map((x) => ({ name: name(x.name), host: pt(x.host), guest: pt(x.guest) })) : [],
+  };
+}
+
 export function sanitizeRoomState(r) {
   if (!obj(r)) return null;
   if (!oneOf(...SCREENS)(r.screen) || !oneOf(...GUEST_LINK)(r.guest)) return null;
@@ -141,16 +166,12 @@ export function sanitizeRoomState(r) {
     ready: { host: r.ready.host === true, guest: r.ready.guest === true },
     startInMs: num(0, 10000)(r.startInMs) ? r.startInMs : null,
     gameId: id(r.gameId) ? r.gameId : null,
-    options: {},
+    options: cleanOptions(r.options),
     match: null,
+    series: cleanSeries(r.series),
     result: obj(r.result) ? r.result : null,
     hostHidden: r.hostHidden === true,
   };
-  if (obj(r.options)) {
-    for (const [k, v] of Object.entries(r.options).slice(0, 8)) {
-      if (/^[A-Za-z]{1,16}$/.test(k) && (int(0, 99)(v) || str(16)(v) || bool(v))) room.options[k] = v;
-    }
-  }
   if (obj(r.match)) {
     const m = r.match;
     if (!id(m.matchId) || !int(0, 1e9)(m.gen) || !oneOf(...MATCH_STATUS)(m.status)) return null;
@@ -161,6 +182,7 @@ export function sanitizeRoomState(r) {
       reason: str(16)(m.reason) ? m.reason : null,
       synced: m.synced === true,
       started: m.started === true,
+      opts: cleanOptions(m.opts), // このレースで実際に使う設定（ランダムは確定した値）
     };
   }
   return room;
@@ -170,6 +192,8 @@ export function sanitizeRoomState(r) {
 export function sanitizeResult(r) {
   const s = (v, max = 40) => (typeof v === 'string' ? v.slice(0, max) : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
   if (!obj(r)) return null;
+  const rows = (a, max) => (Array.isArray(a) ? a.slice(0, max).filter(obj).map((x) => ({ label: s(x.label, 24), host: s(x.host), guest: s(x.guest) })) : []);
+  const pts = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(99999, Math.round(v))) : 0);
   const player = (p) => ({
     headline: s(p?.headline, 24),
     detail: s(p?.detail, 60),
@@ -180,8 +204,9 @@ export function sanitizeResult(r) {
     title: s(r.title, 60),
     host: player(r.host),
     guest: player(r.guest),
-    stats: Array.isArray(r.stats)
-      ? r.stats.slice(0, 16).filter(obj).map((x) => ({ label: s(x.label, 24), host: s(x.host), guest: s(x.guest) }))
-      : [],
+    stats: rows(r.stats, 16),
+    score: rows(r.score, 10),
+    course: s(r.course, 30),
+    points: obj(r.points) ? { host: pts(r.points.host), guest: pts(r.points.guest) } : null,
   };
 }
