@@ -96,6 +96,15 @@ export function npcInput(sim, k, dt) {
     let use = false;
     if (k.item === ITEMS.BOOST) {
       use = bend < 0.5;
+    } else if (k.item === ITEMS.GUARD) {
+      use = nextRandom(s) < dt * 0.8; // すぐ使う
+    } else if (k.item === ITEMS.FRISBEE) {
+      // 前に誰かがいて、そこそこ近いときに投げる
+      for (const o of s.karts) {
+        if (o === k || sim.prog[o.i] <= sim.prog[k.i]) continue;
+        if (sim.prog[o.i] - sim.prog[k.i] < 80) use = true;
+      }
+      if (!use && nextRandom(s) < dt * 0.15) use = true; // 先頭で相手がいなくても持ちっぱなしにしない
     } else {
       for (const o of s.karts) {
         if (o === k) continue;

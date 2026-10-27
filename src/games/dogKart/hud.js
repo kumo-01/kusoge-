@@ -179,8 +179,8 @@ export class Hud {
     let icon = '';
     let name = 'アイテムなし';
     if (d.roll > 0) {
-      const icons = ['🦴', '🍌', '⚡'];
-      icon = icons[Math.floor(performance.now() / 90) % 3];
+      const icons = ['🦴', '🍌', '⚡', '🛡️', '🥏'];
+      icon = icons[Math.floor(performance.now() / 90) % icons.length];
       name = 'ルーレット中…';
     } else if (d.item && ITEM_INFO[d.item]) {
       icon = ITEM_INFO[d.item].icon;

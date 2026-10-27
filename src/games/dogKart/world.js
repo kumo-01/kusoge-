@@ -1008,8 +1008,15 @@ export class World {
       tipMat: this._track(new THREE.MeshToonMaterial({ color: 0x6b4423 })),
     };
     this.projViews = new Map();
+    this.frisbeeViews = new Map();
+    this._frisbeeParts = {
+      disc: this._track(new THREE.CylinderGeometry(1.0, 1.0, 0.16, 20)),
+      ring: this._track(new THREE.TorusGeometry(0.62, 0.07, 6, 18).rotateX(Math.PI / 2)),
+      mat: this._track(new THREE.MeshToonMaterial({ color: 0x35c2ff })),
+      ringMat: this._track(new THREE.MeshToonMaterial({ color: 0xffffff })),
+    };
     this.bananaViews = new Map();
-    this._viewPool = { bone: [], banana: [] };
+    this._viewPool = { bone: [], banana: [], frisbee: [] };
   }
 
   _makeBone() {
@@ -1022,6 +1029,18 @@ export class World {
         k.position.set(sx, 0, sz);
         g.add(k);
       }
+    g.traverse((o) => (o.castShadow = true));
+    g.scale.setScalar(1.3);
+    return g;
+  }
+
+  _makeFrisbee() {
+    const g = new THREE.Group();
+    const p = this._frisbeeParts;
+    g.add(new THREE.Mesh(p.disc, p.mat));
+    const r = new THREE.Mesh(p.ring, p.ringMat);
+    r.position.y = 0.1;
+    g.add(r);
     g.traverse((o) => (o.castShadow = true));
     g.scale.setScalar(1.3);
     return g;
@@ -1079,9 +1098,13 @@ export class World {
         m.position.y = 1.6 + Math.sin(t * 2.5 + i) * 0.25;
       }
     });
-    this._syncViews(items.proj, this.projViews, 'bone', () => this._makeBone(), (v, p) => {
+    this._syncViews(items.proj.filter((p) => !p.f), this.projViews, 'bone', () => this._makeBone(), (v, p) => {
       v.position.set(p.x, 1.1, p.z);
       v.rotation.y = t * 18;
+    });
+    this._syncViews(items.proj.filter((p) => p.f), this.frisbeeViews, 'frisbee', () => this._makeFrisbee(), (v, p) => {
+      v.position.set(p.x, 1.4 + Math.sin(t * 10 + p.id) * 0.1, p.z);
+      v.rotation.set(0.12, t * 22, 0.12);
     });
     this._syncViews(items.bananas, this.bananaViews, 'banana', () => this._makeBanana(), (v, b) => {
       v.position.set(b.x, 0.35, b.z);

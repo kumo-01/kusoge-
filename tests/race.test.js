@@ -184,7 +184,7 @@ test('アイテムボックスを取るとルーレット後にアイテムが�
   assert.ok(sim.s.boxes[0] > 0);
   assert.ok(a.roll > 0);
   for (let i = 0; i < 60 * 1.3; i++) sim.step(DT, [0, 0]);
-  assert.ok(a.item >= 1 && a.item <= 3);
+  assert.ok(a.item >= 1 && a.item <= 5);
   a.x += 50; // 箱から離れる
   for (let i = 0; i < 60 * ITEMS.BOX_RESPAWN; i++) sim.step(DT, [0, 0]);
   assert.equal(sim.s.boxes[0], 0);
@@ -225,7 +225,7 @@ test('不正なスナップショットでもクラッシュしない', () => {
   const s = sanitizeSnapshot({ karts: [{ x: 'NaN', lap: 1e99, item: 77 }, {}], proj: [null, { x: Infinity }], phase: 'evil' }, prev, 9);
   assert.ok(Number.isFinite(s.karts[0].x));
   assert.ok(s.karts[0].lap <= 99);
-  assert.ok(s.karts[0].item <= 3);
+  assert.ok(s.karts[0].item <= 5);
   assert.equal(s.phase, 'countdown');
   assert.equal(s.proj.length, 1);
   assert.ok(Number.isFinite(s.proj[0].x));
@@ -450,6 +450,21 @@ test('NPC も最終ラップで豪雨を呼び、タイミングブーストを�
       if (e.t === 'timing' && e.k >= 2) npcTiming++;
     }
   }
+  // 豪雨: 全員が最終ラップで NPC が最後尾なら、NPC が呼ぶ（確率的なので長めに待つ）
+  const sim2 = new RaceSim(track, { npcs: 2 });
+  while (sim2.s.phase === 'countdown') sim2.step(DT, [0, 0, 0, 0]);
+  for (const k of sim2.s.karts) k.lap = RACE.LAPS - 1;
+  place(sim2.s.karts[0], 80, 0);
+  place(sim2.s.karts[1], 90, 0);
+  place(sim2.s.karts[2], 20, 0);
+  place(sim2.s.karts[3], 50, 0);
+  for (const k of sim2.s.karts) k.sp = 0;
+  for (let i = 0; i < 60 * 30 && !sim2.s.ru; i++) {
+    sim2.step(DT, [0, 0]);
+    for (const k of sim2.s.karts.slice(2)) k.sp = Math.min(k.sp, 5); // 最後尾のまま
+    for (const k of sim2.s.karts.slice(0, 2)) k.sp = 0;
+  }
+  rainBy = sim2.s.rk;
   assert.ok(rainBy >= 2, `rain by ${rainBy}`);
   assert.ok(npcTiming >= 2, `npc timing ${npcTiming}`);
 });
@@ -499,4 +514,77 @@ test('ブーストパッド: 全コース道路上にあり、踏むとブース
   assert.ok(a.sp > b.sp + 3, `pad kart faster ${a.sp} vs ${b.sp}`);
   // パッドの外ではブーストしない
   assert.equal(b.boost, 0);
+});
+
+test('ガード: ホネ・バナナ・体当たり・豪雨を 1 回だけ防ぐ', () => {
+  const sim = newRace();
+  const [a, b] = sim.s.karts;
+  place(a, 300, 0);
+  placeAhead(a, b, 12);
+  a.item = ITEMS.GUARD;
+  sim.step(DT, [IN.ITEM, 0]);
+  assert.ok(a.gd > 0 && a.item === 0);
+  // ホネを当てられても防ぐ（1 回で消える）
+  b.item = ITEMS.BONE;
+  Object.assign(b, { h: a.h + Math.PI });
+  placeAhead(a, b, 12);
+  b.h = a.h + Math.PI;
+  sim.step(DT, [0, IN.ITEM]);
+  for (let i = 0; i < 60; i++) sim.step(DT, [0, 0]);
+  assert.equal(a.gd, 0, 'guard consumed');
+  assert.equal(a.spin, 0, 'not spun');
+  assert.ok(sim.drainEvents().some((e) => e.t === 'block' && e.k === 0));
+  // ガードがなければ次は当たる
+  a.inv = 0;
+  placeAhead(a, b, 12);
+  b.h = a.h + Math.PI;
+  b.item = ITEMS.BONE;
+  sim.step(DT, [0, IN.ITEM]);
+  for (let i = 0; i < 40; i++) sim.step(DT, [0, 0]);
+  assert.ok(a.spin > 0 || a.inv > 0, 'second hit lands');
+});
+
+test('フリスビー: 前の相手を追尾して当てる。飛べる距離には限りがある', () => {
+  const sim = newRace();
+  const [a, b] = sim.s.karts;
+  place(a, 20, 0);
+  place(b, 60, 0);
+  sim.step(DT, [0, 0]); // 走行距離を更新
+  a.item = ITEMS.FRISBEE;
+  sim.step(DT, [IN.ITEM, 0]);
+  const fr = sim.s.proj.find((p) => p.f);
+  assert.ok(fr && fr.t === 1, 'targets the kart ahead');
+  // b を横にずらしても追いかける
+  b.x += 6 * Math.cos(b.h);
+  b.z -= 6 * Math.sin(b.h);
+  b.sp = 0;
+  let hit = false;
+  for (let i = 0; i < 120 && !hit; i++) {
+    sim.step(DT, [0, 0]);
+    hit = sim.drainEvents().some((e) => e.t === 'hit' && e.k === 1);
+  }
+  assert.ok(hit, 'frisbee hit the target');
+  // 追尾先がいないとまっすぐ飛び、距離の限界で消える
+  const sim2 = newRace();
+  const k = sim2.s.karts[0];
+  place(k, 60, 0);
+  place(sim2.s.karts[1], 20, 0); // 自分が先頭
+  sim2.step(DT, [0, 0]);
+  k.item = ITEMS.FRISBEE;
+  sim2.step(DT, [IN.ITEM, 0]);
+  assert.equal(sim2.s.proj[0].t, -1);
+  for (let i = 0; i < 60 * 4; i++) sim2.step(DT, [0, 0]);
+  assert.equal(sim2.s.proj.filter((p) => p.f).length, 0, 'range limit');
+});
+
+test('新アイテムの状態も配信形式で復元できる', () => {
+  const sim = new RaceSim(track, { npcs: 1 });
+  const [a] = sim.s.karts;
+  a.gd = 12;
+  a.item = ITEMS.FRISBEE;
+  sim.s.proj.push({ id: 9, o: 0, x: 1, z: 2, vx: 3, vz: 4, life: 2, age: 0.1, b: 1, f: 1, t: 1, d: 33 });
+  const back = sanitizeSnapshot(unpackNet(JSON.parse(encode(packNet(sim.getSnapshot())))), new RaceSim(track, { npcs: 1 }).s, 15);
+  assert.ok(Math.abs(back.karts[0].gd - 12) < 0.01);
+  assert.equal(back.karts[0].item, ITEMS.FRISBEE);
+  assert.deepEqual([back.proj[0].f, back.proj[0].t, Math.round(back.proj[0].d)], [1, 1, 33]);
 });

@@ -446,6 +446,12 @@ class DogKartGame {
           if (e.item === ITEMS.BONE) {
             snd.play('throw');
             fx?.text('ワン!', k.x, 3.5, k.z, 3);
+          } else if (e.item === ITEMS.FRISBEE) {
+            snd.play('throw');
+            fx?.text('ピュン!', k.x, 3.5, k.z, 3);
+          } else if (e.item === ITEMS.GUARD) {
+            snd.play('itemReady');
+            fx?.ring(k.x, 0.8, k.z, 0x7fd0ff, 5);
           } else if (e.item === ITEMS.BANANA) {
             snd.play('drop');
           } else if (e.item === ITEMS.BOOST) {

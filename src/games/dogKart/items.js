@@ -5,6 +5,8 @@ export const ITEM_INFO = {
   [ITEMS.BONE]: { name: 'ホネアタック', icon: '🦴' },
   [ITEMS.BANANA]: { name: 'バナナトラップ', icon: '🍌' },
   [ITEMS.BOOST]: { name: 'わんわんブースト', icon: '⚡' },
+  [ITEMS.GUARD]: { name: 'ガード', icon: '🛡️' },
+  [ITEMS.FRISBEE]: { name: 'フリスビー', icon: '🥏' },
 };
 
 /** 決定的な乱数（状態をスナップショットに保存できる） */
@@ -18,18 +20,28 @@ export function nextRandom(s) {
 /** 順位に応じてアイテムを選ぶ（後ろの人ほどブーストが出やすい）。rank: 1 = 先頭, total: 台数 */
 export function chooseItem(s, rank, total) {
   const r = nextRandom(s);
-  let w; // [bone, banana, boost]
-  if (rank === 1) w = [0.35, 0.5, 0.15];
-  else if (rank === total) w = [0.35, 0.15, 0.5];
-  else w = [0.45, 0.25, 0.3];
-  if (r < w[0]) return ITEMS.BONE;
-  if (r < w[0] + w[1]) return ITEMS.BANANA;
-  return ITEMS.BOOST;
+  let w; // [bone, banana, boost, guard, frisbee]（先頭は追尾する相手がいないのでフリスビーは出にくい）
+  if (rank === 1) w = [0.25, 0.3, 0.1, 0.3, 0.05];
+  else if (rank === total) w = [0.2, 0.1, 0.3, 0.1, 0.3];
+  else w = [0.3, 0.2, 0.2, 0.15, 0.15];
+  const order = [ITEMS.BONE, ITEMS.BANANA, ITEMS.BOOST, ITEMS.GUARD, ITEMS.FRISBEE];
+  let acc = 0;
+  for (let i = 0; i < w.length; i++) {
+    acc += w[i];
+    if (r < acc) return order[i];
+  }
+  return ITEMS.FRISBEE;
 }
 
 /** スピンさせる。無敵中なら false */
 export function spinKart(k, dur) {
   if (k.inv > 0 || k.fin) return false;
+  if (k.gd > 0) {
+    // ガード: 1 回だけ防ぐ（直後の連続ヒットを避けるため少しだけ無敵）
+    k.gd = 0;
+    k.inv = 0.8;
+    return false;
+  }
   k.spin = dur;
   k.spinDur = dur;
   k.inv = dur + ITEMS.INVULN_AFTER_SPIN;
@@ -40,7 +52,8 @@ export function spinKart(k, dur) {
   return true;
 }
 
-export function useItem(s, k, events) {
+/** progs: 全車の走行距離（フリスビーの追尾先を決める） */
+export function useItem(s, k, events, progs = null) {
   if (!k.item || k.roll > 0) return;
   const item = k.item;
   k.item = 0;
@@ -63,6 +76,37 @@ export function useItem(s, k, events) {
   } else if (item === ITEMS.BANANA) {
     s.bananas.push({ id: s.nextId++, o: k.i, x: k.x - fx * 2.8, z: k.z - fz * 2.8, life: ITEMS.BANANA_LIFE, age: 0 });
     while (s.bananas.length > ITEMS.BANANA_MAX) s.bananas.shift();
+  } else if (item === ITEMS.GUARD) {
+    k.gd = ITEMS.GUARD_TIME;
+  } else if (item === ITEMS.FRISBEE) {
+    // 自分のすぐ前にいる相手を追いかける（いなければまっすぐ飛ぶ）
+    let target = -1;
+    if (progs) {
+      let best = Infinity;
+      for (const o of s.karts) {
+        if (o === k || (o.fin && !o.npc)) continue;
+        const d = progs[o.i] - progs[k.i];
+        if (d > 0 && d < best) {
+          best = d;
+          target = o.i;
+        }
+      }
+    }
+    const speed = Math.max(0, k.sp) + ITEMS.FRISBEE_SPEED;
+    s.proj.push({
+      id: s.nextId++,
+      o: k.i,
+      x: k.x + fx * 2.4,
+      z: k.z + fz * 2.4,
+      vx: fx * speed,
+      vz: fz * speed,
+      life: ITEMS.FRISBEE_RANGE / speed + 1,
+      age: 0,
+      b: ITEMS.FRISBEE_BOUNCES,
+      f: 1,
+      t: target,
+      d: 0,
+    });
   } else if (item === ITEMS.BOOST) {
     k.boost = ITEMS.BOOST_TIME;
     k.sp = Math.min(KART.BOOST_SPEED, Math.max(k.sp, KART.MAX_SPEED * 0.85) + 6);
@@ -77,6 +121,7 @@ export function useItem(s, k, events) {
  */
 export function updateItems(s, dt, track, boxPos, rankOf, events) {
   const karts = s.karts;
+  for (const k of karts) if (k.gd > 0) k.gd = Math.max(0, k.gd - dt);
 
   // ボックス: アイテムを受け取れる車（手ぶら・ルーレット中でない）だけが箱を割る。
   // すでに持っている車はすり抜けるので、1人が箱を全部消して総取りすることはできない。
@@ -116,6 +161,22 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
     const pr = s.proj[i];
     pr.age += dt;
     pr.life -= dt;
+    if (pr.f) {
+      // フリスビー: 狙った相手の方へ少しずつ向きを変える。飛べる距離には限りがある
+      const sp = Math.hypot(pr.vx, pr.vz) || 1;
+      const tg = pr.t >= 0 ? karts[pr.t] : null;
+      if (tg && !(tg.fin && !tg.npc)) {
+        const cur = Math.atan2(pr.vx, pr.vz);
+        let d = Math.atan2(tg.x - pr.x, tg.z - pr.z) - cur;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        const na = cur + Math.max(-ITEMS.FRISBEE_TURN * dt, Math.min(ITEMS.FRISBEE_TURN * dt, d));
+        pr.vx = Math.sin(na) * sp;
+        pr.vz = Math.cos(na) * sp;
+      }
+      pr.d += sp * dt;
+      if (pr.d > ITEMS.FRISBEE_RANGE) pr.life = 0;
+    }
     pr.x += pr.vx * dt;
     pr.z += pr.vz * dt;
     let remove = pr.life <= 0;
@@ -153,7 +214,7 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
         }
       }
     }
-    if (!remove) {
+    if (!remove && !pr.f) {
       // ホネとバナナがぶつかると両方消える
       for (let j = s.bananas.length - 1; j >= 0; j--) {
         const bn = s.bananas[j];

@@ -177,6 +177,15 @@ export class KartView {
     this.dog.group.scale.setScalar(0.92);
     this.body.add(this.dog.group);
 
+    // ガード中の泡
+    this.shield = new THREE.Mesh(
+      once('g-shield', () => new THREE.SphereGeometry(2.3, 16, 12)),
+      once('m-shield', () => new THREE.MeshBasicMaterial({ color: 0x7fd0ff, transparent: true, opacity: 0.32, depthWrite: false })),
+    );
+    this.shield.position.y = 1.3;
+    this.shield.visible = false;
+    this.group.add(this.shield);
+
     // 足元の丸い影
     const blob = new THREE.Mesh(
       once('g-blob', () => new THREE.CircleGeometry(1.9, 24)),
@@ -296,6 +305,9 @@ export class KartView {
       this.cloud.rotation.y = -(r.h + spinAngle) + Math.sin(t * 1.5) * 0.2; // ワールドに対してほぼ向きを固定
       this.drops.forEach((d, i) => (d.position.y = -0.6 - ((t * 3 + i * 0.37) % 1) * 2.2));
     }
+    // ガード（残りわずかになったら点滅）
+    this.shield.visible = r.gd > 0 && (r.gd > 3 || Math.floor(t * 8) % 2 === 0);
+    if (this.shield.visible) this.shield.scale.setScalar(1 + Math.sin(t * 4) * 0.04);
     this.dog.animate({ dt, speed: r.sp, steer: r.st, spin: r.spin, boost: boosting ? 1 : 0, bump: r.bump, mood });
   }
 
