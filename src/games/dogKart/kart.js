@@ -188,6 +188,60 @@ export class KartView {
     this.shield.visible = false;
     this.group.add(this.shield);
 
+    // 飼い主モード: 金色のオーラと、後ろをリードを持って走る飼い主
+    this.aura = new THREE.Mesh(
+      once('g-aura', () => new THREE.SphereGeometry(2.6, 16, 12)),
+      once('m-aura', () => new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending })),
+    );
+    this.aura.position.y = 1.3;
+    this.aura.visible = false;
+    this.group.add(this.aura);
+    this.owner = new THREE.Group();
+    const skin = once('m-skin', () => toon(0xffd7b0));
+    const shirt = once('m-shirt', () => toon(0x35a7ff));
+    const pants = once('m-pants', () => toon(0x2f3a63));
+    const cap = once('m-cap', () => toon(0xff4d5e));
+    const leash = once('m-leash', () => toon(0xff4d5e));
+    const part = (geo, mat, pos, parent = this.owner) => add(geo, mat, pos, null, parent);
+    part(once('g-o-torso', () => new THREE.CapsuleGeometry(0.42, 0.7, 4, 8)), shirt, [0, 1.75, 0]);
+    part(once('g-o-head', () => new THREE.SphereGeometry(0.4, 12, 10)), skin, [0, 2.75, 0]);
+    part(once('g-o-cap', () => new THREE.SphereGeometry(0.43, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2)), cap, [0, 2.85, 0.02]);
+    part(once('g-o-brim', () => new THREE.BoxGeometry(0.6, 0.06, 0.4)), cap, [0, 2.85, 0.4]);
+    this.ownerLegs = [-0.2, 0.2].map((lx) => {
+      const pivot = new THREE.Group();
+      pivot.position.set(lx, 1.15, 0);
+      part(once('g-o-leg', () => new THREE.CapsuleGeometry(0.17, 0.75, 4, 6).translate(0, -0.55, 0)), pants, [0, 0, 0], pivot);
+      this.owner.add(pivot);
+      return pivot;
+    });
+    this.ownerArms = [-0.55, 0.55].map((ax) => {
+      const pivot = new THREE.Group();
+      pivot.position.set(ax, 2.2, 0);
+      part(once('g-o-arm', () => new THREE.CapsuleGeometry(0.13, 0.6, 4, 6).translate(0, -0.4, 0)), shirt, [0, 0, 0], pivot);
+      this.owner.add(pivot);
+      return pivot;
+    });
+    // 視界をふさがないように、車の右横を並んで走る
+    const OWNER_POS = [3.1, 0, -1.1];
+    this.owner.position.set(...OWNER_POS);
+    this.owner.visible = false;
+    this.group.add(this.owner);
+    // 犬とつなぐリード
+    const lg = once('g-leash', () => new THREE.BoxGeometry(0.06, 0.06, 1).translate(0, 0, 0.5));
+    this.leash = new THREE.Mesh(lg, leash);
+    const from = [0.35, 1.5, -0.2]; // 犬の首元
+    const hand = [OWNER_POS[0] - 0.5, 1.75, OWNER_POS[2] + 0.2]; // 飼い主の手
+    const dx = hand[0] - from[0];
+    const dy = hand[1] - from[1];
+    const dz = hand[2] - from[2];
+    this.leash.position.set(...from);
+    this.leash.rotation.order = 'YXZ';
+    this.leash.rotation.y = Math.atan2(dx, dz);
+    this.leash.rotation.x = -Math.atan2(dy, Math.hypot(dx, dz));
+    this.leash.scale.z = Math.hypot(dx, dy, dz);
+    this.leash.visible = false;
+    this.group.add(this.leash);
+
     // 足元の丸い影
     const blob = new THREE.Mesh(
       once('g-blob', () => new THREE.CircleGeometry(1.9, 24)),
@@ -310,6 +364,21 @@ export class KartView {
     // ガード（残りわずかになったら点滅）
     this.shield.visible = r.gd > 0 && (r.gd > 3 || Math.floor(t * 8) % 2 === 0);
     if (this.shield.visible) this.shield.scale.setScalar(1 + Math.sin(t * 4) * 0.04);
+    // 飼い主モード: 金色にきらめいて、横を飼い主が並んで走る
+    const ow = r.ow > 0;
+    this.aura.visible = ow && !this.firstPerson;
+    this.owner.visible = ow;
+    this.leash.visible = ow;
+    if (ow) {
+      this.aura.scale.setScalar(1 + Math.sin(t * 10) * 0.06);
+      this.aura.material.opacity = 0.22 + 0.12 * Math.sin(t * 16);
+      const ph = t * 16;
+      this.ownerLegs[0].rotation.x = Math.sin(ph) * 0.9;
+      this.ownerLegs[1].rotation.x = -Math.sin(ph) * 0.9;
+      this.ownerArms[0].rotation.set(-0.5, 0, -1.25); // リードを持つ手（車側）は犬のほうへ
+      this.ownerArms[1].rotation.x = Math.sin(ph) * 0.8;
+      this.owner.position.y = Math.abs(Math.sin(ph)) * 0.18;
+    }
     this.dog.animate({ dt, speed: r.sp, steer: r.st, spin: r.spin, boost: boosting ? 1 : 0, bump: r.bump, mood });
   }
 

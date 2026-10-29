@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { Track, COURSES } from '../src/games/dogKart/track.js';
 import { RaceSim, sanitizeSnapshot, packNet, unpackNet, kartName } from '../src/games/dogKart/race.js';
 import { maxSpeedOf as maxSpeedFor } from '../src/games/dogKart/physics.js';
-import { spinKart } from '../src/games/dogKart/items.js';
+import { spinKart, itemWeights, chooseItem } from '../src/games/dogKart/items.js';
 import { IN, ITEMS, RACE, KART, TIMING, RAIN, PAD, FOOD, SCORE } from '../src/games/dogKart/constants.js';
 import { getGame, resolveMatchOptions, validOptions } from '../src/games/registry.js';
 import { decode, encode, FROM_GUEST, FROM_HOST, sanitizeRoomState } from '../src/core/protocol.js';
@@ -187,7 +187,7 @@ test('アイテムボックスを取るとルーレット後にアイテムが�
   assert.ok(sim.s.boxes[0] > 0);
   assert.ok(a.roll > 0);
   for (let i = 0; i < 60 * 1.3; i++) sim.step(DT, [0, 0]);
-  assert.ok(a.item >= 1 && a.item <= 5);
+  assert.ok(a.item >= 1 && a.item < ITEMS.COUNT);
   a.x += 50; // 箱から離れる
   for (let i = 0; i < 60 * ITEMS.BOX_RESPAWN; i++) sim.step(DT, [0, 0]);
   assert.equal(sim.s.boxes[0], 0);
@@ -228,7 +228,7 @@ test('不正なスナップショットでもクラッシュしない', () => {
   const s = sanitizeSnapshot({ karts: [{ x: 'NaN', lap: 1e99, item: 77 }, {}], proj: [null, { x: Infinity }], phase: 'evil' }, prev, 9);
   assert.ok(Number.isFinite(s.karts[0].x));
   assert.ok(s.karts[0].lap <= 99);
-  assert.ok(s.karts[0].item <= 5);
+  assert.ok(s.karts[0].item < ITEMS.COUNT);
   assert.equal(s.phase, 'countdown');
   assert.equal(s.proj.length, 1);
   assert.ok(Number.isFinite(s.proj[0].x));
@@ -394,115 +394,253 @@ test('タイミングブースト: チャンスは 1〜2 回で、ジャスト�
   assert.ok(boostSeen);
 });
 
-test('豪雨: 最終ラップに入った最下位の車だけが呼べ、呼んだ車以外が遅くなる（1 レース 1 回）', () => {
+test('豪雨アイテム: 使った車以外が遅くなり、時間がたつと戻る（ガードは1回防ぐ）', () => {
   const sim = new RaceSim(track, { npcs: 2 });
   while (sim.s.phase === 'countdown') sim.step(DT, [0, 0, 0, 0]);
-  const [a, b] = sim.s.karts;
-  // NPC が勝手に呼ばないように NPC は止めておく（最終ラップに入れない）
-  sim.step(DT, [IN.RAIN, 0]);
-  for (let i = 0; i < 60; i++) sim.step(DT, [0, 0]);
-  assert.equal(sim.s.ru, 0, 'not on final lap');
-  assert.equal(b.wet, 0);
-  // 最終ラップでも最下位でなければ呼べない（a だけ最終ラップ = 先頭）
-  a.lap = RACE.LAPS - 1;
-  sim.step(DT, [IN.RAIN, 0]);
-  for (let i = 0; i < 60; i++) sim.step(DT, [0, 0]);
-  assert.equal(sim.s.ru, 0, 'leader cannot call');
-  assert.equal(sim.canCallRain(a), false);
-  // 全員が最終ラップに入り、ゲストが最後尾になったら、ゲストだけが呼べる
-  for (const k of sim.s.karts) k.lap = RACE.LAPS - 1;
-  place(b, -60, 0);
-  assert.equal(sim.rankOf(1), 4);
-  sim.step(DT, [IN.RAIN, 0]);
-  assert.equal(sim.s.ru, 0, 'host is not last');
-  sim.step(DT, [0, IN.RAIN]);
-  assert.equal(sim.s.ru, 1);
-  assert.equal(sim.s.rk, 1);
+  const [a, b, c, d] = sim.s.karts;
+  c.gd = 10; // NPC の 1 台はガード中
+  a.item = ITEMS.RAIN;
+  sim.drainEvents();
+  sim.step(DT, [IN.ITEM, 0]);
+  assert.equal(a.item, 0);
+  assert.equal(sim.s.rk, 0);
   assert.ok(sim.s.rain > RAIN.DURATION - 0.1);
-  assert.equal(b.wet, 0, 'caller not slowed');
-  assert.ok(a.wet > 0 && sim.s.karts[2].wet > 0 && sim.s.karts[3].wet > 0, 'others slowed');
-  const ev = sim.drainEvents().filter((e) => e.t === 'rain');
-  assert.equal(ev.length, 1);
-  // 2 回目は呼べない
-  a.lap = RACE.LAPS - 1;
-  sim.step(DT, [IN.RAIN, 0]);
-  assert.equal(sim.s.rk, 1);
-  assert.equal(sim.drainEvents().filter((e) => e.t === 'rain').length, 0);
+  assert.equal(a.wet, 0, 'user not slowed');
+  assert.ok(b.wet > 0 && d.wet > 0, 'others slowed');
+  assert.equal(c.wet, 0, 'guard blocks rain');
+  assert.equal(c.gd, 0);
+  assert.equal(sim.drainEvents().filter((e) => e.t === 'rain').length, 1);
   // 遅くなっている間は最高速が下がる
-  Object.assign(a, { boost: 0, slow: 0, grass: 0, sp: 0 });
-  for (let i = 0; i < 60 * 3; i++) sim.step(DT, [IN.UP, 0]);
-  assert.ok(a.sp <= KART.MAX_SPEED * RAIN.FACTOR + 0.5, `wet speed ${a.sp}`);
-  // 時間がたつと元に戻る
-  for (let i = 0; i < 60 * RAIN.DURATION; i++) sim.step(DT, [IN.UP, 0]);
-  assert.equal(a.wet, 0);
-  assert.equal(sim.s.rain, 0);
+  Object.assign(b, { boost: 0, slow: 0, grass: 0 });
+  assert.ok(maxSpeedFor(b) <= KART.MAX_SPEED * RAIN.FACTOR + 1e-6, `wet max speed ${maxSpeedFor(b)}`);
+  for (let i = 0; i < 60 * RAIN.DURATION; i++) sim.step(DT, [0, 0]);
+  Object.assign(b, { boost: 0, slow: 0, grass: 0 });
+  assert.ok(maxSpeedFor(b) >= KART.MAX_SPEED - 1e-6);
+  assert.equal(b.wet, 0);
+  assert.ok(sim.s.rain < 1e-6);
 });
 
-test('豪雨: 最終ラップに入る直前に押した入力も少しの間は有効（通信の遅れ対策）', () => {
-  const sim = new RaceSim(track);
-  while (sim.s.phase === 'countdown') sim.step(DT, [0, 0]);
-  const [a, b] = sim.s.karts;
-  a.lap = RACE.LAPS - 1; // ホストは先に最終ラップへ（ゲストより前にいる）
-  placeAhead(b, a, 6);
-  sim.step(DT, [0, IN.RAIN]);
-  for (let i = 0; i < 10; i++) sim.step(DT, [0, 0]);
-  assert.equal(sim.s.ru, 0);
-  b.lap = RACE.LAPS - 1;
-  sim.step(DT, [0, 0]);
-  assert.equal(sim.s.rk, 1);
-});
-
-test('NPC も最終ラップで豪雨を呼び、タイミングブーストを使う', () => {
-  const sim = new RaceSim(track, { npcs: 2 });
-  let rainBy = -1;
-  let npcTiming = 0;
-  for (let i = 0; i < 60 * 240 && sim.s.phase !== 'finished'; i++) {
-    const [a, b] = sim.s.karts;
-    sim.step(DT, [bot(a, 3), bot(b, -3)]);
-    for (const e of sim.drainEvents()) {
-      if (e.t === 'rain') rainBy = e.k;
-      if (e.t === 'timing' && e.k >= 2) npcTiming++;
+test('アイテムの出方: 豪雨は最下位だけ・ガードは最下位以外・フリスビーと犬小屋は2位以下・飼い主は後ろほど出やすい', () => {
+  for (const total of [2, 3, 4, 6, 7]) {
+    let prevOwner = -1;
+    for (let rank = 1; rank <= total; rank++) {
+      const w = itemWeights(rank, total);
+      const last = rank === total;
+      assert.equal(w[ITEMS.RAIN] > 0, last, `rain rank ${rank}/${total}`);
+      assert.equal(w[ITEMS.GUARD] > 0, !last, `guard rank ${rank}/${total}`);
+      assert.equal(w[ITEMS.FRISBEE] > 0, rank >= 2, `frisbee rank ${rank}/${total}`);
+      assert.equal(w[ITEMS.HOUSE] > 0, rank >= 2, `house rank ${rank}/${total}`);
+      assert.ok(w[ITEMS.OWNER] >= prevOwner, 'owner more likely behind');
+      prevOwner = w[ITEMS.OWNER];
     }
+    assert.equal(itemWeights(1, total)[ITEMS.OWNER], 0, 'leader never gets owner');
+    assert.ok(itemWeights(total, total)[ITEMS.OWNER] > 0);
   }
-  // 豪雨: 全員が最終ラップで NPC が最後尾なら、NPC が呼ぶ（確率的なので長めに待つ）
-  const sim2 = new RaceSim(track, { npcs: 2 });
-  while (sim2.s.phase === 'countdown') sim2.step(DT, [0, 0, 0, 0]);
-  for (const k of sim2.s.karts) k.lap = RACE.LAPS - 1;
-  place(sim2.s.karts[0], 80, 0);
-  place(sim2.s.karts[1], 90, 0);
-  place(sim2.s.karts[2], 20, 0);
-  place(sim2.s.karts[3], 50, 0);
-  for (const k of sim2.s.karts) k.sp = 0;
-  for (let i = 0; i < 60 * 30 && !sim2.s.ru; i++) {
-    sim2.step(DT, [0, 0]);
-    for (const k of sim2.s.karts.slice(2)) k.sp = Math.min(k.sp, 5); // 最後尾のまま
-    for (const k of sim2.s.karts.slice(0, 2)) k.sp = 0;
+  // 実際に引いてみても、出てはいけないものは出ない
+  const sim = newRace();
+  for (let i = 0; i < 3000; i++) {
+    const t = 5;
+    assert.notEqual(chooseItem(sim.s, 1, t), ITEMS.FRISBEE);
+    assert.notEqual(chooseItem(sim.s, 1, t), ITEMS.HOUSE);
+    assert.notEqual(chooseItem(sim.s, 1, t), ITEMS.RAIN);
+    assert.notEqual(chooseItem(sim.s, 3, t), ITEMS.RAIN);
+    assert.notEqual(chooseItem(sim.s, t, t), ITEMS.GUARD);
   }
-  rainBy = sim2.s.rk;
-  assert.ok(rainBy >= 2, `rain by ${rainBy}`);
-  assert.ok(npcTiming >= 2, `npc timing ${npcTiming}`);
+  const seen = new Set();
+  for (let i = 0; i < 4000; i++) seen.add(chooseItem(sim.s, 5, 5));
+  for (const it of [ITEMS.BONE, ITEMS.BANANA, ITEMS.BOOST, ITEMS.FRISBEE, ITEMS.OWNER, ITEMS.RAIN, ITEMS.HOUSE]) assert.ok(seen.has(it), `last place can get ${it}`);
 });
 
-test('定期配信の形式でタイミング・豪雨の状態も復元できる', () => {
+test('飼い主登場: 無敵で自動で走り、触れた車をはね飛ばして、時間で終わる。全コースで壁に張りつかない', () => {
+  COURSES.forEach((c, ci) => {
+    const t = new Track(ci);
+    const sim = new RaceSim(t);
+    while (sim.s.phase === 'countdown') sim.step(DT, [0, 0]);
+    const [a, b] = sim.s.karts;
+    const p = t.pointAt(40, 0);
+    Object.assign(a, { x: p.x, z: p.z, h: p.h, sp: 0, kx: 0, kz: 0 });
+    const q = t.pointAt(-200, 0);
+    Object.assign(b, { x: q.x, z: q.z, h: q.h });
+    a.item = ITEMS.OWNER;
+    sim.step(DT, [IN.ITEM, 0]);
+    assert.ok(a.ow > 0 && a.item === 0);
+    // 操作（後退・左右）は無視される
+    let top = 0;
+    let off = 0;
+    const walls0 = a.stats.walls;
+    const start = sim.progressOf(a);
+    for (let i = 0; i < 60 * ITEMS.OWNER_TIME + 30; i++) {
+      sim.step(DT, [IN.DOWN | IN.LEFT, 0]);
+      top = Math.max(top, a.sp);
+      off = Math.max(off, Math.abs(t.project(a.x, a.z).lat) / t.roadHalf);
+      assert.equal(a.spin, 0);
+      b.x = q.x; b.z = q.z; // 邪魔しない場所で待機
+    }
+    assert.equal(a.ow, 0, 'owner mode ends');
+    assert.ok(top > KART.MAX_SPEED, `${c.name} top speed ${top}`);
+    assert.ok(sim.progressOf(a) - start > 250, `${c.name} progressed ${sim.progressOf(a) - start}`);
+    assert.ok(off < 1.05, `${c.name} stays on the road (${off.toFixed(2)})`);
+    assert.ok(a.stats.walls - walls0 <= 1, `${c.name} wall hits ${a.stats.walls - walls0}`);
+  });
+  // 無敵: ホネ・バナナ・スピンのどれも効かない
+  const sim = newRace();
+  const [a, b] = sim.s.karts;
+  place(a, 100, 0);
+  place(b, 60, 0);
+  a.item = ITEMS.OWNER;
+  sim.step(DT, [IN.ITEM, 0]);
+  assert.equal(spinKart(a, 1), false);
+  assert.equal(spinKart(a, 1, true), false);
+  b.item = ITEMS.BONE;
+  // 触れた車ははね飛ばされる
+  const sim2 = newRace();
+  const [x, y] = sim2.s.karts;
+  place(x, 100, 0);
+  placeAhead(x, y, 12);
+  x.item = ITEMS.OWNER;
+  sim2.step(DT, [IN.ITEM, 0]);
+  let by = -1;
+  for (let i = 0; i < 90 && y.spin <= 0; i++) {
+    sim2.step(DT, [0, 0]);
+    y.sp = 0;
+    for (const e of sim2.drainEvents()) if (e.t === 'hit' && e.k === 1) by = e.by;
+  }
+  assert.ok(y.spin > 0, 'touched kart spins');
+  assert.equal(by, 0);
+  assert.ok(x.stats.hits >= 1 && y.stats.hitBy >= 1);
+});
+
+test('犬小屋: 1位を狙って必ず当たり、近くの車も巻き込む。ガードは防ぐ。自分が1位なら不発', () => {
+  const setup = () => {
+    const sim = new RaceSim(track, { npcs: 2 });
+    while (sim.s.phase === 'countdown') sim.step(DT, [0, 0, 0, 0]);
+    const [a, b, c, d] = sim.s.karts;
+    const hold = () => {
+      place(b, 300, 0);
+      place(c, 294, 3); // b のすぐ後ろ（近く）
+      place(d, 150, 0); // 遠い
+    };
+    place(a, 200, 0);
+    hold();
+    a.item = ITEMS.HOUSE;
+    sim.drainEvents();
+    return { sim, a, b, c, d, hold };
+  };
+  {
+    const { sim, a, b, c, d, hold } = setup();
+    b.inv = 100; // スピン直後のような無敵でも当たる
+    sim.step(DT, [IN.ITEM, 0, 0, 0]);
+    assert.equal(a.item, 0);
+    assert.equal(sim.s.houses.length, 1);
+    assert.equal(sim.s.houses[0].t, 1, 'targets the leader');
+    for (let i = 0; i < 60 * ITEMS.HOUSE_DELAY - 3; i++) {
+      hold();
+      sim.step(DT, [0, 0]);
+    }
+    assert.equal(b.spin, 0, 'not landed yet');
+    assert.equal(sim.drainEvents().filter((e) => e.t === 'house').length, 0);
+    for (let i = 0; i < 12; i++) {
+      hold();
+      sim.step(DT, [0, 0]);
+    }
+    assert.ok(b.spin > 0, 'leader hit');
+    assert.ok(c.spin > 0, 'nearby kart caught');
+    assert.equal(d.spin, 0, 'far kart not');
+    assert.equal(a.spin, 0, 'thrower far away');
+    assert.ok(a.stats.hits >= 2);
+    // しばらく地面に残ってから消える
+    for (let i = 0; i < 60 * (ITEMS.HOUSE_STAY + 0.5); i++) {
+      hold();
+      sim.step(DT, [0, 0]);
+    }
+    assert.equal(sim.s.houses.length, 0);
+  }
+  {
+    const { sim, a, b, hold } = setup();
+    b.gd = 10;
+    sim.step(DT, [IN.ITEM, 0, 0, 0]);
+    for (let i = 0; i < 60 * ITEMS.HOUSE_DELAY + 5; i++) {
+      hold();
+      sim.step(DT, [0, 0]);
+    }
+    assert.equal(b.spin, 0, 'guard blocks the house');
+    assert.equal(b.gd, 0);
+  }
+  {
+    // 狙いは使った時点の1位に固定（追い越されても追いかける）
+    const { sim, a, b, hold } = setup();
+    sim.step(DT, [IN.ITEM, 0, 0, 0]);
+    place(a, 400, 0);
+    for (let i = 0; i < 60 * ITEMS.HOUSE_DELAY + 5; i++) {
+      hold();
+      sim.step(DT, [0, 0]);
+    }
+    assert.ok(b.spin > 0);
+  }
+  {
+    // 自分が1位なら不発
+    const { sim, a } = setup();
+    place(a, 500, 0);
+    sim.step(DT, [IN.ITEM, 0, 0, 0]);
+    assert.equal(a.item, 0);
+    assert.equal(sim.s.houses.length, 0);
+    assert.equal(sim.drainEvents().filter((e) => e.t === 'poof').length, 1);
+  }
+});
+
+test('NPC は飼い主・豪雨・犬小屋のアイテムも使う', () => {
+  for (const item of [ITEMS.OWNER, ITEMS.RAIN, ITEMS.HOUSE]) {
+    const sim = new RaceSim(track, { npcs: 1 });
+    while (sim.s.phase === 'countdown') sim.step(DT, [0, 0, 0]);
+    const [a, b, n] = sim.s.karts;
+    place(a, 400, 0);
+    place(b, 380, 0);
+    place(n, 300, 0);
+    n.item = item;
+    let used = false;
+    for (let i = 0; i < 60 * 20 && !used; i++) {
+      place(a, 400, 0);
+      place(b, 380, 0);
+      place(n, 300, 0);
+      sim.step(DT, [0, 0, 0]);
+      used = n.item === 0;
+    }
+    assert.ok(used, `npc used item ${item}`);
+  }
+});
+
+test('定期配信の形式で飼い主・犬小屋・豪雨の状態も復元できる', () => {
   const sim = new RaceSim(track, { npcs: 4 });
   while (sim.s.phase === 'countdown') sim.step(DT, [0, 0]);
-  const k = sim.s.karts[1];
-  for (const o of sim.s.karts) o.lap = RACE.LAPS - 1;
-  place(k, -60, 0); // 最後尾
-  k.tw = 0.9;
-  k.tb = 1;
-  sim.step(DT, [0, IN.RAIN]);
+  const [a, b] = sim.s.karts;
+  place(a, 200, 0);
+  place(b, 300, 0);
+  a.item = ITEMS.OWNER;
+  sim.step(DT, [IN.ITEM, 0]);
+  b.item = ITEMS.RAIN;
+  sim.step(DT, [0, IN.ITEM]);
+  sim.s.karts[2].item = ITEMS.HOUSE;
+  sim.s.karts[2].x = a.x;
+  sim.s.karts[2].z = a.z - 30;
+  sim.s.houses.push({ id: 77, o: 2, t: 1, x: b.x, z: b.z, age: 0.5, hit: 0 });
+  sim.s.karts[3].item = ITEMS.HOUSE;
   const snap = JSON.parse(encode(packNet(sim.getSnapshot())));
   const back = sanitizeSnapshot(unpackNet(snap), new RaceSim(track).s, 30);
   assert.equal(back.karts.length, 6);
-  assert.deepEqual(back.tc.map((v) => Math.round(v)), sim.s.tc.map((v) => Math.round(v)));
-  assert.equal(back.ru, 1);
+  assert.ok(Math.abs(back.karts[0].ow - a.ow) < 0.01 && back.karts[0].ow > 0);
+  assert.equal(back.karts[3].item, ITEMS.HOUSE);
+  assert.equal(back.houses.length, 1);
+  assert.equal(back.houses[0].id, 77);
+  assert.equal(back.houses[0].t, 1);
+  assert.ok(Math.abs(back.houses[0].age - 0.5) < 0.01);
   assert.equal(back.rk, 1);
   assert.ok(back.rain > 0);
-  assert.ok(Math.abs(back.karts[1].tw - k.tw) < 0.01);
-  assert.equal(back.karts[1].tb, 1);
-  assert.ok(back.karts[0].wet > 0);
+  assert.ok(back.karts[0].wet === 0 && back.karts[2].wet > 0);
   assert.equal(back.karts[5].npc, 1);
+  // 不正な犬小屋は無視・丸められる
+  const bad = sanitizeSnapshot({ ...sim.getSnapshot(), houses: [null, { id: 1, o: 99, t: -5, x: 'a', z: 1e99, age: 99 }] }, sim.s, 30);
+  assert.equal(bad.houses.length, 1);
+  assert.ok(bad.houses[0].t >= 0 && Number.isFinite(bad.houses[0].x));
 });
 
 test('ブーストパッド: 全コース道路上にあり、踏むとブーストして加速する', () => {

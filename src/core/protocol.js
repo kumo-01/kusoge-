@@ -4,7 +4,7 @@
 // PeerJS の DataConnection は serialization: 'raw' で使い、文字列の長さを
 // パース前に確認してから JSON.parse する（巨大データでクラッシュさせないため）。
 
-export const PROTOCOL_VERSION = 3; // 3: ドッグフード・ボス犬・連戦で状態の形が変わった（古いページとは遊べないように）
+export const PROTOCOL_VERSION = 4; // 4: 飼い主・豪雨・犬小屋のアイテム化で状態の形が変わった（3: ドッグフード・ボス犬・連戦）（古いページとは遊べないように）
 
 /** 1 メッセージの最大文字数 */
 export const MAX_MESSAGE_CHARS = 60000;

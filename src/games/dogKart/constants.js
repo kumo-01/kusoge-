@@ -38,6 +38,10 @@ export const ITEMS = {
   BOOST: 3,
   GUARD: 4,
   FRISBEE: 5,
+  OWNER: 6, // 飼い主登場（マリオカートのキラー）
+  RAIN: 7, // 豪雨
+  HOUSE: 8, // 犬小屋（1位に必ず当たる）
+  COUNT: 9,
   BOX_RESPAWN: 4.0,
   BOX_RADIUS: 2.2,
   ROULETTE: 1.1, // アイテムが決まるまでのルーレット時間
@@ -57,6 +61,14 @@ export const ITEMS = {
   FRISBEE_RANGE: 130, // 飛べる距離。これを超えると消える
   FRISBEE_BOUNCES: 1,
   INVULN_AFTER_SPIN: 1.1, // スピン後の無敵時間（連続でハメられないように）
+  OWNER_TIME: 6, // 飼い主に引っ張ってもらえる時間（秒）。その間は無敵で自動で走る
+  OWNER_FACTOR: 1.14, // 飼い主モード中の最高速の倍率
+  OWNER_SPIN: 1.4, // 飼い主にはね飛ばされた車のスピン時間
+  HOUSE_DELAY: 2.2, // 犬小屋を使ってから落ちてくるまでの時間（落下地点は1位を追いかける）
+  HOUSE_STAY: 1.2, // 落ちたあと地面に残る時間
+  HOUSE_RADIUS: 9, // 落ちたとき巻き込まれる範囲
+  HOUSE_SPIN: 1.7,
+  HOUSE_MAX: 4,
 };
 
 export const NET = {
@@ -78,7 +90,6 @@ export const IN = {
   ITEM: 16, // 押した瞬間だけ
   RESPAWN: 32, // 押した瞬間だけ
   TAP: 64, // タイミングブーストの「タップ」。押した瞬間だけ
-  RAIN: 128, // 豪雨を呼ぶ。押した瞬間だけ
   HELD: 15,
   ONESHOT: 240,
 };
@@ -101,12 +112,11 @@ export const PAD = {
   ACCEL: 90, // 踏んでいる間の加速（m/s²）
 };
 
-// 豪雨: 最終ラップに入った最下位の車だけが、1 レースに 1 回だけ雨雲を呼べる。呼んだ車以外は一時的に遅くなる
+// 豪雨: 最下位の車だけがアイテムとして引ける。使った車以外は一時的に遅くなる
 export const RAIN = {
   DURATION: 7, // 雨が降っている時間
-  SLOW_TIME: 5, // 呼んだ車以外が遅くなる時間
+  SLOW_TIME: 5, // 使った車以外が遅くなる時間
   FACTOR: 0.72, // その間の最高速の倍率
-  REQUEST_GRACE: 0.5, // 最終ラップに入る直前に押した入力を待つ時間（通信の遅れ対策）
 };
 
 // ドッグフード: 道に落ちている（マリオカートのコイン）。拾うほど少し速くなる

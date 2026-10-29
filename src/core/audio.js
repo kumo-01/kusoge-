@@ -219,10 +219,6 @@ class Sound {
         case 'miss':
           this._tone({ type: 'triangle', from: 500, to: 300, dur: 0.25, vol: 0.18 });
           break;
-        case 'rainReady':
-          this._tone({ type: 'sine', from: 700, to: 1400, dur: 0.25, vol: 0.18 });
-          this._tone({ type: 'sine', from: 1050, to: 2100, dur: 0.25, vol: 0.12, delay: 0.12 });
-          break;
         case 'thunder':
           // ゴロゴロ…ドーン
           this._noise({ dur: 1.6, vol: 0.7, filter: 'lowpass', from: 900, to: 80, q: 0.5 });

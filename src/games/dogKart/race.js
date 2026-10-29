@@ -4,8 +4,8 @@
 
 import { RACE, ITEMS, IN, RAIN, TIMING, FOOD, SCORE } from './constants.js';
 import { createKart, stepKart, collideKarts } from './physics.js';
-import { updateItems, useItem } from './items.js';
-import { npcInput } from './npc.js';
+import { updateItems, useItem, spinKart } from './items.js';
+import { npcInput, ownerInput } from './npc.js';
 import { stepTiming, pickChances } from './timing.js';
 import { formatTime } from '../../core/util.js';
 
@@ -47,8 +47,8 @@ export class RaceSim {
       ack: 0, // 最後に適用したゲスト入力の seq
       tc: [], // タイミングブーストのチャンス地点（スタートからの走行距離）
       rain: 0, // 豪雨の残り時間
-      rk: -1, // 豪雨を呼んだ車
-      ru: 0, // このレースで豪雨を使ったか（1 レース 1 回）
+      rk: -1, // 豪雨を使った車
+      houses: [], // 落ちてくる犬小屋
     };
     this.s.tc = pickChances(this.s, t.length);
   }
@@ -72,17 +72,22 @@ export class RaceSim {
     for (let i = 0; i < s.foods.length; i++) if (s.foods[i] > 0) s.foods[i] = Math.max(0, s.foods[i] - dt);
 
     for (const k of s.karts) {
-      const inp = k.npc ? npcInput(this, k, dt) : inputs[k.i] | 0;
-      if (active) {
-        stepTiming(k, this.prog[k.i], s.tc, !!(inp & IN.TAP), dt, ev);
-        // 豪雨: 最終ラップに入る直前に押した入力も少しだけ待つ（ゲストの画面では予測で先に最終ラップに入るため）
-        if (inp & IN.RAIN && !s.ru) k.rq = RAIN.REQUEST_GRACE;
-        if (k.rq > 0) {
-          if (this.canCallRain(k)) this.callRain(k);
-          else k.rq = Math.max(0, k.rq - dt);
+      let inp = k.npc ? npcInput(this, k, dt) : inputs[k.i] | 0;
+      if (k.ow > 0) {
+        // 飼い主モード: 飼い主が引っ張って自動で走る（操作はできない）。ゴールしたら終わり
+        k.ow = active && !k.fin ? Math.max(0, k.ow - dt) : 0;
+        if (k.ow > 0) {
+          inp = ownerInput(this, k) | (inp & IN.TAP ? IN.TAP : 0);
+          k.boost = Math.max(k.boost, 0.2);
+          k.slow = 0;
+          k.wet = 0;
+          k.spin = 0;
         }
       }
-      if (active && inp & IN.ITEM) useItem(s, k, ev, this.prog);
+      if (active) {
+        stepTiming(k, this.prog[k.i], s.tc, !!(inp & IN.TAP), dt, ev);
+      }
+      if (active && inp & IN.ITEM) useItem(s, k, ev, this.prog, (u) => this.callRain(u));
       if (active && inp & IN.RESPAWN) this.respawn(k);
       const wall = stepKart(k, inp, dt, track, active);
       if (wall > 8) {
@@ -110,6 +115,22 @@ export class RaceSim {
         const b = ks[j];
         const hit = collideKarts(a, b);
         if (!hit || hit.rel <= 3) continue;
+        if (a.ow > 0 !== b.ow > 0) {
+          // 飼い主モードの車に触れた車ははね飛ばされる
+          const ownerK = a.ow > 0 ? a : b;
+          const other = a.ow > 0 ? b : a;
+          if (other.bc <= 0) {
+            other.bc = 0.35;
+            if (spinKart(other, ITEMS.OWNER_SPIN, true)) {
+              other.stats.hitBy++;
+              ownerK.stats.hits++;
+              ev.push({ t: 'hit', k: other.i, by: ownerK.i, x: other.x, z: other.z });
+            } else {
+              ev.push({ t: 'block', k: other.i, x: other.x, z: other.z });
+            }
+          }
+          continue;
+        }
         const rammer = hit.rammer === 0 ? a : b;
         const victim = hit.rammer === 0 ? b : a;
         if (rammer.bc > 0 && victim.bc > 0) continue;
@@ -188,22 +209,13 @@ export class RaceSim {
     }
   }
 
-  /** 豪雨を呼べるか: 最終ラップに入っていて、まだ誰も呼んでいなくて、全員（NPC 含む）の中で最下位 */
-  canCallRain(k) {
-    const s = this.s;
-    if (s.phase !== 'racing' || s.ru || k.lap < RACE.LAPS - 1 || (k.fin && !k.npc)) return false;
-    return this.rankOf(k.i, this.prog.length ? this.prog : null) === s.karts.length;
-  }
-
-  /** 豪雨を呼ぶ。呼んだ車以外（ゴール済みの人間を除く）がしばらく遅くなる */
+  /** 豪雨を降らせる。使った車以外（ゴール済みの人間を除く）がしばらく遅くなる */
   callRain(k) {
     const s = this.s;
-    s.ru = 1;
     s.rk = k.i;
     s.rain = RAIN.DURATION;
-    k.rq = 0;
     for (const o of s.karts) {
-      if (o === k || (o.fin && !o.npc)) continue;
+      if (o === k || (o.fin && !o.npc) || o.ow > 0) continue;
       if (o.gd > 0) {
         o.gd = 0; // ガードで豪雨も 1 回防ぐ
         this.events.push({ t: 'block', k: o.i, x: o.x, z: o.z });
@@ -356,7 +368,7 @@ const int = (v, d = 0, lo = 0, hi = 1e9) => Math.round(num(v, d, lo, hi));
 function sanitizeKart(r, i, prev) {
   const k = { ...prev };
   if (!r || typeof r !== 'object') return k;
-  for (const f of ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'al', 'at', 'as', 'tn', 'rq']) {
+  for (const f of ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'al', 'at', 'as', 'tn']) {
     k[f] = num(r[f], prev[f] ?? 0);
   }
   k.tw = num(r.tw, 0, 0, TIMING.WINDOW);
@@ -370,7 +382,8 @@ function sanitizeKart(r, i, prev) {
   k.fin = r.fin ? 1 : 0;
   k.lap = int(r.lap, 0, 0, 99);
   k.cp = int(r.cp, 0, 0, RACE.CHECKPOINTS - 1);
-  k.item = int(r.item, 0, 0, 5);
+  k.item = int(r.item, 0, 0, ITEMS.COUNT - 1);
+  k.ow = num(r.ow, 0, 0, ITEMS.OWNER_TIME);
   k.gd = num(r.gd, 0, 0, ITEMS.GUARD_TIME);
   k.fd = int(r.fd, 0, 0, FOOD.MAX);
   // stats は定期配信では省略されることがある（そのときは前回の値を使う）
@@ -412,7 +425,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
     tc: Array.isArray(r.tc) ? r.tc.slice(0, 2).map((v) => num(v, 0, 0, 1e5)) : prev.tc || [],
     rain: num(r.rain, 0, 0, RAIN.DURATION),
     rk: Number.isInteger(r.rk) && r.rk >= 0 && r.rk < r.karts.length ? r.rk : -1,
-    ru: r.ru ? 1 : 0,
+    houses: [],
   };
   if (Array.isArray(r.proj)) {
     for (const p of r.proj.slice(0, 32)) {
@@ -426,11 +439,19 @@ export function sanitizeSnapshot(r, prev, boxCount) {
       s.bananas.push({ id: int(b.id), o: owner(b.o), x: num(b.x), z: num(b.z), life: num(b.life, 0, 0, 60), age: num(b.age, 0, 0, 60) });
     }
   }
+  if (Array.isArray(r.houses)) {
+    const tgt = (t) => (Number.isInteger(t) && t >= 0 && t < r.karts.length ? t : 0);
+    for (const h of r.houses.slice(0, ITEMS.HOUSE_MAX + 2)) {
+      if (!h || typeof h !== 'object') continue;
+      const age = num(h.age, 0, 0, 20);
+      s.houses.push({ id: int(h.id), o: owner(h.o), t: tgt(h.t), x: num(h.x), z: num(h.z), age, hit: age >= ITEMS.HOUSE_DELAY ? 1 : 0 });
+    }
+  }
   return s;
 }
 
 // ---- 定期配信用のコンパクトな形式（キー名を省いて配列にする。通信量を約半分に） ----
-const NET_KART_FIELDS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'tw', 'tb', 'wet', 'gd', 'fd'];
+const NET_KART_FIELDS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow'];
 const PHASES = ['countdown', 'racing', 'finished'];
 
 /** 定期配信用に詰める（stats や NPC の思考状態は省く） */
@@ -444,12 +465,13 @@ export function packNet(s) {
     w: s.winner,
     a: s.ack,
     tc: s.tc,
-    rn: [s.rain, s.rk, s.ru],
+    rn: [s.rain, s.rk],
     k: s.karts.map((k) => NET_KART_FIELDS.map((f) => k[f])),
     b: s.boxes,
     fo: s.foods.reduce((a, t, i) => (t > 0 && a.push(i), a), []),
     pr: s.proj.map((p) => [p.id, p.o, p.x, p.z, p.vx, p.vz, p.life, p.age, p.b, p.f | 0, p.t ?? -1, p.d || 0]),
     bn: s.bananas.map((b) => [b.id, b.o, b.x, b.z, b.life, b.age]),
+    hs: s.houses.map((h) => [h.id, h.o, h.t, h.x, h.z, h.age]),
   };
 }
 
@@ -471,11 +493,11 @@ export function unpackNet(p) {
     tc: p.tc,
     rain: Array.isArray(p.rn) ? p.rn[0] : 0,
     rk: Array.isArray(p.rn) ? p.rn[1] : -1,
-    ru: Array.isArray(p.rn) ? p.rn[2] : 0,
     karts: p.k.slice(0, RACE.HUMANS + RACE.MAX_NPCS).map((a) => row(a, NET_KART_FIELDS)),
     boxes: p.b,
     foodTaken: Array.isArray(p.fo) ? p.fo.slice(0, 400) : [],
     proj: Array.isArray(p.pr) ? p.pr.slice(0, 32).map((a) => row(a, ['id', 'o', 'x', 'z', 'vx', 'vz', 'life', 'age', 'b', 'f', 't', 'd'])) : [],
+    houses: Array.isArray(p.hs) ? p.hs.slice(0, 8).map((a) => row(a, ['id', 'o', 't', 'x', 'z', 'age'])) : [],
     bananas: Array.isArray(p.bn) ? p.bn.slice(0, 16).map((a) => row(a, ['id', 'o', 'x', 'z', 'life', 'age'])) : [],
   };
 }

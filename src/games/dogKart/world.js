@@ -6,7 +6,7 @@ import { KartView } from './kart.js';
 import { Effects } from './effects.js';
 import { buildDog } from './dog.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { PAD } from './constants.js';
+import { PAD, ITEMS } from './constants.js';
 import { device, getQualityPref, setQualityPref } from '../../core/device.js';
 
 // 背景配置用の決定的な乱数（ホストとゲストで同じ景色になる）
@@ -1384,7 +1384,39 @@ export class World {
       ringMat: this._track(new THREE.MeshToonMaterial({ color: 0xffffff })),
     };
     this.bananaViews = new Map();
-    this._viewPool = { bone: [], banana: [], frisbee: [] };
+    // 犬小屋: 落下地点の目印（赤い輪）と、空から落ちてくる小屋
+    this.houseViews = new Map();
+    this._houseParts = {
+      body: this._track(new THREE.BoxGeometry(4.2, 2.6, 4.6)),
+      roof: this._track(new THREE.ConeGeometry(3.7, 2.2, 4).rotateY(Math.PI / 4)),
+      door: this._track(new THREE.CircleGeometry(0.95, 14)),
+      mark: this._track(new THREE.RingGeometry(0.82, 1, 28).rotateX(-Math.PI / 2)),
+      bodyMat: this._track(new THREE.MeshToonMaterial({ color: 0xd9a066 })),
+      roofMat: this._track(new THREE.MeshToonMaterial({ color: 0xd9433a })),
+      doorMat: this._track(new THREE.MeshBasicMaterial({ color: 0x3a2412 })),
+      markMat: this._track(new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide })),
+    };
+    this._viewPool = { bone: [], banana: [], frisbee: [], house: [] };
+  }
+
+  _makeHouse() {
+    const g = new THREE.Group();
+    const p = this._houseParts;
+    const mark = new THREE.Mesh(p.mark, p.markMat);
+    mark.position.y = 0.15;
+    mark.name = 'mark';
+    const home = new THREE.Group();
+    home.name = 'home';
+    const body = new THREE.Mesh(p.body, p.bodyMat);
+    body.position.y = 1.3;
+    const roof = new THREE.Mesh(p.roof, p.roofMat);
+    roof.position.y = 3.7;
+    const door = new THREE.Mesh(p.door, p.doorMat);
+    door.position.set(0, 1.1, 2.32);
+    home.add(body, roof, door);
+    home.traverse((o) => (o.castShadow = true));
+    g.add(mark, home);
+    return g;
   }
 
   _makeBone() {
@@ -1474,6 +1506,29 @@ export class World {
     this._syncViews(items.proj.filter((p) => p.f), this.frisbeeViews, 'frisbee', () => this._makeFrisbee(), (v, p) => {
       v.position.set(p.x, 1.4 + Math.sin(t * 10 + p.id) * 0.1, p.z);
       v.rotation.set(0.12, t * 22, 0.12);
+    });
+    this._syncViews(items.houses || [], this.houseViews, 'house', () => this._makeHouse(), (v, h) => {
+      const delay = ITEMS.HOUSE_DELAY;
+      const mark = v.getObjectByName('mark');
+      const home = v.getObjectByName('home');
+      v.position.set(h.x, 0, h.z);
+      if (h.age < delay) {
+        // 落下地点は 1 位を追いかけ、近づくほど小さく濃く（落ちるタイミングが分かる）
+        const f = h.age / delay;
+        mark.visible = true;
+        mark.scale.setScalar(ITEMS.HOUSE_RADIUS * (1 + 0.55 * (1 - f)) * (1 + Math.sin(t * 14) * 0.03)); // 落ちる瞬間に当たる範囲と一致
+        home.position.y = 70 * (1 - f) * (1 - f);
+        home.scale.set(1, 1, 1);
+      } else {
+        // 落ちたあとは地面で少しつぶれてから消える
+        const g = h.age - delay;
+        const squish = 1 - Math.exp(-g * 14);
+        mark.visible = false;
+        home.position.y = 0;
+        const out = Math.max(0, Math.min(1, (ITEMS.HOUSE_STAY - g) / 0.3));
+        const wide = 1 + 0.1 * Math.exp(-g * 8);
+        home.scale.set(wide * out, (0.78 + 0.22 * squish) * out, wide * out);
+      }
     });
     this._syncViews(items.bananas, this.bananaViews, 'banana', () => this._makeBanana(), (v, b) => {
       v.position.set(b.x, 0.35, b.z);

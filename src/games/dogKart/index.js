@@ -22,7 +22,7 @@ export function createGame() {
   return new DogKartGame();
 }
 
-const EVENT_TYPES = new Set(['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food']);
+const EVENT_TYPES = new Set(['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house']);
 
 function cleanEvent(e) {
   if (!e || typeof e !== 'object' || !EVENT_TYPES.has(e.t)) return null;
@@ -125,9 +125,6 @@ class DogKartGame {
     this.paused = true;
     this.finished = false;
     this.hud = new Hud(ctx.container, this.track, this.me, { round: ctx.options?.round, races: ctx.options?.races });
-    this.hud.onRain = () => {
-      this.rainPressed = true;
-    };
     this.world = null;
     this.hud.setQualityLabel(getQualityPref());
     // 何戦目かとコース名、ボス犬の参戦をカウントダウン中に知らせる
@@ -183,8 +180,6 @@ class DogKartGame {
     this._prevY = [];
     this._onPad = [];
     this.tapPressed = false;
-    this.rainPressed = false;
-    this.rainReady = false;
     this._prevTw = 0;
     this._rainLevel = 0;
     // 画面を押す（クリック・タップ）とタイミングブースト。ボタンの上は除く
@@ -220,9 +215,7 @@ class DogKartGame {
     if (i.consume('Space')) b |= IN.ITEM;
     if (i.consume('KeyR')) b |= IN.RESPAWN;
     if (i.consume('Enter', 'NumpadEnter', 'KeyE') || this.tapPressed) b |= IN.TAP;
-    if (i.consume('KeyQ') || this.rainPressed) b |= IN.RAIN;
     this.tapPressed = false;
-    this.rainPressed = false;
     if (i.consume('KeyC')) this.toggleCamera();
     b |= this.hud.touch.bits();
     return b;
@@ -308,7 +301,10 @@ class DogKartGame {
         this.ctx.sendInput(this.seq, this.sentInputs.slice());
         this.pending = [];
       }
-      if (NET.PREDICTION && this.pred.k) {
+      if (NET.PREDICTION && this.pred.k && this.sim.s.karts[1].ow > 0) {
+        // 飼い主モード中は自動で走るのでホストの状態をそのまま使う（予測しない）
+        this.pred.reset(this.sim.s.karts[1]);
+      } else if (NET.PREDICTION && this.pred.k) {
         const s = this.sim.s;
         const raceT = this._guestRaceTime();
         const active = s.phase === 'racing' || (s.phase === 'countdown' && raceT >= 0);
@@ -417,7 +413,6 @@ class DogKartGame {
     this.sound.setEngine(false);
     this.sound.setRain(0);
     this.tapPressed = false;
-    this.rainPressed = false;
     if (this.isHost) {
       this.guestQueue = [];
       this.lastQueuedSeq = this.sim.s.ack;
@@ -480,9 +475,28 @@ class DogKartGame {
             snd.play('boost');
             fx?.text('ブーン!', k.x, 3.5, k.z, 3.5);
             fx?.ring(k.x, 0.5, k.z, 0xffd23f, 5);
+          } else if (e.item === ITEMS.OWNER) {
+            snd.play('boost');
+            fx?.text('飼い主登場!', k.x, 4, k.z, 4.5);
+            fx?.ring(k.x, 0.5, k.z, 0xffd23f, 7);
+            fx?.sparkle(k.x, 1.5, k.z, 14);
+            if (e.k === me) this.hud.flash('🧑 飼い主登場！ 引っ張ってもらうワン', 'good', 1800);
+            else this.hud.flash(`🧑 ${kartName(k)}に飼い主登場！ ぶつかるとはね飛ばされる`, 'bad', 1800);
+          } else if (e.item === ITEMS.HOUSE) {
+            snd.play('throw');
+            fx?.text('ヒュー…', k.x, 3.5, k.z, 3.5);
+            if (e.k === me) this.hud.flash('🏠 犬小屋を落とした！ 1位にまっしぐら', 'good', 1800);
+            else this.hud.flash('🏠 犬小屋が降ってくる！', 'bad', 1800);
           }
           break;
         }
+        case 'house':
+          snd.play('hit');
+          fx?.puff(e.x, 1, e.z, { n: 14, size: 1.6, spread: 5 });
+          fx?.ring(e.x, 0.4, e.z, 0xc98a4b, ITEMS.HOUSE_RADIUS);
+          fx?.text('ドーン!', e.x, 5, e.z, 5);
+          this.cam?.addShake(e.v === me ? 1 : 0.4);
+          break;
         case 'hit':
           snd.play('hit');
           fx?.stars(e.x, 1.8, e.z, 10, 1.1);
@@ -631,7 +645,7 @@ class DogKartGame {
         karts[i] = { ...k, x: k.x + (Math.sin(k.h) * k.sp + k.kx) * ex, z: k.z + (Math.cos(k.h) * k.sp + k.kz) * ex };
       }
     }
-    if (NET.PREDICTION && this.pred.k) {
+    if (NET.PREDICTION && this.pred.k && !(n.s.karts[1].ow > 0)) {
       this.pred.decay(dt);
       const k = this.pred.k;
       // 画面の更新と 60Hz の更新はずれるので、直前の位置との間を補間して動きを滑らかにする
@@ -649,7 +663,12 @@ class DogKartGame {
       const q = prevProj.get(p.id);
       return q ? { ...p, x: lerp(q.x, p.x, f), z: lerp(q.z, p.z, f) } : p;
     });
-    return { karts, items: { boxes: s.boxes, proj, bananas: n.s.bananas, foods: s.foods } };
+    const prevHouse = new Map(a.s.houses.map((p) => [p.id, p]));
+    const houses = n.s.houses.map((p) => {
+      const q = prevHouse.get(p.id);
+      return q ? { ...p, x: lerp(q.x, p.x, f), z: lerp(q.z, p.z, f) } : p;
+    });
+    return { karts, items: { boxes: s.boxes, proj, bananas: n.s.bananas, houses, foods: s.foods } };
   }
 
   /** 車ごとの追加演出（ドリフトの火花・着地の土煙・ブースト煙など） */
@@ -750,15 +769,7 @@ class DogKartGame {
     const tw = s.phase === 'racing' ? pk.tw : 0;
     if (tw > 0 && this._prevTw <= 0 && !this.paused) this.sound.play('chance');
     this._prevTw = tw;
-    const onFinal = this.isHost ? sk.lap >= RACE.LAPS - 1 : this.sim.progressOf(pk) >= (RACE.LAPS - 1) * this.track.length;
     const rank = this.sim.rankOf(this.me);
-    // 豪雨を呼べるのは、最終ラップに入った最下位の車だけ（判定はホスト）
-    const rainReady = s.phase === 'racing' && !s.ru && onFinal && !sk.fin && rank === s.karts.length;
-    if (rainReady && !this.rainReady && !this.paused) {
-      this.sound.play('rainReady');
-      this.hud.flash(this.hud.touch.visible ? '☔ 最下位の特権！ ボタンで豪雨をよべる' : '☔ 最下位の特権！ Q か ☔ で豪雨をよべる', 'final', 1800);
-    }
-    this.rainReady = rainReady;
     // 雨の強さ（降り始めと止み際はなめらかに）
     const rainTarget = s.rain > 0 ? Math.min(1, s.rain / 0.8, (RAIN.DURATION - s.rain) / 0.5 + 0.2) : 0;
     this._rainLevel += (rainTarget - this._rainLevel) * Math.min(1, dt * 4);
@@ -777,7 +788,6 @@ class DogKartGame {
         wrong: sk.wrong,
         phase: s.phase,
         tw,
-        rainReady,
         wet: mine.wet || 0,
         food: sk.fd || 0,
         karts,

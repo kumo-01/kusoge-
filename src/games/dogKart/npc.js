@@ -21,6 +21,21 @@ function bendAhead(track, s, from, to) {
   return Math.abs(d);
 }
 
+/** 飼い主モード中の自動操縦: コースの中央を、カーブでは少し緩めながら走る（人間もNPCも同じ） */
+export function ownerInput(sim, k) {
+  const track = sim.track;
+  const ps = track.project(k.x, k.z).s;
+  const tgt = track.pointAt(ps + 12 + Math.max(0, k.sp) * 0.4, 0);
+  const d = angleTo(k, tgt.x, tgt.z);
+  let bits = 0;
+  if (d > 0.04) bits |= IN.LEFT;
+  else if (d < -0.04) bits |= IN.RIGHT;
+  const bend = bendAhead(track, ps, 6, 6 + Math.max(20, k.sp * 1.2));
+  if (bend > 1.5 && k.sp > KART.MAX_SPEED * 0.9) bits |= IN.DOWN;
+  else bits |= IN.UP;
+  return bits;
+}
+
 /**
  * NPC の今回の入力を決める
  * @param {import('./race.js').RaceSim} sim
@@ -88,9 +103,6 @@ export function npcInput(sim, k, dt) {
       k.tn = 0;
     }
   }
-  // 豪雨: 最終ラップに入ってしばらくすると呼ぶ（人間が先に呼べる余裕を残す）
-  if (sim.canCallRain(k) && nextRandom(s) < dt * 0.35) bits |= IN.RAIN;
-
   // アイテム
   if (k.item && k.roll <= 0 && s.phase === 'racing') {
     const fx = Math.sin(k.h);
@@ -98,8 +110,13 @@ export function npcInput(sim, k, dt) {
     let use = false;
     if (k.item === ITEMS.BOOST) {
       use = bend < 0.5;
-    } else if (k.item === ITEMS.GUARD) {
+    } else if (k.item === ITEMS.GUARD || k.item === ITEMS.OWNER || k.item === ITEMS.RAIN) {
       use = nextRandom(s) < dt * 0.8; // すぐ使う
+    } else if (k.item === ITEMS.HOUSE) {
+      // 自分より前に誰かがいるときに使う（先頭の自分には当てられない）
+      let ahead = false;
+      for (const o of s.karts) if (o !== k && sim.prog[o.i] > sim.prog[k.i]) ahead = true;
+      use = ahead && nextRandom(s) < dt * 0.8;
     } else if (k.item === ITEMS.FRISBEE) {
       // 前に誰かがいて、そこそこ近いときに投げる（ボス犬は外さないよう、もっと近づいてから）
       const near = boss ? 60 : 80;

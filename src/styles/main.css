@@ -1473,35 +1473,6 @@ body[data-screen='game'] .toasts {
   font-size: 0.7rem;
   opacity: 0.9;
 }
-.hud-rain-btn {
-  pointer-events: auto;
-  display: block;
-  margin: 0 auto 18px;
-  font: inherit;
-  font-weight: 900;
-  font-size: 1rem;
-  color: #fff;
-  background: linear-gradient(180deg, #6d7bd6, #3d4aa8);
-  border: 4px solid #fff;
-  border-radius: 999px;
-  padding: 0.5em 1em;
-  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.2), 0 0 20px rgba(120, 140, 255, 0.8);
-  cursor: pointer;
-  animation: rain-pulse 0.7s ease-in-out infinite alternate;
-  white-space: nowrap;
-}
-.hud-rain-btn small {
-  margin-left: 0.4em;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 999px;
-  padding: 0 0.5em;
-  font-size: 0.7rem;
-}
-@keyframes rain-pulse {
-  to {
-    transform: scale(1.08);
-  }
-}
 .hud-wet {
   position: absolute;
   top: 26%;
@@ -1541,9 +1512,6 @@ body[data-screen='game'] .toasts {
 @media (max-width: 720px) {
   .hud-timing {
     transform: scale(0.8);
-  }
-  .hud-rain-btn {
-    font-size: 0.85rem;
   }
 }
 
@@ -1819,12 +1787,6 @@ body[data-screen='game'] {
   text-shadow: none;
 }
 .is-touch .hud-bc {
-  display: none;
-}
-.is-touch .hud-rain-btn {
-  pointer-events: auto;
-}
-.is-touch .hud-rain-btn small {
   display: none;
 }
 .is-phone .hud-cam-btn {

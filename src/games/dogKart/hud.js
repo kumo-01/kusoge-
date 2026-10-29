@@ -51,7 +51,6 @@ export class Hud {
       this.timingRing,
       h('div.hud-timing-label', null, 'ここだ！で画面をタップ', h('small', null, 'クリック / タップ / Enter')),
     );
-    this.rainBtn = h('button.hud-rain-btn', { hidden: true, onclick: () => this.onRain?.(), title: '豪雨をよぶ（Q）' }, '☔ 豪雨をよぶ', h('small', null, 'Q'));
     this.wetBadge = h('div.hud-wet', { hidden: true }, '☔ ずぶぬれ… スピードダウン');
     this.thunderEl = h('div.hud-thunder');
     this.fallback = h('div.hud-fallback', { hidden: true }, '3D表示を開始できなかったため、簡易表示で遊んでいます');
@@ -63,8 +62,8 @@ export class Hud {
       h('div.hud-tl', null, h('div.hud-rank-wrap', null, this.rank, this.rankTotal), h('div.hud-lt', null, this.round, this.lap, this.time)),
       this.trBox,
       h('div.hud-bl', null, h('div.hud-speed', null, this.speed, h('span', null, 'わんkm/h')), h('div.hud-speed-bar', null, this.speedBar), this.food),
-      h('div.hud-br', null, this.rainBtn, this.itemSlot),
-      h('div.hud-bc', null, 'W/↑ アクセル　S/↓ ブレーキ　A D/← → ハンドル　Space アイテム　R 復帰　C カメラ　Enter/タップ タイミング　Q 豪雨'),
+      h('div.hud-br', null, this.itemSlot),
+      h('div.hud-bc', null, 'W/↑ アクセル　S/↓ ブレーキ　A D/← → ハンドル　Space アイテム　R 復帰　C カメラ　Enter/タップ タイミング'),
       this.rotateHint,
       this.thunderEl,
       this.wetBadge,
@@ -200,7 +199,7 @@ export class Hud {
     let icon = '';
     let name = 'アイテムなし';
     if (d.roll > 0) {
-      const icons = ['🦴', '🍌', '⚡', '🛡️', '🥏'];
+      const icons = ['🦴', '🍌', '⚡', '🛡️', '🥏', '🧑', '☔', '🏠'];
       icon = icons[Math.floor(performance.now() / 90) % icons.length];
       name = 'ルーレット中…';
     } else if (d.item && ITEM_INFO[d.item]) {
@@ -219,7 +218,6 @@ export class Hud {
     }
     this.warn.hidden = !(d.wrong > 1);
     this.wetBadge.hidden = !(d.wet > 0);
-    this.rainBtn.hidden = !d.rainReady;
 
     // タイミングブーストのリング: 残り WINDOW → SWEET で大きさ 2.6 → 1（的と同じ）、その後さらに縮む
     const tw = d.tw || 0;

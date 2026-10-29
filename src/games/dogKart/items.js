@@ -1,4 +1,4 @@
-// アイテム: ホネアタック / バナナトラップ / わんわんブースト（判定はホストのみ）
+// アイテム: ホネアタック / バナナトラップ / わんわんブースト / ガード / フリスビー / 飼い主登場 / 豪雨 / 犬小屋（判定はホストのみ）
 import { ITEMS, KART, FOOD } from './constants.js';
 
 export const ITEM_INFO = {
@@ -7,6 +7,9 @@ export const ITEM_INFO = {
   [ITEMS.BOOST]: { name: 'わんわんブースト', icon: '⚡' },
   [ITEMS.GUARD]: { name: 'ガード', icon: '🛡️' },
   [ITEMS.FRISBEE]: { name: 'フリスビー', icon: '🥏' },
+  [ITEMS.OWNER]: { name: '飼い主登場', icon: '🧑' },
+  [ITEMS.RAIN]: { name: '豪雨', icon: '☔' },
+  [ITEMS.HOUSE]: { name: '犬小屋', icon: '🏠' },
 };
 
 /** 決定的な乱数（状態をスナップショットに保存できる） */
@@ -17,25 +20,42 @@ export function nextRandom(s) {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-/** 順位に応じてアイテムを選ぶ（後ろの人ほどブーストが出やすい）。rank: 1 = 先頭, total: 台数 */
-export function chooseItem(s, rank, total) {
-  const r = nextRandom(s);
-  let w; // [bone, banana, boost, guard, frisbee]（先頭は追尾する相手がいないのでフリスビーは出にくい）
-  if (rank === 1) w = [0.25, 0.3, 0.1, 0.3, 0.05];
-  else if (rank === total) w = [0.2, 0.1, 0.3, 0.1, 0.3];
-  else w = [0.3, 0.2, 0.2, 0.15, 0.15];
-  const order = [ITEMS.BONE, ITEMS.BANANA, ITEMS.BOOST, ITEMS.GUARD, ITEMS.FRISBEE];
-  let acc = 0;
-  for (let i = 0; i < w.length; i++) {
-    acc += w[i];
-    if (r < acc) return order[i];
-  }
-  return ITEMS.FRISBEE;
+/**
+ * 順位に応じてアイテムを選ぶ。rank: 1 = 先頭, total: 台数
+ * - 飼い主登場・ブーストは後ろの順位ほど出やすい
+ * - フリスビー・犬小屋は 2 位以下だけ / ガードは最下位以外 / 豪雨は最下位だけ
+ */
+export function itemWeights(rank, total) {
+  const f = total > 1 ? (rank - 1) / (total - 1) : 0; // 0 = 先頭, 1 = 最下位
+  const last = rank === total && total > 1;
+  const w = [];
+  w[ITEMS.BONE] = 0.24;
+  w[ITEMS.BANANA] = 0.2;
+  w[ITEMS.BOOST] = 0.1 + 0.18 * f;
+  w[ITEMS.GUARD] = last ? 0 : 0.15;
+  w[ITEMS.FRISBEE] = rank >= 2 ? 0.14 : 0;
+  w[ITEMS.OWNER] = 0.32 * f * f;
+  w[ITEMS.RAIN] = last ? 0.14 : 0;
+  w[ITEMS.HOUSE] = rank >= 2 ? 0.05 + 0.1 * f : 0;
+  return w;
 }
 
-/** スピンさせる。無敵中なら false */
-export function spinKart(k, dur) {
-  if (k.inv > 0 || k.fin) return false;
+export function chooseItem(s, rank, total) {
+  const w = itemWeights(rank, total);
+  let sum = 0;
+  for (let i = 1; i < w.length; i++) sum += w[i];
+  const r = nextRandom(s) * sum;
+  let acc = 0;
+  for (let i = 1; i < w.length; i++) {
+    acc += w[i];
+    if (w[i] > 0 && r < acc) return i;
+  }
+  return ITEMS.BONE;
+}
+
+/** スピンさせる。無敵中なら false（force: スピン後などの短い無敵は無視する。ガードと飼い主モードでは防がれる） */
+export function spinKart(k, dur, force = false) {
+  if (k.fin || k.ow > 0 || (k.inv > 0 && !force)) return false;
   if (k.gd > 0) {
     // ガード: 1 回だけ防ぐ（直後の連続ヒットを避けるため少しだけ無敵）
     k.gd = 0;
@@ -53,8 +73,8 @@ export function spinKart(k, dur) {
   return true;
 }
 
-/** progs: 全車の走行距離（フリスビーの追尾先を決める） */
-export function useItem(s, k, events, progs = null) {
+/** progs: 全車の走行距離（フリスビー・犬小屋の狙いを決める）。callRain: 豪雨を降らせる処理 */
+export function useItem(s, k, events, progs = null, callRain = null) {
   if (!k.item || k.roll > 0) return;
   const item = k.item;
   k.item = 0;
@@ -108,6 +128,33 @@ export function useItem(s, k, events, progs = null) {
       t: target,
       d: 0,
     });
+  } else if (item === ITEMS.OWNER) {
+    k.ow = ITEMS.OWNER_TIME;
+    k.spin = 0;
+    k.slow = 0;
+    k.wet = 0;
+  } else if (item === ITEMS.RAIN) {
+    callRain?.(k);
+  } else if (item === ITEMS.HOUSE) {
+    // 今 1 位の車を狙う（自分が先頭になっていたら不発）
+    let target = -1;
+    let best = -Infinity;
+    if (progs) {
+      for (const o of s.karts) {
+        if (o.fin && !o.npc) continue;
+        if (progs[o.i] > best) {
+          best = progs[o.i];
+          target = o.i;
+        }
+      }
+    }
+    if (target < 0 || target === k.i) {
+      events.push({ t: 'poof', x: k.x, z: k.z });
+    } else {
+      const tk = s.karts[target];
+      s.houses.push({ id: s.nextId++, o: k.i, t: target, x: tk.x, z: tk.z, age: 0, hit: 0 });
+      while (s.houses.length > ITEMS.HOUSE_MAX) s.houses.shift();
+    }
   } else if (item === ITEMS.BOOST) {
     k.boost = ITEMS.BOOST_TIME;
     k.sp = Math.min(KART.BOOST_SPEED, Math.max(k.sp, KART.MAX_SPEED * 0.85) + 6);
@@ -199,6 +246,7 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
     }
     if (!remove) {
       for (const k of karts) {
+        if (k.ow > 0) continue; // 飼い主モード中はすり抜ける
         if (k.i === pr.o && pr.age < 0.5) continue; // 投げた直後に自分に当たらない（跳ね返りには当たる）
         const dx = k.x - pr.x;
         const dz = k.z - pr.z;
@@ -241,6 +289,7 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
     let remove = bn.life <= 0;
     if (!remove) {
       for (const k of karts) {
+        if (k.ow > 0) continue;
         if (k.i === bn.o && bn.age < 0.8) continue;
         const dx = k.x - bn.x;
         const dz = k.z - bn.z;
@@ -258,5 +307,36 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
       }
     }
     if (remove) s.bananas.splice(i, 1);
+  }
+
+  // 犬小屋: 狙った車（1 位）の上を追いかけて、時間になったら落ちる。近くの車も巻き込まれる
+  for (let i = s.houses.length - 1; i >= 0; i--) {
+    const hs = s.houses[i];
+    hs.age += dt;
+    const tk = karts[hs.t];
+    if (!hs.hit) {
+      if (tk) {
+        hs.x = tk.x;
+        hs.z = tk.z;
+      }
+      if (hs.age >= ITEMS.HOUSE_DELAY) {
+        hs.hit = 1;
+        let n = 0;
+        for (const k of karts) {
+          if (k.i !== hs.t && (k.x - hs.x) ** 2 + (k.z - hs.z) ** 2 > ITEMS.HOUSE_RADIUS ** 2) continue;
+          if (k.ow > 0) continue;
+          if (spinKart(k, ITEMS.HOUSE_SPIN, true)) {
+            n++;
+            k.stats.hitBy++;
+            if (k.i !== hs.o && karts[hs.o]) karts[hs.o].stats.hits++;
+            events.push({ t: 'hit', k: k.i, by: hs.o, x: k.x, z: k.z });
+          } else {
+            events.push({ t: 'block', k: k.i, x: k.x, z: k.z });
+          }
+        }
+        events.push({ t: 'house', k: hs.o, v: hs.t, x: hs.x, z: hs.z, n });
+      }
+    }
+    if (hs.age >= ITEMS.HOUSE_DELAY + ITEMS.HOUSE_STAY) s.houses.splice(i, 1);
   }
 }
