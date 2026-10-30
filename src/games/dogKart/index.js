@@ -315,6 +315,7 @@ class DogKartGame {
       this.sentInputs = [];
       this.buffer = [{ t: s.tick * this.ctx.fixedDt, s }];
       this.clockInit = false;
+      this._rt = undefined;
       this.pred.reset(s.karts[this.me]);
       this.seq = s.acks[this.me] || 0;
       this.pending = [];
@@ -376,6 +377,7 @@ class DogKartGame {
     this.paused = false;
     if (!this.auth) {
       this.clockInit = false;
+      this._rt = undefined;
       this.buffer = this.buffer.slice(-1);
       if (this.pred.k) this.pred.hist = [];
     }
@@ -559,7 +561,15 @@ class DogKartGame {
     if (this.auth) {
       return { karts: s.karts, items: s };
     }
-    const renderT = this.clock - this.interp;
+    // 他の車を描く時刻。補間の遅延が増えたり、端末が一瞬止まったりしても、時刻は戻さない
+    // （戻すと、速い車が数メートル後ろへ飛ぶ）。目標との差は、進む速さを変えて少しずつ縮める
+    const target = this.clock - this.interp;
+    let renderT = target;
+    if (this._rt !== undefined && !this.paused) {
+      const diff = target - this._rt - dt; // 実時間どおり進めたあとの、目標とのずれ
+      renderT = Math.abs(diff) > 0.5 ? target : this._rt + dt * Math.min(1.6, Math.max(0, 1 + diff / 0.25));
+    }
+    this._rt = renderT;
     const b = this.buffer;
     let a = b[b.length - 1];
     let n = a;
@@ -662,6 +672,8 @@ class DogKartGame {
       });
     }
     const mine = karts[this.me];
+    // テスト用: 画面に出す位置を記録する（VITE_TEST_HOOKS=1 でビルドしたときだけ）
+    if (import.meta.env?.VITE_TEST_HOOKS && globalThis.__wanwanProbe && !this.paused) globalThis.__wanwanProbe.push([performance.now(), s.tick, karts.map((k) => [k.x, k.z, k.h, k.sp])]);
     const raceT = this.auth ? s.t : this._guestRaceTime();
 
     // カウントダウンの音（双方とも自分の時計で鳴らす）
