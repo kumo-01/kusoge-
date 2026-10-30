@@ -510,7 +510,7 @@ test('飼い主登場: 無敵で自動で走り、触れた車をはね飛ばし
   assert.ok(x.stats.hits >= 1 && y.stats.hitBy >= 1);
 });
 
-test('犬小屋: 1位を狙って必ず当たり、近くの車も巻き込む。ガードは防ぐ。自分が1位なら不発', () => {
+test('犬小屋: 1位を狙って必ず当たり、近くの車も巻き込む。ガードでも防げない。自分が1位なら不発', () => {
   const setup = () => {
     const sim = new RaceSim(track, { npcs: 2 });
     while (sim.s.phase === 'countdown') sim.step(DT, [0, 0, 0, 0]);
@@ -563,8 +563,8 @@ test('犬小屋: 1位を狙って必ず当たり、近くの車も巻き込む�
       hold();
       sim.step(DT, [0, 0]);
     }
-    assert.equal(b.spin, 0, 'guard blocks the house');
-    assert.equal(b.gd, 0);
+    assert.ok(b.spin > 0, 'guard cannot block the house');
+    assert.equal(b.gd, 0, 'guard breaks');
   }
   {
     // 狙いは使った時点の1位に固定（追い越されても追いかける）
@@ -586,6 +586,68 @@ test('犬小屋: 1位を狙って必ず当たり、近くの車も巻き込む�
     assert.equal(sim.s.houses.length, 0);
     assert.equal(sim.drainEvents().filter((e) => e.t === 'poof').length, 1);
   }
+});
+
+test('フリスビー: コースに沿って曲がり、壁にぶつからず、カーブの先の相手にも当たる（全コース）', () => {
+  COURSES.forEach((c, ci) => {
+    const t = new Track(ci);
+    // 曲がり方が大きい場所を探す（100m 先で向きが 1 ラジアン以上変わる）
+    let s0 = -1;
+    for (let s = 20; s < t.length - 200; s += 10) {
+      let d = t.pointAt(s + 90, 0).h - t.pointAt(s, 0).h;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      if (Math.abs(d) > 1.0) {
+        s0 = s;
+        break;
+      }
+    }
+    assert.ok(s0 >= 0, `${c.name} has a bend`);
+    const sim = new RaceSim(t);
+    while (sim.s.phase === 'countdown') sim.step(DT, [0, 0]);
+    const [a, b] = sim.s.karts;
+    const pa = t.pointAt(s0, 3);
+    const cpAt = (s) => Math.floor(s / (t.length / t.checkpoints));
+    Object.assign(a, { x: pa.x, z: pa.z, h: pa.h, sp: 20, kx: 0, kz: 0, item: ITEMS.FRISBEE, inv: 0, cp: cpAt(s0) });
+    const pb = t.pointAt(s0 + 90, -4);
+    Object.assign(b, { x: pb.x, z: pb.z, h: pb.h, sp: 0, kx: 0, kz: 0, inv: 0, spin: 0, cp: cpAt(s0 + 90) });
+    sim.drainEvents();
+    sim.step(DT, [IN.ITEM, 0]);
+    assert.equal(sim.s.proj.length, 1);
+    let hit = false;
+    let worstLat = 0;
+    let boing = 0;
+    for (let i = 0; i < 60 * 4 && !hit; i++) {
+      b.sp = 0;
+      Object.assign(b, { x: pb.x, z: pb.z, kx: 0, kz: 0 });
+      sim.step(DT, [0, 0]);
+      for (const pr of sim.s.proj) worstLat = Math.max(worstLat, Math.abs(t.project(pr.x, pr.z).lat));
+      for (const e of sim.drainEvents()) {
+        if (e.t === 'hit' && e.k === 1) hit = true;
+        if (e.t === 'boing') boing++;
+      }
+    }
+    assert.ok(hit, `${c.name}: frisbee reaches the target around the bend`);
+    assert.ok(worstLat < t.roadHalf + 0.5, `${c.name}: stays on the road (${worstLat.toFixed(1)})`);
+    assert.equal(boing, 0, `${c.name}: never hits a wall`);
+  });
+  // 相手がいなくても、壁に激突せずコースに沿って飛んで、飛べる距離で消える
+  const t = new Track(0);
+  const sim = new RaceSim(t);
+  while (sim.s.phase === 'countdown') sim.step(DT, [0, 0]);
+  const a = sim.s.karts[0];
+  const pa = t.pointAt(30, 0);
+  Object.assign(a, { x: pa.x, z: pa.z, h: pa.h, sp: 30, kx: 0, kz: 0, item: ITEMS.FRISBEE });
+  sim.s.karts[1].x = 1e4; // 遠くへ
+  sim.step(DT, [IN.ITEM, 0]);
+  let n = 0;
+  let boing = 0;
+  while (sim.s.proj.length && n++ < 60 * 8) {
+    sim.step(DT, [0, 0]);
+    for (const e of sim.drainEvents()) if (e.t === 'boing') boing++;
+  }
+  assert.equal(sim.s.proj.length, 0, 'frisbee disappears after its range');
+  assert.equal(boing, 0);
 });
 
 test('NPC は飼い主・豪雨・犬小屋のアイテムも使う', () => {

@@ -325,10 +325,18 @@ export class World {
     const mCount = this.lite ? mt.count : Math.round(mt.count * Math.min(1.6, this.dens));
     for (let i = 0; i < mCount; i++) {
       const a = (i / mCount) * Math.PI * 2 + rnd() * 0.2;
-      const r = this.ringR + rnd() * 80;
+      let r = this.ringR + rnd() * 80;
       const m = new THREE.Mesh(mountainGeo, this._track(new THREE.MeshToonMaterial({ color: mt.colors[i % mt.colors.length] })));
       const s = (60 + rnd() * 70) * mt.size * Math.min(2.2, this.ringR / 430);
       m.scale.set(s * 1.3, s, s * 1.3);
+      // 山の裾がコースにかかると、壁のようにコースをふさぐ（当たり判定はない）ので、コースから十分離れるまで外側へずらす
+      const base = s * 1.3 + this.track.wallDist + 12;
+      for (let k = 0; k < 40; k++) {
+        const x = this.center.x + Math.cos(a) * r;
+        const z = this.center.z + Math.sin(a) * r;
+        if (Math.abs(this.track.project(x, z).lat) > base) break;
+        r += 25;
+      }
       m.position.set(this.center.x + Math.cos(a) * r, s / 2 - 2, this.center.z + Math.sin(a) * r);
       this.scene.add(m);
       if (capMat) {

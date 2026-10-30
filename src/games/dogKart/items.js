@@ -210,27 +210,42 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
     pr.age += dt;
     pr.life -= dt;
     if (pr.f) {
-      // フリスビー: 狙った相手の方へ少しずつ向きを変える。飛べる距離には限りがある
-      const sp = Math.hypot(pr.vx, pr.vz) || 1;
-      const tg = pr.t >= 0 ? karts[pr.t] : null;
-      if (tg && !(tg.fin && !tg.npc)) {
-        const cur = Math.atan2(pr.vx, pr.vz);
-        let d = Math.atan2(tg.x - pr.x, tg.z - pr.z) - cur;
-        while (d > Math.PI) d -= Math.PI * 2;
-        while (d < -Math.PI) d += Math.PI * 2;
-        const na = cur + Math.max(-ITEMS.FRISBEE_TURN * dt, Math.min(ITEMS.FRISBEE_TURN * dt, d));
-        pr.vx = Math.sin(na) * sp;
-        pr.vz = Math.cos(na) * sp;
+      // フリスビー: コースに沿って飛び、狙った相手のいる横位置へ寄っていく（壁にぶつからず、カーブも曲がる）
+      if (pr.ps === undefined) {
+        const q = track.project(pr.x, pr.z);
+        pr.ps = q.s;
+        pr.pl = q.lat;
       }
+      if (pr.sp === undefined) pr.sp = Math.hypot(pr.vx, pr.vz) || 1; // コースに沿って進む速さ（投げたときに決まる）
+      const sp = pr.sp;
+      const tg = pr.t >= 0 ? karts[pr.t] : null;
+      const lim = track.roadHalf - 1.5;
+      if (tg && !(tg.fin && !tg.npc)) {
+        const tq = track.project(tg.x, tg.z);
+        const ahead = track.wrapDS(tq.s - pr.ps);
+        // 近くまで来たら相手そのものを狙う。まだ遠いときは相手の横位置（レーン）に寄る
+        const goal = ahead > 0 && ahead < 14 ? tq.lat : Math.max(-lim, Math.min(lim, tq.lat));
+        const dl = goal - pr.pl;
+        const maxStep = ITEMS.FRISBEE_LATERAL * dt;
+        pr.pl += Math.max(-maxStep, Math.min(maxStep, dl));
+        if (ahead < -6) pr.t = -1; // 追い越してしまったら相手を追わない
+      }
+      pr.ps += sp * dt;
+      const np = track.pointAt(pr.ps, pr.pl);
+      pr.vx = (np.x - pr.x) / dt;
+      pr.vz = (np.z - pr.z) / dt;
+      pr.x = np.x;
+      pr.z = np.z;
       pr.d += sp * dt;
       if (pr.d > ITEMS.FRISBEE_RANGE) pr.life = 0;
+    } else {
+      pr.x += pr.vx * dt;
+      pr.z += pr.vz * dt;
     }
-    pr.x += pr.vx * dt;
-    pr.z += pr.vz * dt;
     let remove = pr.life <= 0;
     const p = track.project(pr.x, pr.z);
     const limit = track.wallDist - 0.5;
-    if (Math.abs(p.lat) > limit) {
+    if (!pr.f && Math.abs(p.lat) > limit) {
       const sgn = p.lat > 0 ? 1 : -1;
       const nx = p.nx * sgn;
       const nz = p.nz * sgn;
@@ -325,6 +340,7 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
         for (const k of karts) {
           if (k.i !== hs.t && (k.x - hs.x) ** 2 + (k.z - hs.z) ** 2 > ITEMS.HOUSE_RADIUS ** 2) continue;
           if (k.ow > 0) continue;
+          k.gd = 0; // 犬小屋はガードでも防げない（ガードは割れる）
           if (spinKart(k, ITEMS.HOUSE_SPIN, true)) {
             n++;
             k.stats.hitBy++;

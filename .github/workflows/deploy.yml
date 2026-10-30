@@ -26,6 +26,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # 直接つなげないネットワーク用の無料 TURN（任意）。リポジトリ変数 TURN_URL に Worker の URL を入れる。空なら使わない
+          VITE_TURN_URL: ${{ vars.TURN_URL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

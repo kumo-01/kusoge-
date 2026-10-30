@@ -1,0 +1,10 @@
+name = "wanwan-turn"
+main = "index.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+# ゲームを公開しているサイト（GitHub Pages のドメイン）。ここ以外のブラウザからは使えない
+ALLOWED_ORIGINS = "https://kumo-01.github.io"
+
+# secret（wrangler secret put / GitHub Actions の secrets で設定。ファイルには書かない）:
+#   TURN_KEY_ID, TURN_KEY_API_TOKEN

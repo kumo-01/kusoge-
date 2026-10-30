@@ -58,7 +58,7 @@ class Predictor {
       this.reset(server);
       return;
     }
-    for (const f of ['lap', 'cp', 'item', 'roll', 'fin', 'ft', 'lapStart', 'best', 'stats', 'spinDur', 'wrong', 'bump', 'fd']) this.k[f] = server[f];
+    for (const f of ['lap', 'cp', 'item', 'roll', 'fin', 'ft', 'lapStart', 'best', 'stats', 'spinDur', 'wrong', 'bump', 'fd', 'ow']) this.k[f] = server[f];
     // タイミングブーストは自分の画面（予測）で進める。ホストのほうが先に進んでいたら合わせる
     if (server.tb > this.k.tb) {
       this.k.tb = server.tb;
@@ -477,11 +477,8 @@ class DogKartGame {
             fx?.ring(k.x, 0.5, k.z, 0xffd23f, 5);
           } else if (e.item === ITEMS.OWNER) {
             snd.play('boost');
-            fx?.text('飼い主登場!', k.x, 4, k.z, 4.5);
             fx?.ring(k.x, 0.5, k.z, 0xffd23f, 7);
             fx?.sparkle(k.x, 1.5, k.z, 14);
-            if (e.k === me) this.hud.flash('🧑 飼い主登場！ 引っ張ってもらうワン', 'good', 1800);
-            else this.hud.flash(`🧑 ${kartName(k)}に飼い主登場！ ぶつかるとはね飛ばされる`, 'bad', 1800);
           } else if (e.item === ITEMS.HOUSE) {
             snd.play('throw');
             fx?.text('ヒュー…', k.x, 3.5, k.z, 3.5);
@@ -594,13 +591,8 @@ class DogKartGame {
           break;
         }
         case 'rain': {
-          const k = kartPos(e.k) || e;
           snd.play('thunder');
           this.hud.thunder();
-          fx?.text('ゴロゴロ…', k.x, 5, k.z, 4.5);
-          const who = kartName(kartPos(e.k));
-          if (e.k === me) this.hud.flash('☔ 豪雨をよんだ！ みんなおそくなるワン', 'good', 2200);
-          else this.hud.flash(`☔ ${who}が豪雨をよんだ！ スピードダウン…`, 'bad', 2200);
           break;
         }
         case 'poof':

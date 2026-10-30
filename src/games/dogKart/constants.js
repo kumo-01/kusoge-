@@ -57,7 +57,7 @@ export const ITEMS = {
   BOOST_TIME: 2.4,
   GUARD_TIME: 20, // ガードの持続（秒）。何かに当たると 1 回で消える
   FRISBEE_SPEED: 46, // 自分の速度に足す速さ
-  FRISBEE_TURN: 3.4, // 追尾の旋回（rad/s）
+  FRISBEE_LATERAL: 22, // コースに沿って飛びながら横に寄る速さ（m/s）
   FRISBEE_RANGE: 130, // 飛べる距離。これを超えると消える
   FRISBEE_BOUNCES: 1,
   INVULN_AFTER_SPIN: 1.1, // スピン後の無敵時間（連続でハメられないように）

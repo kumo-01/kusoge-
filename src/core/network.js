@@ -11,6 +11,7 @@ import Peer from 'peerjs';
 import { Emitter, randomHex, randomToken, safeEqual, now } from './util.js';
 import { PROTOCOL_VERSION, FROM_GUEST, FROM_HOST, FAST_FROM_GUEST, FAST_FROM_HOST, encode, decode } from './protocol.js';
 import { buildInviteUrl, saveGuestSession, backoffDelay } from './reconnect.js';
+import { loadIceServers } from './ice.js';
 
 export const NET_CONFIG = {
   HEARTBEAT_MS: 1000, // ping 送信間隔
@@ -26,8 +27,9 @@ export const NET_CONFIG = {
   CONGESTED_BYTES: 256 * 1024, // 送信バッファがこれを超えたら定期スナップショットを間引く
 };
 
-/** PeerJS の接続オプション。既定は PeerJS Cloud。環境変数で自前の PeerServer も指定可能 */
-export function peerOptions() {
+/** PeerJS の接続オプション。既定は PeerJS Cloud。環境変数で自前の PeerServer も指定可能。
+ *  iceServers: TURN（中継）を使うときの ICE サーバー一覧（src/core/ice.js） */
+export function peerOptions(iceServers = null) {
   const env = import.meta.env || {};
   const o = { debug: 0 };
   if (env.VITE_PEER_HOST) {
@@ -36,8 +38,10 @@ export function peerOptions() {
     o.path = env.VITE_PEER_PATH || '/';
     o.secure = env.VITE_PEER_SECURE !== 'false';
   }
-  // ICE サーバーは PeerJS の既定値（Google の STUN と PeerJS 公開 TURN）を使う。
+  // ICE サーバー: TURN を設定していれば（VITE_TURN_URL）、直接つなげないときだけ中継する。
+  // 設定がない・取得できないときは PeerJS の既定値（Google の STUN と PeerJS 公開 TURN）を使う。
   // 公開 TURN は可用性が保証されないため、すべてのネットワークで接続できるとは限らない。
+  if (iceServers) o.config = { iceServers };
   return o;
 }
 
@@ -286,9 +290,10 @@ export class HostNetwork extends Emitter {
   async create() {
     this.inviteKey = randomToken(18);
     let lastErr;
+    const ice = await loadIceServers();
     for (let i = 0; i < 3; i++) {
       const id = `wwk-${randomHex(12)}`;
-      const peer = new Peer(id, peerOptions());
+      const peer = new Peer(id, peerOptions(ice));
       try {
         await waitPeerOpen(peer, NET_CONFIG.PEER_OPEN_TIMEOUT_MS);
         if (this.destroyed) {
@@ -557,7 +562,7 @@ export class GuestNetwork extends Emitter {
         } catch {
           /* noop */
         }
-        this.peer = new Peer(peerOptions());
+        this.peer = new Peer(peerOptions(await loadIceServers()));
         this.peer.on('error', (err) => {
           this.lastError = err?.type;
           if (err?.type === 'peer-unavailable') this.sawUnavailable = true;
