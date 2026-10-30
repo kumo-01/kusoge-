@@ -202,9 +202,14 @@ TURN の鍵を隠すための小さな Worker（`worker/turn/`、Workers の無�
 2. Cloudflare の **API トークン**（権限: Workers Scripts の編集）と **アカウント ID** を用意する
 3. このリポジトリの Settings → Secrets and variables → Actions → **Secrets** に 4 つ登録する:
    `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` / `TURN_KEY_ID` / `TURN_KEY_API_TOKEN`
-4. Actions タブの **Deploy TURN credentials Worker** を手動で実行する → Worker の URL（`https://wanwan-turn.<アカウント>.workers.dev`）が表示される
+4. Actions タブの **Deploy TURN credentials Worker** を手動で実行する → Worker の URL（`https://kusoge.<アカウント>.workers.dev`（Worker の名前は `worker/turn/wrangler.toml` の `name`））が表示される
    （`worker/turn/wrangler.toml` の `ALLOWED_ORIGINS` は、公開しているサイトのドメインに合わせてください）
 5. 同じ画面の **Variables** に `TURN_URL` として、その Worker の URL を登録し、Pages のデプロイをもう一度走らせる
+
+**GitHub Actions を使わず、Cloudflare の画面だけで済ませる方法**もあります（Workers & Pages に GitHub リポジトリをつなぐ）。
+その場合は、プロジェクトの **Settings → Build** で、ルートディレクトリを `worker/turn`、ビルドコマンドは空、デプロイコマンドを `npx wrangler deploy` にし、
+プロジェクト名を `worker/turn/wrangler.toml` の `name`（`kusoge`）と同じにします。
+**Settings → Variables and secrets** に `TURN_KEY_ID` と `TURN_KEY_API_TOKEN` を **Secret** として登録すれば、GitHub 側の Secrets 4 つは不要です。
 
 設定しない・Worker が落ちている・取得に3秒以上かかるときは、これまでどおり（Google と Cloudflare の STUN だけ）で動き、遊べなくなることはありません。
 TURN の認証情報は数時間で切れるもので、API トークンはブラウザには渡りません。
