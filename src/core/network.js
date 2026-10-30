@@ -276,6 +276,10 @@ export class HostNetwork extends Emitter {
   get inviteUrl() {
     return this.roomId ? buildInviteUrl(this.roomId, this.inviteKey) : '';
   }
+  /** 順番どおり確実に届く通信か（中継は WebSocket なので、はい。P2P の高速チャンネルは、取りこぼしあり） */
+  get reliable() {
+    return this.transport === 'relay';
+  }
   /** 席 slot（1 以降）のゲストの接続 */
   linkOf(slot) {
     return this.slots[slot - 1]?.link || null;
@@ -567,6 +571,9 @@ export class GuestNetwork extends Emitter {
 
   get rtt() {
     return this.link?.rtt ?? null;
+  }
+  get reliable() {
+    return isRelayRoom(this.roomId);
   }
 
   start() {

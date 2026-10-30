@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DogKartEngine } from '../src/games/dogKart/engine.js';
+import { Track } from '../src/games/dogKart/track.js';
 import { sanitizeSnapshot, unpackNet, RaceSim } from '../src/games/dogKart/race.js';
 import { IN, RACE, NET } from '../src/games/dogKart/constants.js';
 import { encode } from '../src/core/protocol.js';
@@ -123,4 +124,67 @@ test('エンジン: 人数・NPC の数・席の指定どおりに作られる',
   assert.equal(e.gq.length, 2);
   assert.equal(e.track.name, new DogKartEngine({ course: 3 }).track.name);
   assert.ok(RACE.MAX_KARTS >= e.sim.s.karts.length);
+});
+
+test('配信の形: 車は変わった項目だけ・ボックスは取られた番号だけで、元の状態に戻せ、1 回の配信が小さい', () => {
+  const e = started({ npcs: 3, boss: 1 });
+  for (let i = 0; i < 90; i++) {
+    for (const p of [0, 1, 2]) e.receiveInput(p, i + 1, [IN.UP, IN.UP]);
+    e.step(DT);
+  }
+  const s = e.sim.s;
+  s.karts[1].spin = 0.75;
+  s.karts[1].boost = 1.2;
+  s.karts[2].gd = 5;
+  s.karts[0].ow = 3.5;
+  s.boxes[3] = 2.5;
+  const net = e.encode();
+  assert.equal(net.p, 2);
+  assert.equal(net.tc, undefined, 'タイミングのチャンス地点は毎回送らない');
+  assert.deepEqual(net.bx, [3], 'taken boxes only');
+  // 車の行: 毎回の 10 項目 + 印 + 該当する項目だけ（何もない車は 11 個）
+  const idle = net.k[3];
+  assert.ok(idle.length < 20, `idle kart row is short (${idle.length})`);
+  assert.ok(net.k[1].length > idle.length);
+  // 往復
+  const client = new RaceSim(e.track, { players: [0, 1, 2], npcs: 3, boss: 1 });
+  const back = sanitizeSnapshot(unpackNet(JSON.parse(JSON.stringify(net))), client.s, client.boxPos.length);
+  assert.notEqual(back, client.s);
+  assert.ok(Math.abs(back.karts[1].spin - 0.75) < 0.01 && Math.abs(back.karts[1].boost - 1.2) < 0.01);
+  assert.ok(Math.abs(back.karts[2].gd - 5) < 0.01 && Math.abs(back.karts[0].ow - 3.5) < 0.01);
+  assert.equal(back.karts[2].spin, 0, 'omitted fields are the default');
+  assert.equal(back.karts[2].ms, s.karts[2].ms >= 1.0 ? back.karts[2].ms : 1);
+  assert.deepEqual(back.boxes.map((v) => v > 0), s.boxes.map((v, i) => i === 3));
+  for (let i = 0; i < s.karts.length; i++) {
+    assert.ok(Math.abs(back.karts[i].x - s.karts[i].x) < 0.011, `x ${i}`);
+    assert.ok(Math.abs(back.karts[i].h - s.karts[i].h) < 0.0011, `h ${i}`);
+    assert.equal(back.karts[i].lap, s.karts[i].lap);
+    assert.equal(back.karts[i].cp, s.karts[i].cp);
+  }
+  assert.deepEqual(back.tc, client.s.tc, 'tc は前の状態を引き継ぐ');
+  // 古い形（p: 1）や壊れたものは読まない
+  assert.equal(unpackNet({ ...net, p: 1 }), null);
+  assert.equal(unpackNet(null), null);
+  // 大きさ（6 台）: 以前は約 1.07KB だった
+  const bytes = encode({ type: 'game_snapshot', matchId: 'abcd1234', gen: 1, seq: 1, snap: net, ev: [] }).length;
+  assert.ok(bytes < 800, `snapshot ${bytes} bytes`);
+});
+
+test('Track.project: 覚えた結果を返しても、毎回計算した結果と同じ（全コース）', () => {
+  for (const ci of [0, 4, 6, 9]) {
+    const t = new Track(ci);
+    const fresh = new Track(ci);
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let n = 0; n < 400; n++) {
+      const x = (rnd() - 0.5) * 1500;
+      const z = (rnd() - 0.5) * 1500;
+      const a = { ...t.project(x, z) };
+      const b = { ...fresh._project(x, z) };
+      const again = { ...t.project(x, z) }; // 2 回目は覚えた結果
+      for (const k of Object.keys(b)) {
+        assert.ok(Math.abs(a[k] - b[k]) < 1e-9 && Math.abs(again[k] - b[k]) < 1e-9, `${k} ${a[k]} ${b[k]} ${again[k]}`);
+      }
+    }
+  }
 });

@@ -415,6 +415,15 @@ function sanitizeKart(r, i, prev) {
   return k;
 }
 
+/** アイテムボックスの状態: 完全な状態は残り時間の配列、定期配信は「取られている番号の一覧（boxTaken）」で届く（画面には見える・見えないだけ分かればよい） */
+function sanitizeBoxes(r, n) {
+  if (Array.isArray(r.boxTaken)) {
+    const taken = new Set(r.boxTaken.filter((v) => Number.isInteger(v) && v >= 0 && v < n));
+    return Array.from({ length: n }, (_, i) => (taken.has(i) ? 1 : 0));
+  }
+  return Array.from({ length: n }, (_, i) => num(Array.isArray(r.boxes) ? r.boxes[i] : 0, 0, 0, 60));
+}
+
 /** ドッグフードの状態: 完全な状態は配列、定期配信は「取られている番号の一覧（foodTaken）」で届く */
 function sanitizeFoods(r, prev) {
   const n = prev.foods?.length || 0;
@@ -436,7 +445,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
     endT: num(r.endT, 0, 0, 10),
     winner: Number.isInteger(r.winner) && r.winner >= 0 && r.winner < r.karts.length ? r.winner : -1,
     karts: r.karts.map((rk, i) => sanitizeKart(rk, i, prev.karts[i] || createKart(i, { x: 0, z: 0, h: 0 }))),
-    boxes: Array.from({ length: boxCount }, (_, i) => num(Array.isArray(r.boxes) ? r.boxes[i] : 0, 0, 0, 60)),
+    boxes: sanitizeBoxes(r, boxCount),
     foods: sanitizeFoods(r, prev),
     proj: [],
     bananas: [],
@@ -471,37 +480,71 @@ export function sanitizeSnapshot(r, prev, boxCount) {
   return s;
 }
 
-// ---- 定期配信用のコンパクトな形式（キー名を省いて配列にする。通信量を約半分に） ----
-const NET_KART_FIELDS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow'];
+// ---- 定期配信用のコンパクトな形式 ----
+// 車 1 台は、毎回変わる 10 項目（位置・向き・速さなど）＋「0（や既定値）でない項目の印（ビット）」＋その項目の値だけ。
+// 前回との差ではなく、その時点の状態そのものを詰めるので、順不同で届いたり落ちたりしても読める。
+// 値は見た目に困らない細かさまで丸める（位置 1cm・向き 0.001rad）。タイミングのチャンス地点（tc）は試合の間変わらないので、完全な状態でだけ送る。
+const NET_HOT = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th'];
+const NET_HOT_DIGITS = [2, 2, 2, 2, 3, 2, 2, 2, 2, 2];
+const NET_COLD = ['spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow'];
+const NET_COLD_DEFAULT = NET_COLD.map((f) => (f === 'spinDur' || f === 'ms' ? 1 : 0));
+const NET_COLD_DIGITS = NET_COLD.map((f) => (f === 'ft' || f === 'lapStart' || f === 'best' ? 3 : 2));
 const PHASES = ['countdown', 'racing', 'finished'];
+const q = (v, d) => {
+  const m = d === 3 ? 1000 : 100;
+  return Math.round((+v || 0) * m) / m;
+};
 
 /** 定期配信用に詰める（stats や NPC の思考状態は省く） */
 export function packNet(s) {
   return {
-    p: 1,
+    p: 2,
     tick: s.tick,
     ph: PHASES.indexOf(s.phase),
-    t: s.t,
-    e: s.endT,
+    t: q(s.t, 3),
+    e: q(s.endT, 2),
     w: s.winner,
     a: s.acks,
-    tc: s.tc,
-    rn: [s.rain, s.rk],
-    k: s.karts.map((k) => NET_KART_FIELDS.map((f) => k[f])),
-    b: s.boxes,
+    rn: [q(s.rain, 2), s.rk],
+    k: s.karts.map((k) => {
+      const row = NET_HOT.map((f, i) => q(k[f], NET_HOT_DIGITS[i]));
+      let mask = 0;
+      const extra = [];
+      NET_COLD.forEach((f, i) => {
+        const v = q(k[f], NET_COLD_DIGITS[i]);
+        if (v !== NET_COLD_DEFAULT[i]) {
+          mask |= 1 << i;
+          extra.push(v);
+        }
+      });
+      row.push(mask, ...extra);
+      return row;
+    }),
+    // アイテムボックス・ドッグフードは「いま取られている番号」だけ
+    bx: s.boxes.reduce((a, t, i) => (t > 0 && a.push(i), a), []),
     fo: s.foods.reduce((a, t, i) => (t > 0 && a.push(i), a), []),
-    pr: s.proj.map((p) => [p.id, p.o, p.x, p.z, p.vx, p.vz, p.life, p.age, p.b, p.f | 0, p.t ?? -1, p.d || 0]),
-    bn: s.bananas.map((b) => [b.id, b.o, b.x, b.z, b.life, b.age]),
-    hs: s.houses.map((h) => [h.id, h.o, h.t, h.x, h.z, h.age]),
+    pr: s.proj.map((p) => [p.id, p.o, q(p.x, 2), q(p.z, 2), q(p.vx, 2), q(p.vz, 2), q(p.life, 2), q(p.age, 2), p.b, p.f | 0, p.t ?? -1, q(p.d || 0, 1)]),
+    bn: s.bananas.map((b) => [b.id, b.o, q(b.x, 2), q(b.z, 2), q(b.life, 1), q(b.age, 1)]),
+    hs: s.houses.map((h) => [h.id, h.o, h.t, q(h.x, 2), q(h.z, 2), q(h.age, 2)]),
   };
 }
 
-/** packNet の逆。形が崩れていても例外を出さず、検証は sanitizeSnapshot に任せる */
 export function unpackNet(p) {
-  if (!p || typeof p !== 'object' || p.p !== 1 || !Array.isArray(p.k)) return null;
+  if (!p || typeof p !== 'object' || p.p !== 2 || !Array.isArray(p.k)) return null;
   const row = (a, keys) => {
     const o = {};
     if (Array.isArray(a)) keys.forEach((f, i) => (o[f] = a[i]));
+    return o;
+  };
+  const kart = (a) => {
+    const o = {};
+    if (!Array.isArray(a)) return o;
+    NET_HOT.forEach((f, i) => (o[f] = a[i]));
+    const mask = Number.isInteger(a[NET_HOT.length]) ? a[NET_HOT.length] : 0;
+    let j = NET_HOT.length + 1;
+    NET_COLD.forEach((f, i) => {
+      o[f] = mask & (1 << i) ? a[j++] : NET_COLD_DEFAULT[i]; // 印がない項目は既定値
+    });
     return o;
   };
   return {
@@ -511,11 +554,10 @@ export function unpackNet(p) {
     endT: p.e,
     winner: p.w,
     acks: p.a,
-    tc: p.tc,
     rain: Array.isArray(p.rn) ? p.rn[0] : 0,
     rk: Array.isArray(p.rn) ? p.rn[1] : -1,
-    karts: p.k.slice(0, RACE.MAX_KARTS).map((a) => row(a, NET_KART_FIELDS)),
-    boxes: p.b,
+    karts: p.k.slice(0, RACE.MAX_KARTS).map(kart),
+    boxTaken: Array.isArray(p.bx) ? p.bx.slice(0, 200) : [],
     foodTaken: Array.isArray(p.fo) ? p.fo.slice(0, 400) : [],
     proj: Array.isArray(p.pr) ? p.pr.slice(0, 32).map((a) => row(a, ['id', 'o', 'x', 'z', 'vx', 'vz', 'life', 'age', 'b', 'f', 't', 'd'])) : [],
     houses: Array.isArray(p.hs) ? p.hs.slice(0, 8).map((a) => row(a, ['id', 'o', 't', 'x', 'z', 'age'])) : [],

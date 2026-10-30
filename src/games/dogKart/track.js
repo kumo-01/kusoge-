@@ -302,6 +302,7 @@ export class Track {
     }
     this._buildGrid();
     this._proj = { i: 0, t: 0, s: 0, lat: 0, cx: 0, cz: 0, tx: 0, tz: 1, nx: 1, nz: 0 };
+    this._pcache = new Float64Array(64 * 12).fill(NaN);
   }
 
   /**
@@ -310,6 +311,41 @@ export class Track {
    * lat > 0 は進行方向の左側。
    */
   project(x, z) {
+    // 同じ位置は 1 ステップの中で何度も調べられる（順位・壁・周回・NPC・アイテム）ので、直近の結果を覚えておく（小さな表）
+    const C = this._pcache;
+    const slot = (Math.imul((x * 64) | 0, 73856093) ^ Math.imul((z * 64) | 0, 19349663)) & 63;
+    const o = slot * 12;
+    if (C[o] === x && C[o + 1] === z) {
+      const hit = this._proj;
+      hit.i = C[o + 2];
+      hit.t = C[o + 3];
+      hit.s = C[o + 4];
+      hit.lat = C[o + 5];
+      hit.cx = C[o + 6];
+      hit.cz = C[o + 7];
+      hit.tx = C[o + 8];
+      hit.tz = C[o + 9];
+      hit.nx = C[o + 10];
+      hit.nz = C[o + 11];
+      return hit;
+    }
+    const r = this._project(x, z);
+    C[o] = x;
+    C[o + 1] = z;
+    C[o + 2] = r.i;
+    C[o + 3] = r.t;
+    C[o + 4] = r.s;
+    C[o + 5] = r.lat;
+    C[o + 6] = r.cx;
+    C[o + 7] = r.cz;
+    C[o + 8] = r.tx;
+    C[o + 9] = r.tz;
+    C[o + 10] = r.nx;
+    C[o + 11] = r.nz;
+    return r;
+  }
+
+  _project(x, z) {
     const N = this.n;
     let best = Infinity;
     let bi = 0;

@@ -65,7 +65,8 @@ export class DogKartEngine {
         this.sim.s.acks[i] = e.seq;
       }
     }
-    if (!q.length || (g.starved && q.length < 2)) {
+    // 入力が途切れたあとは、2 つ溜まるまで待って滑らかにする。ただし「押した瞬間」の入力（アイテム・復帰・タイミング）は待たずに使う
+    if (!q.length || (g.starved && q.length < 2 && !(q[0].bits & IN.ONESHOT))) {
       g.starved = true;
       // 入力が途切れた（タブが裏に回った・通信が詰まった）ら、押しっぱなし扱いを解除する
       if (++g.starveTicks > 15) g.held = 0;

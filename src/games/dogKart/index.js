@@ -163,6 +163,8 @@ class DogKartGame {
     // ゲスト用
     this.seenEvents = new Set();
     this.sentInputs = [];
+    this._same = 0;
+    this._lastBits = 0;
     this.buffer = [];
     this.clock = 0;
     this.clockInit = false;
@@ -249,11 +251,19 @@ class DogKartGame {
       const bits = this._readInput();
       this.seq++;
       this.pending.push(bits);
-      this.sentInputs.push(bits);
-      if (this.sentInputs.length > NET.INPUT_REDUNDANCY) this.sentInputs.shift();
-      if (this.pending.length >= NET.INPUT_SEND_EVERY || bits & IN.ONESHOT) {
-        // 直近の入力をまとめて送る（1 通落ちても次の通に同じ入力が入っている）
-        this.ctx.sendInput(this.seq, this.sentInputs.slice());
+      // 順番どおり確実に届く通信（WebSocket）なら、新しい分だけ送る。取りこぼしがある通信（P2P の高速チャンネル）は、直近の分を重ねて送る
+      const reliable = !!this.ctx.reliableInput;
+      if (!reliable) {
+        this.sentInputs.push(bits);
+        if (this.sentInputs.length > NET.INPUT_REDUNDANCY) this.sentInputs.shift();
+      }
+      // 入力が変わらない間は送る回数を減らす（変わったらすぐ送る）。受け取る側は押しっぱなしを保つので、見た目や操作感は変わらない
+      this._same = bits === this._lastBits && !(bits & IN.ONESHOT) ? this._same + 1 : 0;
+      this._lastBits = bits;
+      // （何も押していない間は 1 秒に 2 回、押しっぱなしの間は約 8 回。サーバーは前の入力を保つ）
+      const every = this._same >= 30 && bits === 0 ? 30 : this._same >= 8 ? 8 : NET.INPUT_SEND_EVERY;
+      if (this.pending.length >= every || bits & IN.ONESHOT) {
+        this.ctx.sendInput(this.seq, reliable ? this.pending.slice() : this.sentInputs.slice());
         this.pending = [];
       }
       if (NET.PREDICTION && this.pred.k && this.sim.s.karts[this.me].ow > 0) {
@@ -323,7 +333,7 @@ class DogKartGame {
       ev.push(c);
     }
     if (this.seenEvents.size > 400) this.seenEvents = new Set([...this.seenEvents].slice(-200));
-    const raw = snap.p === 1 ? unpackNet(snap) : snap;
+    const raw = snap.p ? unpackNet(snap) : snap; // p があれば配信用に詰めた形、なければ完全な状態
     const s = raw ? sanitizeSnapshot(raw, this.sim.s, this.sim.boxPos.length) : this.sim.s;
     const t = s.tick * this.ctx.fixedDt;
     const last = this.buffer[this.buffer.length - 1];

@@ -80,6 +80,7 @@ export class GameManager extends Emitter {
       role: this.role,
       isHost: this.isHost,
       serverSim: this.serverSim,
+      reliableInput: this.serverSim || !!this.net.reliable, // 操作の送り先への通信が、順番どおり確実に届くか
       players, // 参加する席。車の番号 i の人は players[i] の席
       playerIndex: Math.max(0, players.indexOf(this.slot ?? 0)), // 自分の車の番号
       container,
@@ -327,12 +328,16 @@ export class GameManager extends Emitter {
   }
 
   _sendSnapshot() {
-    const snap = this.game.getSnapshot();
+    // 巻き戻し用の完全な状態は 3 回に 1 回（約 0.1 秒おき）だけ残す。毎回コピーすると重い
+    const keep = !this.game.encodeNetSnapshot || (this._histN = (this._histN | 0) + 1) % 3 === 0;
+    const snap = keep ? this.game.getSnapshot() : null;
     const ev = this.game.drainNetEvents ? this.game.drainNetEvents() : [];
     const t = now();
-    this._history.push({ t, snap });
-    const keepAfter = t - LOOP_CONFIG.HISTORY_SEC * 1000;
-    while (this._history.length && this._history[0].t < keepAfter) this._history.shift();
+    if (snap) {
+      this._history.push({ t, snap });
+      const keepAfter = t - LOOP_CONFIG.HISTORY_SEC * 1000;
+      while (this._history.length && this._history[0].t < keepAfter) this._history.shift();
+    }
     if (this.net.congested && ev.length === 0) return; // 送信が詰まっているときは位置更新を間引く
     const payload = this.game.encodeNetSnapshot ? this.game.encodeNetSnapshot(snap) : snap;
     this.net.sendFast({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this._netSeq, snap: payload, ev });

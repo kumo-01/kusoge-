@@ -227,19 +227,23 @@ export class Game {
     this._last = now;
     this._acc += dt;
     let steps = 0;
+    let due = false;
     while (this._acc >= FIXED_DT && steps < MAX_STEPS && this.running) {
       this.engine.step(FIXED_DT);
       this._acc -= FIXED_DT;
       steps++;
-      if (++this._netTick % NET_EVERY === 0) {
-        this.broadcast({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this.seq, snap: this.engine.encode(), ev: this.engine.drainNetEvents() });
-      }
+      if (++this._netTick % NET_EVERY === 0) due = true;
       const result = this.engine.takeResult();
       if (result) {
         this.pause();
+        this.broadcast({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this.seq, snap: this.engine.encode(), ev: this.engine.drainNetEvents() });
         this.broadcast({ type: 'e_result', matchId: this.matchId, result });
         return;
       }
+    }
+    // 配信は 1 回の呼び出しで 1 回だけ（遅れを取り戻すために続けて計算したときも、同じ時刻の状態を何通も送らない。届く間隔が揃う）
+    if (due && this.running) {
+      this.broadcast({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this.seq, snap: this.engine.encode(), ev: this.engine.drainNetEvents() });
     }
     if (steps >= MAX_STEPS) this._acc = 0;
     if (Date.now() - this._startedAt > MAX_MATCH_MS) this.stop();
