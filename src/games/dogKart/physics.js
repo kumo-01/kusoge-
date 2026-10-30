@@ -92,12 +92,13 @@ export function setVelocity(k, vx, vz) {
  * @param {boolean} active レース中（カウントダウン中・ゴール後は操作不可）
  * @returns {number} 壁への衝突速度（0 なら衝突なし）
  */
-export function stepKart(k, input, dt, track, active) {
+export function stepKart(k, input, dt, track, active, holdSteer = false) {
   // ゴールした人間は操作終了。NPC はゴール後も走り続ける（コース上で止まって邪魔にならないように）
   const control = active && k.spin <= 0 && (!k.fin || k.npc);
   const up = control && input & IN.UP;
   const down = control && input & IN.DOWN;
-  const steerIn = control ? (input & IN.LEFT ? 1 : 0) - (input & IN.RIGHT ? 1 : 0) : 0;
+  // holdSteer: 今のハンドルの切れ具合を保つ（ほかの端末が、この車の少し先を推定するとき。左右の小刻みな押し分けに振り回されない）
+  const steerIn = !control ? 0 : holdSteer ? k.st : (input & IN.LEFT ? 1 : 0) - (input & IN.RIGHT ? 1 : 0);
 
   k.st += (steerIn - k.st) * Math.min(1, dt * 10);
   k.th = up ? 1 : down ? -1 : 0;

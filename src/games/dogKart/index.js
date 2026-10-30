@@ -1,13 +1,14 @@
 // わんわん爆走カート: ミニゲームモジュール本体
 //
 // ホスト: RaceSim を 60Hz で進める正本。ゲスト入力はキューに積み、1 tick に 1 つずつ適用する。
-// ゲスト: 受信したスナップショットを補間して表示。自分の車だけクライアント予測し、
-//         ホストの確定状態との誤差を少しずつ補正する。
+// 受け取る側（ゲスト。サーバーが計算するときはホストも）: 自分の車はクライアント予測し、確定状態との誤差を滑らかに補正する。
+//         ほかの車・飛んでいるアイテムは、自分の車と同じ時刻まで先へ計算して描く（netview.js）。
 
 import { Track } from './track.js';
 import { RaceSim, sanitizeSnapshot, unpackNet, kartName } from './race.js';
 import { DogKartEngine } from './engine.js';
-import { stepKart, PHYS_KEYS } from './physics.js';
+import { Predictor, RemoteKarts } from './netview.js';
+import { stepKart } from './physics.js';
 import { World } from './world.js';
 import { ChaseCamera } from './camera.js';
 import { Hud } from './hud.js';
@@ -30,160 +31,6 @@ function cleanEvent(e) {
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const idx = (v) => (Number.isInteger(v) && v >= 0 && v < RACE.MAX_KARTS ? v : 0);
   return { id: n(e.id), t: e.t, k: idx(e.k), by: idx(e.by), r: idx(e.r), v: idx(e.v), x: n(e.x), z: n(e.z), s: n(e.s), b: Math.max(0, Math.min(64, n(e.b) | 0)), item: n(e.item) | 0, lap: n(e.lap) | 0, q: Math.max(-1, Math.min(2, n(e.q) | 0)), grant: !!e.grant, big: !!e.big, n: Math.max(0, Math.min(99, n(e.n) | 0)) };
-}
-
-/** ゲスト自身の車のクライアント予測 */
-class Predictor {
-  constructor() {
-    this.k = null;
-    this.hist = [];
-    this.off = { x: 0, z: 0, y: 0, h: 0 };
-  }
-
-  reset(k) {
-    this.k = structuredClone(k);
-    this.hist = [];
-    this.off = { x: 0, z: 0, y: 0, h: 0 };
-  }
-
-  record(seq) {
-    const e = { seq };
-    for (const key of PHYS_KEYS) e[key] = this.k[key];
-    this.hist.push(e);
-    if (this.hist.length > 240) this.hist.shift();
-  }
-
-  /** server: ホストが確定したゲストの車, ack: そのとき適用済みだった入力 seq */
-  reconcile(server, ack) {
-    if (!this.k) {
-      this.reset(server);
-      return;
-    }
-    for (const f of ['lap', 'cp', 'item', 'roll', 'fin', 'ft', 'lapStart', 'best', 'stats', 'spinDur', 'wrong', 'bump', 'fd', 'ow']) this.k[f] = server[f];
-    // タイミングブーストは自分の画面（予測）で進める。ホストのほうが先に進んでいたら合わせる
-    if (server.tb > this.k.tb) {
-      this.k.tb = server.tb;
-      this.k.tw = server.tw;
-    }
-    while (this.hist.length && this.hist[0].seq < ack) this.hist.shift();
-    const e = this.hist[0];
-    if (!e || e.seq !== ack) {
-      // 対応する履歴がない（再開直後など）: 大きくずれていれば合わせる
-      if (Math.hypot(server.x - this.k.x, server.z - this.k.z) > NET.SNAP_DIST * 2) this.reset(server);
-      return;
-    }
-    const dx = server.x - e.x;
-    const dz = server.z - e.z;
-    const dh = angleDiff(e.h, server.h);
-    if (Math.hypot(dx, dz) > NET.SNAP_DIST || Math.abs(dh) > 1.5) {
-      // 復帰などの瞬間移動はそのまま合わせる
-      for (const key of PHYS_KEYS) this.k[key] = server[key];
-      this.hist = [];
-      this.off = { x: 0, z: 0, y: 0, h: 0 };
-      return;
-    }
-    for (const key of PHYS_KEYS) {
-      const d = key === 'h' ? dh : server[key] - e[key];
-      if (Math.abs(d) < 1e-7) continue;
-      this.k[key] += d;
-      for (const h of this.hist) h[key] += d;
-    }
-    for (const key of ['spin', 'boost', 'slow', 'inv', 'rc']) this.k[key] = Math.max(0, this.k[key]);
-    if (this.k.y < 0) this.k.y = 0;
-    // 見た目は急に動かさず、補正量を少しずつ反映する
-    this.off.x -= dx;
-    this.off.z -= dz;
-    this.off.h -= dh;
-  }
-
-  decay(dt) {
-    const f = Math.exp(-dt * 9);
-    this.off.x *= f;
-    this.off.z *= f;
-    this.off.h *= f;
-  }
-}
-
-/**
- * ほかの車（人・NPC）を、自分の車と同じ時刻まで先に進めて表示する。
- * 自分の車は操作がすぐ反映されるよう、サーバーの確定状態より「まだサーバーに届いていない操作の分」だけ先を走っている。
- * ほかの車をサーバーの確定状態（過去）のまま描くと、実際より後ろに見えて、当たる位置や順位が見た目と食い違う。
- * そこで、確定状態からその車の今の操作（in）のまま同じ tick 数だけ先へ計算して描く。操作が変わったときのずれは少しずつ吸収する。
- */
-class RemoteKarts {
-  constructor() {
-    this.reset();
-  }
-
-  reset() {
-    this.g = []; // 車ごとの「今の時刻」の推定
-    this.p = []; // 1 tick 前の推定（画面の更新との間を補間する）
-    this.off = []; // 見た目のずれ（少しずつ 0 に戻す）
-  }
-
-  /** karts: 最新の確定状態、ahead: 自分の車がそれより何 tick 先か */
-  sync(karts, me, ahead, track, active, dt) {
-    for (let i = 0; i < karts.length; i++) {
-      if (i === me) {
-        this.g[i] = null;
-        continue;
-      }
-      const k = { ...karts[i] };
-      let prev = { x: k.x, z: k.z, y: k.y, h: k.h };
-      for (let t = 0; t < ahead; t++) {
-        prev = { x: k.x, z: k.z, y: k.y, h: k.h };
-        stepKart(k, k.in, dt, track, active);
-      }
-      const old = this.g[i];
-      const o = this.off[i] || (this.off[i] = { x: 0, z: 0, y: 0, h: 0 });
-      if (old) {
-        // 今まで描いていた位置から急に動かさない（差を見た目のずれとして持ち、少しずつ戻す）
-        const dx = old.x + o.x - k.x;
-        const dz = old.z + o.z - k.z;
-        if (Math.hypot(dx, dz) > NET.SNAP_DIST * 2) {
-          o.x = o.z = o.y = o.h = 0; // 復帰などの瞬間移動はそのまま
-        } else {
-          o.x = dx;
-          o.z = dz;
-          o.y = old.y + o.y - k.y;
-          o.h = angleDiff(k.h, old.h + o.h);
-        }
-      }
-      this.g[i] = k;
-      this.p[i] = prev;
-    }
-    this.g.length = this.p.length = karts.length;
-  }
-
-  /** 1 tick 進める（自分の車の予測と同じタイミングで） */
-  step(track, active, dt) {
-    for (let i = 0; i < this.g.length; i++) {
-      const k = this.g[i];
-      if (!k) continue;
-      this.p[i] = { x: k.x, z: k.z, y: k.y, h: k.h };
-      stepKart(k, k.in, dt, track, active);
-    }
-  }
-
-  decay(dt) {
-    const f = Math.exp(-dt * 8);
-    for (const o of this.off) {
-      if (!o) continue;
-      o.x *= f;
-      o.z *= f;
-      o.y *= f;
-      o.h *= f;
-    }
-  }
-
-  /** 描く位置（al: 直前の tick との間の割合） */
-  view(i, al) {
-    const k = this.g[i];
-    if (!k) return null;
-    const p = this.p[i] || k;
-    const o = this.off[i];
-    return { ...k, x: lerp(p.x, k.x, al) + o.x, z: lerp(p.z, k.z, al) + o.z, y: Math.max(0, lerp(p.y, k.y, al) + o.y), h: lerpAngle(p.h, k.h, al) + o.h };
-  }
 }
 
 const lerpKart = (a, b, f) => ({
@@ -349,8 +196,16 @@ class DogKartGame {
         this.pending = [];
       }
       if (NET.PREDICTION && this.pred.k && this.sim.s.karts[this.me].ow > 0) {
-        // 飼い主モード中は自動で走るのでホストの状態をそのまま使う（予測しない）
-        this.pred.reset(this.sim.s.karts[this.me]);
+        // 飼い主モード中は自動で走る（操作はできない）。自分の車も、ほかの車と同じく確定状態から同じ時刻まで先を推定して使う
+        // （確定状態をそのまま使うと、自分の車とまわりが数メートル後ろへ飛び、終わったときに前へ飛ぶ）
+        const s = this.sim.s;
+        const run = s.phase === 'racing';
+        const pk = this.pred.k;
+        this.predPrev = { x: pk.x, z: pk.z, y: pk.y, h: pk.h };
+        this.remote.step(this.track, run, dt);
+        const g = this.remote.g[this.me];
+        if (g) this.pred.reset(g);
+        else stepKart(pk, s.karts[this.me].in, dt, this.track, run, true);
       } else if (NET.PREDICTION && this.pred.k) {
         const s = this.sim.s;
         const raceT = this._guestRaceTime();
@@ -449,7 +304,18 @@ class DogKartGame {
       // ほかの車を、自分の車と同じ時刻まで進める（自分の操作がサーバーで使われるのは ack の何 tick 後か = 自分の車がどれだけ先か）
       const ahead = Math.max(0, Math.min(NET.REMOTE_AHEAD_MAX, this.seq - (s.acks[this.me] || 0)));
       const active = s.phase === 'racing' || (s.phase === 'countdown' && this._guestRaceTime() >= 0);
-      this.remote.sync(s.karts, this.me, ahead, this.track, active && s.phase !== 'finished', this.ctx.fixedDt);
+      // 飼い主モード中は自分の車も同じように推定する（操作できないので）
+      const wasAuto = !!this.remote.g[this.me];
+      this.remote.sync(s.karts, s.karts[this.me].ow > 0 ? -1 : this.me, ahead, this.track, active && s.phase !== 'finished', this.ctx.fixedDt);
+      // 予測 ⇔ 推定の切り替えで、自分の車の見た目が飛ばないよう、見た目のずれを引き継ぐ
+      const g = this.remote.g[this.me];
+      const ro = this.remote.off[this.me];
+      const po = this.pred.off;
+      if (!wasAuto && g && ro) {
+        Object.assign(ro, { x: this.pred.k.x + po.x - g.x, z: this.pred.k.z + po.z - g.z, h: angleDiff(g.h, this.pred.k.h + po.h), vx: po.vx, vz: po.vz, vh: po.vh });
+      } else if (wasAuto && !g && ro) {
+        Object.assign(po, { x: ro.x, z: ro.z, h: ro.h, vx: ro.vx, vz: ro.vz, vh: ro.vh });
+      }
     }
     if (ev.length) this._handleEvents(ev.sort((a, b) => a.id - b.id));
   }
@@ -690,16 +556,18 @@ class DogKartGame {
       }
     }
     // 自分の車を予測しているときは、ほかの車・飛んでいるアイテムも自分の車と同じ時刻で描く（見た目と当たる位置を一致させる）
-    const present = NET.PREDICTION && this.pred.k && !(n.s.karts[this.me]?.ow > 0);
+    const present = NET.PREDICTION && this.pred.k;
+    // 飼い主モード中（自動で走る）は、自分の車もほかの車と同じ推定で描く
+    const auto = s.karts[this.me]?.ow > 0 && !!this.remote.g[this.me];
     const al = this.predPrev && !this.paused ? Math.max(0, Math.min(1, alpha)) : 1;
     if (present && this.remote.g.length) {
       this.remote.decay(dt);
       for (let i = 0; i < karts.length; i++) {
-        const v = i === this.me ? null : this.remote.view(i, al);
+        const v = i === this.me && !auto ? null : this.remote.view(i, al);
         if (v) karts[i] = v;
       }
     }
-    if (present) {
+    if (present && !auto) {
       this.pred.decay(dt);
       const k = this.pred.k;
       // 画面の更新と 60Hz の更新はずれるので、直前の位置との間を補間して動きを滑らかにする
@@ -713,9 +581,14 @@ class DogKartGame {
     let proj;
     let bananas = n.s.bananas;
     if (present) {
-      // 最新の確定状態から、自分の車と同じ時刻まで速度のまま進める
+      // 最新の確定状態から、自分の車と同じ時刻まで進める（ホネはまっすぐ、フリスビーはコースに沿って）
       const ahead = Math.max(0, this.seq - 1 + al - (s.acks[this.me] || 0)) * this.ctx.fixedDt;
-      proj = s.proj.map((p) => ({ ...p, x: p.x + p.vx * ahead, z: p.z + p.vz * ahead }));
+      proj = s.proj.map((p) => {
+        if (!p.f) return { ...p, x: p.x + p.vx * ahead, z: p.z + p.vz * ahead };
+        const q = this.track.project(p.x, p.z);
+        const np = this.track.pointAt(q.s + Math.hypot(p.vx, p.vz) * ahead, q.lat);
+        return { ...p, x: np.x, z: np.z };
+      });
       bananas = s.bananas;
     } else {
       // 飛んでいるホネは id で対応付けて補間
@@ -784,7 +657,7 @@ class DogKartGame {
     }
     const mine = karts[this.me];
     // テスト用: 画面に出す位置を記録する（VITE_TEST_HOOKS=1 でビルドしたときだけ）
-    if (import.meta.env?.VITE_TEST_HOOKS && globalThis.__wanwanProbe && !this.paused) globalThis.__wanwanProbe.push([performance.now(), s.tick, karts.map((k) => [k.x, k.z, k.h, k.sp])]);
+    if (import.meta.env?.VITE_TEST_HOOKS && globalThis.__wanwanProbe && !this.paused) globalThis.__wanwanProbe.push([performance.now(), this.auth ? s.tick : this.seq - 1 + Math.max(0, Math.min(1, alpha)), karts.map((k) => [k.x, k.z, k.h, k.sp])]);
     const raceT = this.auth ? s.t : this._guestRaceTime();
 
     // カウントダウンの音（双方とも自分の時計で鳴らす）

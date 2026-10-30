@@ -333,6 +333,7 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
         ├── registry.js            ゲームの登録簿
         └── dogKart/               わんわん爆走カート
             ├── index.js           モジュール本体（同期・予測・補間）
+            ├── netview.js         受け取る側の表示（自分の車の予測・ほかの車を同じ時刻まで先読み・ずれを滑らかに戻す）
             ├── race.js            レースの正本シミュレーション
             ├── physics.js         アーケード物理
             ├── items.js           アイテム
