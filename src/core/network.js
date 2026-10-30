@@ -11,7 +11,7 @@ import Peer from 'peerjs';
 import { Emitter, randomHex, randomToken, safeEqual, now } from './util.js';
 import { PROTOCOL_VERSION, FROM_GUEST, FROM_HOST, FAST_FROM_GUEST, FAST_FROM_HOST, encode, decode } from './protocol.js';
 import { buildInviteUrl, saveGuestSession, backoffDelay } from './reconnect.js';
-import { loadIceServers } from './ice.js';
+import { RelayPeer, relayBase, isRelayRoom, RELAY_ROOM_PREFIX } from './relay.js';
 
 export const NET_CONFIG = {
   HEARTBEAT_MS: 1000, // ping 送信間隔
@@ -21,15 +21,15 @@ export const NET_CONFIG = {
   CONNECT_TIMEOUT_MS: 9000, // DataConnection が open するまでの待ち時間
   JOIN_TIMEOUT_MS: 6000, // join_request / join_accepted の待ち時間
   PEER_OPEN_TIMEOUT_MS: 12000, // シグナリングサーバー接続の待ち時間
+  RELAY_OPEN_TIMEOUT_MS: 6000, // Cloudflare の中継への接続の待ち時間（だめなら PeerJS Cloud にする）
   PENDING_LIMIT: 4, // 認証前の同時接続数の上限
   FIRST_JOIN_GIVEUP_MS: 25000, // 初回参加をあきらめるまで
   RECONNECT_GIVEUP_MS: 60000, // 再接続をあきらめるまで
   CONGESTED_BYTES: 256 * 1024, // 送信バッファがこれを超えたら定期スナップショットを間引く
 };
 
-/** PeerJS の接続オプション。既定は PeerJS Cloud。環境変数で自前の PeerServer も指定可能。
- *  iceServers: TURN（中継）を使うときの ICE サーバー一覧（src/core/ice.js） */
-export function peerOptions(iceServers = null) {
+/** PeerJS の接続オプション。既定は PeerJS Cloud。環境変数で自前の PeerServer も指定可能 */
+export function peerOptions() {
   const env = import.meta.env || {};
   const o = { debug: 0 };
   if (env.VITE_PEER_HOST) {
@@ -38,10 +38,9 @@ export function peerOptions(iceServers = null) {
     o.path = env.VITE_PEER_PATH || '/';
     o.secure = env.VITE_PEER_SECURE !== 'false';
   }
-  // ICE サーバー: TURN を設定していれば（VITE_TURN_URL）、直接つなげないときだけ中継する。
-  // 設定がない・取得できないときは PeerJS の既定値（Google の STUN と PeerJS 公開 TURN）を使う。
+  // ICE サーバーは PeerJS の既定値（Google の STUN と PeerJS 公開 TURN）を使う。
   // 公開 TURN は可用性が保証されないため、すべてのネットワークで接続できるとは限らない。
-  if (iceServers) o.config = { iceServers };
+  // 直接つなげない環境向けには、Cloudflare の中継（VITE_RELAY_URL。src/core/relay.js）を使える。
   return o;
 }
 
@@ -289,26 +288,32 @@ export class HostNetwork extends Emitter {
 
   async create() {
     this.inviteKey = randomToken(18);
+    // Cloudflare の中継（VITE_RELAY_URL）を設定していれば、まずそちらで部屋を作る。使えなければ PeerJS Cloud（P2P）にする。
+    // どちらで作ったかは部屋 ID の頭（wwr- / wwk-）で分かるので、ゲストは招待 URL だけで同じ方式につながる
+    const kinds = relayBase() ? ['relay', 'peer'] : ['peer'];
     let lastErr;
-    const ice = await loadIceServers();
-    for (let i = 0; i < 3; i++) {
-      const id = `wwk-${randomHex(12)}`;
-      const peer = new Peer(id, peerOptions(ice));
-      try {
-        await waitPeerOpen(peer, NET_CONFIG.PEER_OPEN_TIMEOUT_MS);
-        if (this.destroyed) {
-          peer.destroy();
+    for (const kind of kinds) {
+      const hostSecret = randomToken(18);
+      for (let i = 0; i < 3; i++) {
+        const id = `${kind === 'relay' ? RELAY_ROOM_PREFIX : 'wwk-'}${randomHex(12)}`;
+        const peer = kind === 'relay' ? new RelayPeer(id, { hostSecret }) : new Peer(id, peerOptions());
+        try {
+          await waitPeerOpen(peer, kind === 'relay' ? NET_CONFIG.RELAY_OPEN_TIMEOUT_MS : NET_CONFIG.PEER_OPEN_TIMEOUT_MS);
+          if (this.destroyed) {
+            peer.destroy();
+            return;
+          }
+          this.peer = peer;
+          this.roomId = id;
+          this.transport = kind;
+          this._bindPeer(peer);
+          this._setSignaling('online');
           return;
+        } catch (err) {
+          lastErr = err;
+          peer.destroy();
+          if (err?.type !== 'unavailable-id') break;
         }
-        this.peer = peer;
-        this.roomId = id;
-        this._bindPeer(peer);
-        this._setSignaling('online');
-        return;
-      } catch (err) {
-        lastErr = err;
-        peer.destroy();
-        if (err?.type !== 'unavailable-id') break;
       }
     }
     throw lastErr || new Error('peer-open-failed');
@@ -562,7 +567,7 @@ export class GuestNetwork extends Emitter {
         } catch {
           /* noop */
         }
-        this.peer = new Peer(peerOptions(await loadIceServers()));
+        this.peer = isRelayRoom(this.roomId) ? new RelayPeer() : new Peer(peerOptions());
         this.peer.on('error', (err) => {
           this.lastError = err?.type;
           if (err?.type === 'peer-unavailable') this.sawUnavailable = true;

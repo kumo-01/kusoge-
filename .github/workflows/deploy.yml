@@ -27,8 +27,8 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          # 直接つなげないネットワーク用の無料 TURN（任意）。リポジトリ変数 TURN_URL に Worker の URL を入れる。空なら使わない
-          VITE_TURN_URL: ${{ vars.TURN_URL }}
+          # Cloudflare の中継（任意）。リポジトリ変数 RELAY_URL に Worker の URL を入れる。空なら PeerJS Cloud（P2P）だけを使う
+          VITE_RELAY_URL: ${{ vars.RELAY_URL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

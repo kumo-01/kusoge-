@@ -190,34 +190,24 @@ npm test         # レースシミュレーション・通信プロトコルの�
 - ワークフローは既定ブランチ（Settings → General の Default branch）への push のときだけ公開します。
   GitHub Pages の環境は既定で既定ブランチからのデプロイだけを許可するためです
 
-### TURN（中継）を無料で足す（任意・おすすめ）
+### Cloudflare の中継で通信する（任意・無料）
 
-ゲーム中のデータはホストとゲストが**直接**やりとりします（P2P。いちばん遅れが少ない）。
-会社・学校・一部のモバイル回線などで直接つなげないときだけ、中継（TURN）を経由させると接続できるようになります。
-[Cloudflare Realtime TURN](https://developers.cloudflare.com/realtime/turn/) には無料枠（月 1,000 GB の通信まで。超えると有料なので、使用量は Cloudflare のダッシュボードで確認してください）があり、
-TURN の鍵を隠すための小さな Worker（`worker/turn/`、Workers の無料プランで動く）と組み合わせて使います。
-直接つながるときは中継を使わないので、普段の遅さは変わりません（中継は「つながらない」を「つながる」にするためのもので、回線そのものを速くはしません）。
+既定ではホストとゲストが **P2P（WebRTC）** で直接つながり、最初の出会いだけ PeerJS Cloud を使います。
+会社・学校・一部のモバイル回線などでは直接つなげないことがあるため、**Cloudflare Workers + Durable Objects の中継サーバー**（`worker/relay/`）でつなぐこともできます。
+カード登録なしの無料プランで動かす想定です（Cloudflare の無料枠: Durable Objects は 1 日 10 万リクエスト・実行時間 13,000 GB-秒まで。
+受信メッセージは 20 件で 1 リクエストと数えられるため、2 人対戦（毎秒およそ 60 件）で全部あわせて **1 日 9 時間ほど**の対戦が目安です。超えると、その日は中継が使えなくなります）。
 
-1. [Cloudflare](https://dash.cloudflare.com/) に無料でサインアップし、ダッシュボードの **Realtime → TURN** で TURN キーを作る（**TURN Key ID** と **API Token** が出る）
-2. Cloudflare の **API トークン**（権限: Workers Scripts の編集）と **アカウント ID** を用意する
-3. このリポジトリの Settings → Secrets and variables → Actions → **Secrets** に 4 つ登録する:
-   `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` / `TURN_KEY_ID` / `TURN_KEY_API_TOKEN`
-4. Actions タブの **Deploy TURN credentials Worker** を手動で実行する → Worker の URL（`https://kusoge.<アカウント>.workers.dev`（Worker の名前は `worker/turn/wrangler.toml` の `name`））が表示される
-   （`worker/turn/wrangler.toml` の `ALLOWED_ORIGINS` は、公開しているサイトのドメインに合わせてください）
-5. 同じ画面の **Variables** に `TURN_URL` として、その Worker の URL を登録し、Pages のデプロイをもう一度走らせる
+- 中継を設定すると、ホストは**まず中継で部屋を作り、使えなければ自動で PeerJS Cloud（P2P）にします**。招待 URL の部屋 ID が `wwr-` なら中継、`wwk-` なら P2P です（ゲストは URL だけで自動的に同じ方式につながります）。
+- 中継は通信の中身を見ず、保存もせず、そのまま相手へ渡すだけです。ただし P2P より少し遅れが増えます（経由するぶんだけ）。
+- 設定した Worker は `ALLOWED_ORIGINS`（`worker/relay/wrangler.toml`）に書いたサイトのページからしか使えません。ゲームを公開するドメインに合わせて書き換えてください。
 
-**Cloudflare でカード登録を求められる場合**は、無料枠のある別サービスの [Metered（Open Relay）](https://www.metered.ca/tools/openrelay/)（月 20 GB まで。カード登録の要否は未確認）も使えます。
-Worker の Secret を `TURN_KEY_ID` / `TURN_KEY_API_TOKEN` の代わりに `METERED_APP`（アプリ名）と `METERED_API_KEY`（API キー）にするだけです。
-（実際の Metered との接続は未確認です。）
+**設定の手順（Cloudflare の画面だけで済みます）**
+1. [Cloudflare](https://dash.cloudflare.com/sign-up) に無料登録し、**Workers & Pages → 作成 → GitHub のリポジトリをインポート**でこのリポジトリを選ぶ（プロジェクト名は `worker/relay/wrangler.toml` の `name`（`kusoge`）と同じにする）
+2. プロジェクトの **設定 → ビルド** で、**ルートディレクトリ** を `worker/relay`、**ビルドコマンド** を空、**デプロイコマンド** を `npx wrangler deploy` にして、再ビルドする
+3. 成功すると `https://kusoge.<サブドメイン>.workers.dev` が使えるようになる。ブラウザで開いて `{"ok":true,...}` と出れば動いています
+4. このリポジトリの Settings → Secrets and variables → Actions → **Variables** に `RELAY_URL` としてその URL を登録し、Pages のデプロイをやり直す
 
-**GitHub Actions を使わず、Cloudflare の画面だけで済ませる方法**もあります（Workers & Pages に GitHub リポジトリをつなぐ）。
-その場合は、プロジェクトの **Settings → Build** で、ルートディレクトリを `worker/turn`、ビルドコマンドは空、デプロイコマンドを `npx wrangler deploy` にし、
-プロジェクト名を `worker/turn/wrangler.toml` の `name`（`kusoge`）と同じにします。
-**Settings → Variables and secrets** に `TURN_KEY_ID` と `TURN_KEY_API_TOKEN` を **Secret** として登録すれば、GitHub 側の Secrets 4 つは不要です。
-
-設定しない・Worker が落ちている・取得に3秒以上かかるときは、これまでどおり（Google と Cloudflare の STUN だけ）で動き、遊べなくなることはありません。
-TURN の認証情報は数時間で切れるもので、API トークンはブラウザには渡りません。
-手元でビルドするときは `VITE_TURN_URL=https://…workers.dev/ npm run build` です。
+手元でビルドするときは `VITE_RELAY_URL=https://…workers.dev npm run build` です。ローカルで試すだけなら、`worker/relay` で `npx wrangler dev` を動かし、`VITE_RELAY_URL=http://127.0.0.1:8787` でビルドします。
 
 ### 自前の PeerServer を使う場合（任意）
 
@@ -294,7 +284,7 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
 - すでに別の人がゲストとして参加していないか（ゲスト枠は1つ）
 - 会社・学校・公衆Wi-Fi、一部のモバイル回線（キャリアグレードNAT）では WebRTC の P2P 接続が通らないことがあります。
   PeerJS の既定設定には PeerJS 提供の公開 TURN サーバーが含まれますが、可用性は保証されていません。
-  確実に接続したい場合は、「TURN（中継）を無料で足す」の手順で Cloudflare の無料 TURN を設定してください
+  確実に接続したい場合は、「Cloudflare の中継で通信する」の手順で中継を設定してください
 - 広告ブロッカー・VPN・セキュリティソフトが WebRTC や `0.peerjs.com` への接続を止めていないか
 - PeerJS Cloud が一時的に混雑・停止している可能性もあります（時間をおいて再試行）
 - ブラウザの開発者ツールのコンソールにエラーが出ていないか
@@ -303,7 +293,7 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
 
 - プレイヤーは2人固定。観戦・3人以上は非対応
 - ホストのページ更新・終了からの復帰は非対応（仕様）。ゲストもタブを閉じた後の復帰は保証しません（sessionStorage のため）
-- TURN（中継）は任意の設定です。設定しない場合、ネットワーク環境によっては接続できません。設定しても、すべての環境でつながることまでは保証できません（実際の環境での確認は未実施）
+- Cloudflare の中継は任意の設定です。設定しない場合、ネットワーク環境によっては P2P がつながりません。中継はローカルの Worker（wrangler dev）での確認までで、実際の Cloudflare 上での動作・各種ネットワークでの接続は未確認です
 - ゲストの車はクライアント予測で動かし、ホストの確定状態に少しずつ合わせています。
   遅延が大きいと、体当たり・被弾の瞬間に位置が補正されることがあります
 - 通信遅延のぶん、ゲスト画面のホストの車は約0.1秒＋遅延だけ過去の位置を表示しています
