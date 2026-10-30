@@ -17,6 +17,7 @@ export function createKart(index, pos, boss = false, npc = index >= 2, style = i
     sp: 0,
     kx: 0,
     kz: 0,
+    in: 0, // 今の操作（押しっぱなしの分。ほかの端末が、この車の少し先の動きを計算するのに使う）
     st: 0, // ハンドル（-1..1、見た目用・旋回用に平滑化）
     th: 0, // アクセル状態（見た目用）
     spin: 0, // スピン残り時間（操作不能）

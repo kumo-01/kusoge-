@@ -133,6 +133,10 @@ test('エンジン: 配信用の状態（encode）と完全な状態を受け取
   assert.notEqual(s, client.s, 'accepted');
   assert.equal(s.tick, e.sim.s.tick);
   assert.deepEqual(s.acks, e.sim.s.acks);
+  // 車ごとの今の操作（ほかの端末が少し先の動きを計算するのに使う）
+  assert.equal(e.sim.s.karts[1].in, IN.UP);
+  assert.equal(s.karts[1].in, IN.UP);
+  assert.equal(s.karts[0].in, 0);
   assert.ok(Math.abs(s.karts[1].x - e.sim.s.karts[1].x) < 0.01);
   // 完全な状態
   const full = JSON.parse(JSON.stringify(e.getSnapshot()));
@@ -174,7 +178,7 @@ test('配信の形: 車は変わった項目だけ・ボックスは取られた
   // 車の行: 毎回の 10 項目 + 印 + 該当する項目だけ（何もない車は 11 個）
   const idle = net.k[3];
   assert.ok(idle.length < 20, `idle kart row is short (${idle.length})`);
-  assert.ok(net.k[1].length > idle.length);
+  assert.ok(net.k[1].length >= 13, 'spin と boost の値が載る（10 項目 + 印 + 2）');
   // 往復
   const client = new RaceSim(e.track, { players: [0, 1, 2], npcs: 3, boss: 1 });
   const back = sanitizeSnapshot(unpackNet(JSON.parse(JSON.stringify(net))), client.s, client.boxPos.length);

@@ -80,6 +80,7 @@ export const NET = {
   SNAP_DIST: 6, // 予測の誤差がこれ以上なら瞬時に合わせる
   INPUT_BUFFER_MAX: 40, // サーバーに溜まった入力がこれを超えたら一気に追いつく（端末が止まっていたときなど）
   INPUT_ADJUST_TICKS: 30, // この tick ごとに、入力の届く遅れに合わせて 1 tick 待つ・飛ばすかを決める
+  REMOTE_AHEAD_MAX: 30, // ほかの車を先へ計算する上限（tick）。回線がとても遅いときは、これ以上は先へ進めない
   INPUT_LEAD_MAX: 4, // 入力が使われるまでの余裕がずっとこれ（tick）を超えていたら 1 tick 飛ばす
 };
 

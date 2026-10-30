@@ -104,6 +104,88 @@ class Predictor {
   }
 }
 
+/**
+ * ほかの車（人・NPC）を、自分の車と同じ時刻まで先に進めて表示する。
+ * 自分の車は操作がすぐ反映されるよう、サーバーの確定状態より「まだサーバーに届いていない操作の分」だけ先を走っている。
+ * ほかの車をサーバーの確定状態（過去）のまま描くと、実際より後ろに見えて、当たる位置や順位が見た目と食い違う。
+ * そこで、確定状態からその車の今の操作（in）のまま同じ tick 数だけ先へ計算して描く。操作が変わったときのずれは少しずつ吸収する。
+ */
+class RemoteKarts {
+  constructor() {
+    this.reset();
+  }
+
+  reset() {
+    this.g = []; // 車ごとの「今の時刻」の推定
+    this.p = []; // 1 tick 前の推定（画面の更新との間を補間する）
+    this.off = []; // 見た目のずれ（少しずつ 0 に戻す）
+  }
+
+  /** karts: 最新の確定状態、ahead: 自分の車がそれより何 tick 先か */
+  sync(karts, me, ahead, track, active, dt) {
+    for (let i = 0; i < karts.length; i++) {
+      if (i === me) {
+        this.g[i] = null;
+        continue;
+      }
+      const k = { ...karts[i] };
+      let prev = { x: k.x, z: k.z, y: k.y, h: k.h };
+      for (let t = 0; t < ahead; t++) {
+        prev = { x: k.x, z: k.z, y: k.y, h: k.h };
+        stepKart(k, k.in, dt, track, active);
+      }
+      const old = this.g[i];
+      const o = this.off[i] || (this.off[i] = { x: 0, z: 0, y: 0, h: 0 });
+      if (old) {
+        // 今まで描いていた位置から急に動かさない（差を見た目のずれとして持ち、少しずつ戻す）
+        const dx = old.x + o.x - k.x;
+        const dz = old.z + o.z - k.z;
+        if (Math.hypot(dx, dz) > NET.SNAP_DIST * 2) {
+          o.x = o.z = o.y = o.h = 0; // 復帰などの瞬間移動はそのまま
+        } else {
+          o.x = dx;
+          o.z = dz;
+          o.y = old.y + o.y - k.y;
+          o.h = angleDiff(k.h, old.h + o.h);
+        }
+      }
+      this.g[i] = k;
+      this.p[i] = prev;
+    }
+    this.g.length = this.p.length = karts.length;
+  }
+
+  /** 1 tick 進める（自分の車の予測と同じタイミングで） */
+  step(track, active, dt) {
+    for (let i = 0; i < this.g.length; i++) {
+      const k = this.g[i];
+      if (!k) continue;
+      this.p[i] = { x: k.x, z: k.z, y: k.y, h: k.h };
+      stepKart(k, k.in, dt, track, active);
+    }
+  }
+
+  decay(dt) {
+    const f = Math.exp(-dt * 8);
+    for (const o of this.off) {
+      if (!o) continue;
+      o.x *= f;
+      o.z *= f;
+      o.y *= f;
+      o.h *= f;
+    }
+  }
+
+  /** 描く位置（al: 直前の tick との間の割合） */
+  view(i, al) {
+    const k = this.g[i];
+    if (!k) return null;
+    const p = this.p[i] || k;
+    const o = this.off[i];
+    return { ...k, x: lerp(p.x, k.x, al) + o.x, z: lerp(p.z, k.z, al) + o.z, y: Math.max(0, lerp(p.y, k.y, al) + o.y), h: lerpAngle(p.h, k.h, al) + o.h };
+  }
+}
+
 const lerpKart = (a, b, f) => ({
   ...b,
   x: lerp(a.x, b.x, f),
@@ -145,7 +227,6 @@ class DogKartGame {
       const next = order[(order.indexOf(this.world?.qualityPref || getQualityPref()) + 1) % order.length];
       this.world?.setQualityPref(next);
       this.hud.setQualityLabel(next);
-      this.hud.flash(next === 'high' ? '高画質（自動で下げません）' : next === 'light' ? 'かるい画質（影なし・低解像度）' : '画質: 自動（端末に合わせて調整）', 'plain', 1400);
     };
     this._releaseAwake = keepAwake(); // 遊んでいる間は画面が暗くならないように
     try {
@@ -171,6 +252,7 @@ class DogKartGame {
     this.lateMax = 0;
     this.interp = NET.INTERP_DELAY; // 今の補間遅延（通信の揺れに合わせて増減）
     this.pred = new Predictor();
+    this.remote = new RemoteKarts();
     this.seq = 0;
     this.pending = [];
     this.lastCd = null;
@@ -279,6 +361,7 @@ class DogKartGame {
         this.predPrev = { x: pk.x, z: pk.z, y: pk.y, h: pk.h };
         stepKart(this.pred.k, bits, dt, this.track, active && s.phase !== 'finished');
         this.pred.record(this.seq);
+        this.remote.step(this.track, active && s.phase !== 'finished', dt);
       }
     }
   }
@@ -317,6 +400,7 @@ class DogKartGame {
       this.clockInit = false;
       this._rt = undefined;
       this.pred.reset(s.karts[this.me]);
+      this.remote.reset();
       this.seq = s.acks[this.me] || 0;
       this.pending = [];
     }
@@ -360,7 +444,13 @@ class DogKartGame {
       this.clock += (t - this.clock) * 0.08;
     }
     this.sim.s = s;
-    if (NET.PREDICTION) this.pred.reconcile(s.karts[this.me], s.acks[this.me] || 0);
+    if (NET.PREDICTION) {
+      this.pred.reconcile(s.karts[this.me], s.acks[this.me] || 0);
+      // ほかの車を、自分の車と同じ時刻まで進める（自分の操作がサーバーで使われるのは ack の何 tick 後か = 自分の車がどれだけ先か）
+      const ahead = Math.max(0, Math.min(NET.REMOTE_AHEAD_MAX, this.seq - (s.acks[this.me] || 0)));
+      const active = s.phase === 'racing' || (s.phase === 'countdown' && this._guestRaceTime() >= 0);
+      this.remote.sync(s.karts, this.me, ahead, this.track, active && s.phase !== 'finished', this.ctx.fixedDt);
+    }
     if (ev.length) this._handleEvents(ev.sort((a, b) => a.id - b.id));
   }
 
@@ -380,6 +470,7 @@ class DogKartGame {
       this._rt = undefined;
       this.buffer = this.buffer.slice(-1);
       if (this.pred.k) this.pred.hist = [];
+      this.remote.reset();
     }
   }
 
@@ -433,8 +524,10 @@ class DogKartGame {
           } else if (e.item === ITEMS.HOUSE) {
             snd.play('throw');
             fx?.text('ヒュー…', k.x, 3.5, k.z, 3.5);
+            // 文字は本人にだけ（落とした人と、狙われた人）
+            const target = this.sim.s.houses.find((x) => x.o === e.k)?.t ?? this.sim.s.karts.findIndex((_, i) => this.sim.rankOf(i) === 1);
             if (e.k === me) this.hud.flash('🏠 犬小屋を落とした！ 1位にまっしぐら', 'good', 1800);
-            else this.hud.flash('🏠 犬小屋が降ってくる！', 'bad', 1800);
+            else if (target === me) this.hud.flash('🏠 犬小屋が降ってくる！', 'bad', 1800);
           }
           break;
         }
@@ -596,30 +689,48 @@ class DogKartGame {
         karts[i] = { ...k, x: k.x + (Math.sin(k.h) * k.sp + k.kx) * ex, z: k.z + (Math.cos(k.h) * k.sp + k.kz) * ex };
       }
     }
-    if (NET.PREDICTION && this.pred.k && !(n.s.karts[this.me]?.ow > 0)) {
+    // 自分の車を予測しているときは、ほかの車・飛んでいるアイテムも自分の車と同じ時刻で描く（見た目と当たる位置を一致させる）
+    const present = NET.PREDICTION && this.pred.k && !(n.s.karts[this.me]?.ow > 0);
+    const al = this.predPrev && !this.paused ? Math.max(0, Math.min(1, alpha)) : 1;
+    if (present && this.remote.g.length) {
+      this.remote.decay(dt);
+      for (let i = 0; i < karts.length; i++) {
+        const v = i === this.me ? null : this.remote.view(i, al);
+        if (v) karts[i] = v;
+      }
+    }
+    if (present) {
       this.pred.decay(dt);
       const k = this.pred.k;
       // 画面の更新と 60Hz の更新はずれるので、直前の位置との間を補間して動きを滑らかにする
       const p = this.predPrev;
-      const al = p && !this.paused ? Math.max(0, Math.min(1, alpha)) : 1;
       const px = p ? lerp(p.x, k.x, al) : k.x;
       const pz = p ? lerp(p.z, k.z, al) : k.z;
       const py = p ? lerp(p.y, k.y, al) : k.y;
       const ph = p ? lerpAngle(p.h, k.h, al) : k.h;
       karts[this.me] = { ...k, x: px + this.pred.off.x, z: pz + this.pred.off.z, y: py, h: ph + this.pred.off.h };
     }
-    // 飛んでいるホネは id で対応付けて補間
-    const prevProj = new Map(a.s.proj.map((p) => [p.id, p]));
-    const proj = n.s.proj.map((p) => {
-      const q = prevProj.get(p.id);
-      return q ? { ...p, x: lerp(q.x, p.x, f), z: lerp(q.z, p.z, f) } : p;
-    });
+    let proj;
+    let bananas = n.s.bananas;
+    if (present) {
+      // 最新の確定状態から、自分の車と同じ時刻まで速度のまま進める
+      const ahead = Math.max(0, this.seq - 1 + al - (s.acks[this.me] || 0)) * this.ctx.fixedDt;
+      proj = s.proj.map((p) => ({ ...p, x: p.x + p.vx * ahead, z: p.z + p.vz * ahead }));
+      bananas = s.bananas;
+    } else {
+      // 飛んでいるホネは id で対応付けて補間
+      const prevProj = new Map(a.s.proj.map((p) => [p.id, p]));
+      proj = n.s.proj.map((p) => {
+        const q = prevProj.get(p.id);
+        return q ? { ...p, x: lerp(q.x, p.x, f), z: lerp(q.z, p.z, f) } : p;
+      });
+    }
     const prevHouse = new Map(a.s.houses.map((p) => [p.id, p]));
     const houses = n.s.houses.map((p) => {
       const q = prevHouse.get(p.id);
       return q ? { ...p, x: lerp(q.x, p.x, f), z: lerp(q.z, p.z, f) } : p;
     });
-    return { karts, items: { boxes: s.boxes, proj, bananas: n.s.bananas, houses, foods: s.foods } };
+    return { karts, items: { boxes: s.boxes, proj, bananas, houses, foods: s.foods } };
   }
 
   /** 車ごとの追加演出（ドリフトの火花・着地の土煙・ブースト煙など） */

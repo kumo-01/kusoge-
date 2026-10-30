@@ -93,6 +93,7 @@ export class RaceSim {
           k.spin = 0;
         }
       }
+      k.in = inp & IN.HELD;
       if (active) {
         stepTiming(k, this.prog[k.i], s.tc, !!(inp & IN.TAP), dt, ev);
       }
@@ -408,6 +409,7 @@ function sanitizeKart(r, i, prev) {
   k.ow = num(r.ow, 0, 0, ITEMS.OWNER_TIME);
   k.gd = num(r.gd, 0, 0, ITEMS.GUARD_TIME);
   k.fd = int(r.fd, 0, 0, FOOD.MAX);
+  k.in = int(r.in, 0, 0, IN.HELD);
   // stats は定期配信では省略されることがある（そのときは前回の値を使う）
   const st = r.stats && typeof r.stats === 'object' ? r.stats : prev.stats || {};
   k.stats = {};
@@ -486,7 +488,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
 // 値は見た目に困らない細かさまで丸める（位置 1cm・向き 0.001rad）。タイミングのチャンス地点（tc）は試合の間変わらないので、完全な状態でだけ送る。
 const NET_HOT = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th'];
 const NET_HOT_DIGITS = [2, 2, 2, 2, 3, 2, 2, 2, 2, 2];
-const NET_COLD = ['spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow'];
+const NET_COLD = ['spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow', 'in'];
 const NET_COLD_DEFAULT = NET_COLD.map((f) => (f === 'spinDur' || f === 'ms' ? 1 : 0));
 const NET_COLD_DIGITS = NET_COLD.map((f) => (f === 'ft' || f === 'lapStart' || f === 'best' ? 3 : 2));
 const PHASES = ['countdown', 'racing', 'finished'];
