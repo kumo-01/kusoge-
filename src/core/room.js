@@ -11,7 +11,8 @@
 // 通信状態（guest フィールド・ゲスト側の linkState）は画面状態とは独立して管理する。
 // ゲームの一時停止は画面遷移ではなく match.status で表す。
 
-import { Emitter, randomHex, now } from './util.js';
+import { Emitter, randomHex, randomToken, now } from './util.js';
+import { relayBase } from './relay.js';
 import { HostNetwork, GuestNetwork, describePeerError } from './network.js';
 import { GameManager } from './gameManager.js';
 import { getGame, defaultOptions, validOptions, resolveMatchOptions } from '../games/registry.js';
@@ -53,6 +54,8 @@ export class HostRoom extends Emitter {
     this._startTimer = null;
     this._resumeTimer = null;
     this._acks = new Set(); // いまの世代の状態を読み込んだ（ACK した）席
+    this._srv = null; // サーバー計算の試合のとき { base, gid, ak, tickets }
+    this._hostLoaded = false; // サーバー計算: ホスト自身も、いまの世代の状態を読み込んだか
     this._used = {}; // 連戦でこれまでに使った設定（ランダムのコースを重ねないため）
     this.closed = false;
     this.net = new HostNetwork({ getRoomState: () => this.publicState() });
@@ -99,6 +102,12 @@ export class HostRoom extends Emitter {
       this.emit('change');
     });
     this.gm.on('finish', (result) => this._onGameFinished(result));
+    this.gm.on('full', (msg) => this._onEngineFull(msg));
+    this.gm.on('engine-lost', () => {
+      if (this.state.screen !== 'game' || !this._srv) return;
+      this._toast('サーバーとの通信が切れたため、ゲームを中止しました');
+      this.abortGame();
+    });
     this.signaling = net.signaling;
     this._changed();
   }
@@ -199,7 +208,25 @@ export class HostRoom extends Emitter {
   _updateSynced() {
     const m = this.state.match;
     if (!m) return;
-    m.synced = this._guestsInMatch().every((slot) => this._acks.has(slot) && this.state.players[slot].link === 'connected');
+    const hostOk = !this._srv || this._hostLoaded; // サーバー計算では、ホストも状態を受け取る側
+    m.synced = hostOk && this._guestsInMatch().every((slot) => this._acks.has(slot) && this.state.players[slot].link === 'connected');
+  }
+
+  /** サーバー計算にするか。中継（Cloudflare）でつながっていて、サーバー計算が無効でなければ使う */
+  _serverPlan() {
+    if (this.net.transport !== 'relay' || !relayBase() || import.meta.env?.VITE_SERVER_SIM === '0') return null;
+    return { base: relayBase(), gid: randomHex(12), ak: randomToken(18), tickets: ['', randomToken(18), randomToken(18)] };
+  }
+
+  /** サーバー計算: サーバーから届いた完全な状態をホスト自身が読み込む */
+  _onEngineFull(msg) {
+    const m = this.state.match;
+    if (!m || !this._srv || msg.matchId !== m.matchId || msg.gen !== m.gen) return;
+    this.gm.loadSnapshot(msg.snapshot);
+    this._hostLoaded = true;
+    this._updateSynced();
+    if (m.synced && !m.started && !this.state.hostHidden) this._startRunning(0);
+    else this._changed();
   }
 
   _visibilityChanged() {
@@ -315,11 +342,29 @@ export class HostRoom extends Emitter {
     s.screen = 'game';
     for (const p of s.players) p.ready = false;
     s.result = null;
-    s.match = { matchId, gen: 1, status: 'loading', reason: null, synced: false, started: false, players, opts };
+    let srv = this._serverPlan();
+    s.match = { matchId, gen: 1, status: 'loading', reason: null, synced: false, started: false, players, server: !!srv, opts };
     this._acks.clear();
+    this._hostLoaded = false;
+    this._srv = srv;
     this._changed();
     try {
-      await this.gm.create(def, matchId, 1, opts, players);
+      if (srv) {
+        try {
+          await this.gm.create(def, matchId, 1, opts, players, { base: srv.base, gid: srv.gid, slot: 0, key: srv.ak });
+          await this.gm.startOnServer({ matchId, gen: 1, options: opts, players, tickets: srv.tickets });
+        } catch (err) {
+          // サーバーが使えない（無料枠の上限・障害など）: これまでどおり、ホストの端末で計算する
+          console.warn('[room] サーバー計算を始められませんでした。ホストの端末で計算します', err);
+          this.gm.destroy();
+          srv = null;
+          this._srv = null;
+          if (s.match?.matchId === matchId) s.match.server = false;
+          await this.gm.create(def, matchId, 1, opts, players);
+        }
+      } else {
+        await this.gm.create(def, matchId, 1, opts, players);
+      }
       await this.gm.firstFrame;
     } catch (err) {
       console.error(err);
@@ -349,11 +394,17 @@ export class HostRoom extends Emitter {
     m.synced = false;
     this._acks.clear();
     this.gm.setGen(m.gen);
-    const msg = { type: 'game_start', gameId: this.state.gameId, matchId: m.matchId, gen: m.gen, snapshot: this.gm.getSnapshot() };
+    const srv = this._srv;
+    if (srv) {
+      // サーバー計算: サーバーが全員（ホストも）に完全な状態を送る。参加者には、サーバーの試合 ID と自分のチケットだけ伝える
+      this._hostLoaded = false;
+      this.gm.engineCommand({ type: 'e_sync', gen: m.gen });
+    }
+    const base = { type: 'game_start', gameId: this.state.gameId, matchId: m.matchId, gen: m.gen };
     for (const slot of this._guestsInMatch()) {
       if (!this.net.isConnected(slot)) continue;
       this.state.players[slot].link = 'syncing';
-      this.net.sendTo(slot, msg);
+      this.net.sendTo(slot, srv ? { ...base, snapshot: {}, server: { gid: srv.gid, ticket: srv.tickets[slot] } } : { ...base, snapshot: this.gm.getSnapshot() });
     }
     this._updateSynced();
   }
@@ -364,12 +415,13 @@ export class HostRoom extends Emitter {
     clearTimeout(this._resumeTimer);
     m.started = true;
     m.reason = null;
+    if (this._srv) this.gm.engineCommand({ type: 'e_resume', gen: m.gen, delayMs });
     this.net.send({ type: 'resume', matchId: m.matchId, gen: m.gen, delayMs });
     if (delayMs > 0) {
       m.status = 'resuming';
       this.resumeAt = now() + delayMs;
       // ゲスト側はメッセージ受信から delayMs 後に再開するので、片道の遅延ぶんだけ遅らせて揃える
-      const oneWay = Math.min(300, (this.net.rtt || 0) / 2);
+      const oneWay = this._srv ? 0 : Math.min(300, (this.net.rtt || 0) / 2);
       this._resumeTimer = setTimeout(() => {
         if (this.state.match !== m || m.status !== 'resuming') return;
         m.status = 'running';
@@ -401,11 +453,23 @@ export class HostRoom extends Emitter {
     m.reason = reason;
     m.synced = false;
     this._acks.clear();
+    if (this._srv) {
+      // サーバー計算: サーバーの計算を止める。接続中の一時停止（ホストの操作・タブが裏）なら、全員で状態を揃え直す
+      if (reason === 'disconnect') this.gm.engineCommand({ type: 'e_pause' });
+      else {
+        m.gen++;
+        this.gm.setGen(m.gen);
+        this._hostLoaded = false;
+        this.gm.engineCommand({ type: 'e_sync', gen: m.gen });
+      }
+    }
     if (reason !== 'disconnect' && this.net.guestConnected && this.gm.game) {
       // 接続中の一時停止: ゲストに停止時点の状態を渡して揃えてもらう
-      m.gen++;
-      this.gm.setGen(m.gen);
-      const msg = { type: 'pause', matchId: m.matchId, gen: m.gen, reason, snapshot: this.gm.getSnapshot() };
+      if (!this._srv) {
+        m.gen++;
+        this.gm.setGen(m.gen);
+      }
+      const msg = { type: 'pause', matchId: m.matchId, gen: m.gen, reason, snapshot: this._srv ? {} : this.gm.getSnapshot() };
       for (const g of this._guestsInMatch()) {
         if (!this.net.isConnected(g)) continue;
         this.state.players[g].link = 'syncing';
@@ -436,6 +500,8 @@ export class HostRoom extends Emitter {
     if (s.screen !== 'game') return;
     clearTimeout(this._resumeTimer);
     const matchId = s.match?.matchId;
+    if (this._srv) this.gm.engineCommand({ type: 'e_abort' });
+    this._srv = null;
     this.gm.destroy();
     if (matchId) this.net.send({ type: 'game_abort', matchId });
     s.match = null;
@@ -450,6 +516,7 @@ export class HostRoom extends Emitter {
     const s = this.state;
     if (s.screen !== 'game' || !s.match) return;
     const matchId = s.match.matchId;
+    this._srv = null;
     this.gm.destroy();
     s.result = sanitizeResult(result);
     const se = s.series;
@@ -485,6 +552,8 @@ export class HostRoom extends Emitter {
     this._cancelStart();
     clearTimeout(this._resumeTimer);
     document.removeEventListener('visibilitychange', this._onVisibility);
+    if (this._srv) this.gm.engineCommand({ type: 'e_abort' });
+    this._srv = null;
     this.gm.destroy();
     this.net.close(reason);
     this.emit('closed', { reason });
@@ -579,9 +648,20 @@ export class GuestRoom extends Emitter {
       case 'game_start': {
         const def = getGame(msg.gameId);
         if (!def || this.state?.screen !== 'game') return;
+        // サーバー計算の試合: サーバーの試合 ID と自分のチケットでつなぎ、状態もサーバーから受け取る
+        let server = null;
+        if (msg.server) {
+          const gid = msg.server.gid;
+          const ticket = msg.server.ticket;
+          if (!relayBase() || typeof gid !== 'string' || typeof ticket !== 'string' || !/^[A-Za-z0-9]{24,64}$/.test(gid) || !/^[A-Za-z0-9_-]{8,64}$/.test(ticket)) {
+            this._toast('サーバー計算の試合につなげませんでした');
+            return;
+          }
+          server = { base: relayBase(), gid, slot: this.slot, key: ticket };
+        }
         if (!this.gm.game || this.gm.matchId !== msg.matchId) {
           try {
-            await this.gm.create(def, msg.matchId, msg.gen, { ...validOptions(def, this.state?.options), ...this.state?.match?.opts }, this.state?.match?.players);
+            await this.gm.create(def, msg.matchId, msg.gen, { ...validOptions(def, this.state?.options), ...this.state?.match?.opts }, this.state?.match?.players, server);
             await this.gm.firstFrame; // 重い初回描画を済ませてから ACK する
           } catch (err) {
             console.error(err);
@@ -593,12 +673,12 @@ export class GuestRoom extends Emitter {
             return;
           }
         }
-        this._loadAndAck(msg);
+        await this._loadFrom(msg);
         break;
       }
       case 'pause':
         if (this.gm.matchId !== msg.matchId) return;
-        this._loadAndAck(msg);
+        await this._loadFrom(msg);
         break;
       case 'resume':
         if (this.gm.matchId !== msg.matchId || this.gm.gen !== msg.gen) return;
@@ -623,6 +703,21 @@ export class GuestRoom extends Emitter {
         break;
       default:
         break;
+    }
+  }
+
+  /** 状態を読み込んで ACK する。サーバー計算の試合では、状態はサーバーから受け取る */
+  async _loadFrom(msg) {
+    if (!this.gm.serverSim) return this._loadAndAck(msg);
+    this.gm.pause();
+    this.gm.setGen(msg.gen);
+    try {
+      const full = await this.gm.fetchFull();
+      if (this.closed || this.gm.matchId !== msg.matchId || full.matchId !== msg.matchId) return;
+      this._loadAndAck({ ...msg, snapshot: full.snapshot });
+    } catch (err) {
+      console.error('[room] サーバーから状態を受け取れませんでした', err);
+      this._toast('サーバーから状態を受け取れませんでした。ホストの操作を待ってください');
     }
   }
 

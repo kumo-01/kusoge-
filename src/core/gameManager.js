@@ -16,6 +16,7 @@
 // 画面遷移や勝敗の確定はホストの部屋管理（room.js）が行い、ゲームは context.finish(result) で結果を返す。
 
 import { Emitter, h, now } from './util.js';
+import { EngineClient } from './engineClient.js';
 
 export const LOOP_CONFIG = {
   FIXED_DT: 1 / 60, // ゲーム更新 60Hz
@@ -57,7 +58,7 @@ export class GameManager extends Emitter {
 
   /** ゲームモジュールを読み込んで起動する（一時停止状態で開始） */
   /** players: この試合に参加する席（ホストが先頭）。車の番号はこの順 */
-  async create(def, matchId, gen, options = {}, players = [0, 1]) {
+  async create(def, matchId, gen, options = {}, players = [0, 1], server = null) {
     this.destroy();
     const token = ++this._token;
     const mod = await def.load();
@@ -70,12 +71,15 @@ export class GameManager extends Emitter {
     this.matchId = matchId;
     this.gen = gen;
     this.players = players;
+    // server: サーバー計算の試合 { base, gid, slot, key }。ホストも他の人と同じ「操作を送って状態を受け取る側」になる
+    this.serverSim = !!server;
     this.running = false;
     this._history = [];
     this._container = container;
     const context = {
       role: this.role,
       isHost: this.isHost,
+      serverSim: this.serverSim,
       players, // 参加する席。車の番号 i の人は players[i] の席
       playerIndex: Math.max(0, players.indexOf(this.slot ?? 0)), // 自分の車の番号
       container,
@@ -86,7 +90,12 @@ export class GameManager extends Emitter {
       fixedDt: LOOP_CONFIG.FIXED_DT,
       // ゲスト → ホストへの操作入力
       sendInput: (seq, inputs) => {
-        if (this.isHost || this.game !== game || !this.running) return;
+        if (this.game !== game || !this.running) return;
+        if (this.serverSim) {
+          this.engine?.send({ type: 'player_input', matchId, gen: this.gen, seq, inputs });
+          return;
+        }
+        if (this.isHost) return;
         // 連続入力は順不同の高速チャンネルで送る（重複・欠落は seq と重ね送りで吸収）
         this.net.sendFast({ type: 'player_input', matchId, gen: this.gen, seq, inputs });
       },
@@ -101,8 +110,19 @@ export class GameManager extends Emitter {
         this.running = false;
         setTimeout(() => this.emit('finish', result), 0);
       },
-      getNetInfo: () => ({ rtt: this.net.rtt, running: this.running }),
+      getNetInfo: () => ({ rtt: this.serverSim ? this.engine?.rtt ?? null : this.net.rtt, running: this.running }),
     };
+    if (server) {
+      this.engine = new EngineClient(server);
+      this.engine.on('message', (msg) => this._onEngineMessage(msg, matchId));
+      this.engine.on('open', ({ reopened }) => {
+        // 途中で切れてつなぎ直したら、完全な状態を取り直して追いつく
+        if (reopened && this.game === game && this.running) {
+          this.fetchFull().then((f) => this.loadSnapshot(f.snapshot)).catch(() => {});
+        }
+      });
+      this.engine.on('failed', () => this.emit('engine-lost'));
+    }
     try {
       game.start(context);
     } catch (err) {
@@ -126,6 +146,60 @@ export class GameManager extends Emitter {
 
   setGen(gen) {
     this.gen = gen;
+  }
+
+  // ---- サーバー計算 ----
+  /** サーバーのメッセージ（スナップショットは通常の経路に流す） */
+  _onEngineMessage(msg, matchId) {
+    if (matchId !== this.matchId) return;
+    if (msg.type === 'game_snapshot') this.handleMessage(msg);
+    else if (msg.type === 'e_result') {
+      if (this.isHost && this.game) {
+        this.running = false;
+        setTimeout(() => this.emit('finish', msg.result), 0);
+      }
+    } else if (msg.type === 'e_full') this.emit('full', msg);
+    else if (msg.type === 'e_started') this.emit('started', msg);
+    else if (msg.type === 'e_error') this.emit('engine-error', msg.reason);
+  }
+
+  /** サーバーに完全な状態を送ってもらう（読み込み・再接続・一時停止からの同期） */
+  fetchFull(timeoutMs = 8000) {
+    return new Promise((resolve, reject) => {
+      if (!this.engine) return reject(new Error('no-engine'));
+      const t = setTimeout(() => done(reject, new Error('full-timeout')), timeoutMs);
+      const off = this.on('full', (m) => done(resolve, m));
+      const offErr = this.on('engine-error', (r) => done(reject, new Error(r)));
+      const done = (fn, v) => {
+        clearTimeout(t);
+        off();
+        offErr();
+        fn(v);
+      };
+      this.engine.whenOpen(timeoutMs).then(() => this.engine.send({ type: 'e_sync_request' })).catch((e) => done(reject, e));
+    });
+  }
+
+  /** ホストだけ: 試合の開始をサーバーに伝えて、始まるのを待つ */
+  startOnServer(msg, timeoutMs = 6000) {
+    return new Promise((resolve, reject) => {
+      if (!this.engine) return reject(new Error('no-engine'));
+      const t = setTimeout(() => done(reject, new Error('start-timeout')), timeoutMs);
+      const off = this.on('started', () => done(resolve));
+      const offErr = this.on('engine-error', (r) => done(reject, new Error(r)));
+      const done = (fn, v) => {
+        clearTimeout(t);
+        off();
+        offErr();
+        fn(v);
+      };
+      this.engine.whenOpen(timeoutMs).then(() => this.engine.send({ type: 'e_start', ...msg })).catch((e) => done(reject, e));
+    });
+  }
+
+  /** ホストだけ: サーバーへの指示（e_sync / e_pause / e_resume / e_abort） */
+  engineCommand(msg) {
+    return this.engine?.send(msg) || false;
   }
 
   /** 進行を開始/再開（delayMs 後） */
@@ -199,7 +273,7 @@ export class GameManager extends Emitter {
       if (msg.type === 'player_input' && this.isHost) {
         const player = this.players.indexOf(slot);
         if (this.running && player > 0) game.onMessage({ type: 'player_input', player, seq: msg.seq, inputs: msg.inputs });
-      } else if (msg.type === 'game_snapshot' && !this.isHost) {
+      } else if (msg.type === 'game_snapshot' && (!this.isHost || this.serverSim)) {
         if (this.running) game.applyNetSnapshot(msg.snap, msg.ev || [], msg.seq);
       } else if (msg.type === 'game_msg') {
         game.onMessage({ type: 'game_msg', data: msg.data });
@@ -225,7 +299,7 @@ export class GameManager extends Emitter {
         this._acc -= FIXED;
         steps++;
         // 配信は「2 tick ごと」に、その tick の状態で送る（描画のタイミングで送ると配信の間隔が不揃いになり、相手の動きが揺れる）
-        if (this.isHost && this.running && this.game === game && (this._netTick = (this._netTick | 0) + 1) % NET_EVERY === 0) this._sendSnapshot();
+        if (this.isHost && !this.serverSim && this.running && this.game === game && (this._netTick = (this._netTick | 0) + 1) % NET_EVERY === 0) this._sendSnapshot();
         if (this.game !== game || !this.running) break;
       }
       if (steps >= LOOP_CONFIG.MAX_STEPS) this._acc = 0;
@@ -289,6 +363,9 @@ export class GameManager extends Emitter {
         console.error(err);
       }
     }
+    this.engine?.close();
+    this.engine = null;
+    this.serverSim = false;
     this._container?.remove();
     this._container = null;
     this.sound.setEngine(false);

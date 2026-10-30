@@ -5,7 +5,8 @@
 //         ホストの確定状態との誤差を少しずつ補正する。
 
 import { Track } from './track.js';
-import { RaceSim, sanitizeSnapshot, packNet, unpackNet, kartName } from './race.js';
+import { RaceSim, sanitizeSnapshot, unpackNet, kartName } from './race.js';
+import { DogKartEngine } from './engine.js';
 import { stepKart, PHYS_KEYS } from './physics.js';
 import { World } from './world.js';
 import { ChaseCamera } from './camera.js';
@@ -118,12 +119,20 @@ class DogKartGame {
   start(ctx) {
     this.ctx = ctx;
     this.isHost = ctx.isHost;
+    this.serverSim = !!ctx.serverSim; // サーバーが計算する試合か
     this.me = ctx.playerIndex; // 自分の車の番号（人間は部屋の席の順に 0, 1, 2）
     this.sound = ctx.sound;
     this.track = new Track(ctx.options?.course ?? 0);
-    this.sim = new RaceSim(this.track, { npcs: ctx.options?.npcs ?? 0, boss: ctx.options?.boss ?? 0, players: ctx.players });
+    // auth: この端末が計算役か。ホストが計算するときだけ（サーバーが計算するときは、ホストも他の人と同じ「受け取る側」）
+    this.auth = ctx.isHost && !ctx.serverSim;
+    const simOpts = { npcs: ctx.options?.npcs ?? 0, boss: ctx.options?.boss ?? 0, players: ctx.players };
+    if (this.auth) {
+      this.engine = new DogKartEngine({ ...simOpts, track: this.track });
+      this.sim = this.engine.sim;
+    } else {
+      this.sim = new RaceSim(this.track, simOpts);
+    }
     this.paused = true;
-    this.finished = false;
     this.hud = new Hud(ctx.container, this.track, this.me, { round: ctx.options?.round, races: ctx.options?.races });
     this.world = null;
     this.hud.setQualityLabel(getQualityPref());
@@ -150,9 +159,7 @@ class DogKartGame {
     }
     // ホスト用
     this.prev = this.sim.s.karts.map((k) => ({ x: k.x, z: k.z, y: k.y, h: k.h }));
-    this.gq = this._newGuestQueues(); // ゲストごとの入力キュー（車の番号 1 以降）
-    this.netEvents = [];
-    this.evSeq = 0;
+
     // ゲスト用
     this.seenEvents = new Set();
     this.sentInputs = [];
@@ -216,56 +223,15 @@ class DogKartGame {
     return b;
   }
 
-  _newGuestQueues() {
-    return Array.from({ length: this.sim.humans }, () => ({ queue: [], held: 0, lastSeq: 0, starved: true, starveTicks: 0, carry: 0 }));
-  }
-
-  /** ホスト: 人間 i（車の番号）の入力をキューから 1 tick 分取り出す */
-  _nextGuestInput(i) {
-    const g = this.gq[i];
-    const q = g.queue;
-    // 溜まりすぎたら古い入力を捨てて追いつく（押した瞬間の入力は引き継ぐ）
-    if (q.length > NET.INPUT_BUFFER_MAX) {
-      while (q.length > 2) {
-        const e = q.shift();
-        g.carry |= e.bits & IN.ONESHOT;
-        this.sim.s.acks[i] = e.seq;
-      }
-    }
-    if (!q.length || (g.starved && q.length < 2)) {
-      g.starved = true;
-      // 入力が途切れた（タブが裏に回った・通信が詰まった）ら、押しっぱなし扱いを解除する
-      if (++g.starveTicks > 15) g.held = 0;
-      return g.held;
-    }
-    g.starved = false;
-    g.starveTicks = 0;
-    const e = q.shift();
-    g.held = e.bits & IN.HELD;
-    this.sim.s.acks[i] = e.seq;
-    const bits = e.bits | g.carry;
-    g.carry = 0;
-    return bits;
-  }
-
   /** msg.player: 入力を送ってきた人の車の番号（ホストが、つながっている相手から決める） */
   onMessage(msg) {
-    if (!this.isHost || msg.type !== 'player_input') return;
-    const g = this.gq[msg.player];
-    if (!g || !(msg.player > 0)) return;
-    const n = msg.inputs.length;
-    for (let i = 0; i < n; i++) {
-      const seq = msg.seq - n + 1 + i;
-      if (seq <= g.lastSeq) continue; // 古い入力は無視
-      g.queue.push({ seq, bits: msg.inputs[i] & 255 });
-      g.lastSeq = seq;
-    }
-    if (g.queue.length > 120) g.queue.splice(0, g.queue.length - 120);
+    if (!this.auth || msg.type !== 'player_input' || !(msg.player > 0)) return;
+    this.engine.receiveInput(msg.player, msg.seq, msg.inputs);
   }
 
   // ---- 固定ステップ更新 ----
   update(dt) {
-    if (this.isHost) {
+    if (this.auth) {
       const ks = this.sim.s.karts;
       while (this.prev.length < ks.length) this.prev.push({ x: 0, z: 0, y: 0, h: 0 });
       for (let i = 0; i < ks.length; i++) {
@@ -275,24 +241,10 @@ class DogKartGame {
         p.y = ks[i].y;
         p.h = ks[i].h;
       }
-      const inputs = [this._readInput()];
-      for (let i = 1; i < this.sim.humans; i++) inputs.push(this._nextGuestInput(i));
-      this.sim.step(dt, inputs);
-      const ev = this.sim.drainEvents();
-      if (ev.length) {
-        this._handleEvents(ev);
-        // 定期配信は順不同のチャンネルで送るので、取りこぼしに備えて同じイベントを 3 回続けて載せる（ゲストは id で重複を除く）
-        for (const e of ev) {
-          e.id = ++this.evSeq;
-          this.netEvents.push({ e, n: 3 });
-        }
-        if (this.netEvents.length > 150) this.netEvents.splice(0, this.netEvents.length - 150);
-      }
-      const s = this.sim.s;
-      if (s.phase === 'finished' && s.endT <= 0 && !this.finished) {
-        this.finished = true;
-        this.ctx.finish(this.sim.buildResult());
-      }
+      const ev = this.engine.step(dt, { 0: this._readInput() });
+      if (ev.length) this._handleEvents(ev);
+      const result = this.engine.takeResult();
+      if (result) this.ctx.finish(result);
     } else {
       const bits = this._readInput();
       this.seq++;
@@ -333,31 +285,22 @@ class DogKartGame {
   }
 
   drainNetEvents() {
-    const out = [];
-    for (const x of this.netEvents) {
-      out.push(x.e);
-      x.n--;
-    }
-    this.netEvents = this.netEvents.filter((x) => x.n > 0);
-    return out;
+    return this.engine ? this.engine.drainNetEvents() : [];
   }
 
   /** 定期配信用に小さく詰める */
-  encodeNetSnapshot(snap) {
-    return packNet(snap);
+  encodeNetSnapshot() {
+    return this.engine.encode();
   }
 
   loadSnapshot(snap) {
     this.sim.loadSnapshot(snap);
     const s = this.sim.s;
     this.world?.effects.clear();
-    if (this.isHost) {
+    if (this.auth) {
       // 巻き戻し: 未処理のゲスト入力は破棄して確定済みの seq から受け直す
       this.prev = s.karts.map((k) => ({ x: k.x, z: k.z, y: k.y, h: k.h }));
-      this.gq = this._newGuestQueues();
-      this.gq.forEach((g, i) => (g.lastSeq = s.acks[i] || 0));
-      this.finished = false;
-      this.netEvents = [];
+      this.engine.resetQueues();
     } else {
       this.sentInputs = [];
       this.buffer = [{ t: s.tick * this.ctx.fixedDt, s }];
@@ -370,7 +313,7 @@ class DogKartGame {
   }
 
   applyNetSnapshot(snap, events) {
-    if (this.isHost) return;
+    if (this.auth) return;
     // 演出イベントは古いスナップショットに載っていても、まだ見ていなければ処理する
     const ev = [];
     for (const e of events) {
@@ -415,21 +358,13 @@ class DogKartGame {
     this.sound.setEngine(false);
     this.sound.setRain(0);
     this.tapPressed = false;
-    if (this.isHost) {
-      this.gq.forEach((g, i) => {
-        g.queue = [];
-        g.lastSeq = this.sim.s.acks[i] || 0;
-        g.held = 0;
-        g.starved = true;
-      });
-    } else {
-      this.pending = [];
-    }
+    if (this.auth) this.engine.clearQueues();
+    else this.pending = [];
   }
 
   resume() {
     this.paused = false;
-    if (!this.isHost) {
+    if (!this.auth) {
       this.clockInit = false;
       this.buffer = this.buffer.slice(-1);
       if (this.pred.k) this.pred.hist = [];
@@ -611,7 +546,7 @@ class DogKartGame {
   // ---- 描画 ----
   _renderState(dt, alpha = 1) {
     const s = this.sim.s;
-    if (this.isHost) {
+    if (this.auth) {
       return { karts: s.karts, items: s };
     }
     const renderT = this.clock - this.interp;
@@ -706,10 +641,10 @@ class DogKartGame {
 
   render(alpha, dt) {
     const s = this.sim.s;
-    if (!this.isHost && !this.paused && this.clockInit) this.clock += dt;
+    if (!this.auth && !this.paused && this.clockInit) this.clock += dt;
     const st = this._renderState(dt, alpha);
     let karts = st.karts;
-    if (this.isHost) {
+    if (this.auth) {
       karts = s.karts.map((k, i) => {
         const p = this.prev[i];
         if (this.paused || !p) return k;
@@ -717,7 +652,7 @@ class DogKartGame {
       });
     }
     const mine = karts[this.me];
-    const raceT = this.isHost ? s.t : this._guestRaceTime();
+    const raceT = this.auth ? s.t : this._guestRaceTime();
 
     // カウントダウンの音（双方とも自分の時計で鳴らす）
     if (s.phase === 'countdown') {
@@ -761,7 +696,7 @@ class DogKartGame {
     const rtt = info.rtt != null ? `${Math.round(info.rtt)}ms` : '';
     const sk = s.karts[this.me]; // 周回・アイテムは確定状態を表示
     // タイミングブーストと豪雨は、ゲストは自分の予測（押したタイミングがそのまま判定に使われる）で表示する
-    const pk = !this.isHost && NET.PREDICTION && this.pred.k ? this.pred.k : sk;
+    const pk = !this.auth && NET.PREDICTION && this.pred.k ? this.pred.k : sk;
     const tw = s.phase === 'racing' ? pk.tw : 0;
     if (tw > 0 && this._prevTw <= 0 && !this.paused) this.sound.play('chance');
     this._prevTw = tw;
@@ -787,7 +722,7 @@ class DogKartGame {
         wet: mine.wet || 0,
         food: sk.fd || 0,
         karts,
-        netText: this.paused ? '⏸ 一時停止中' : `📶 ${this.isHost ? 'ゲスト' : 'ホスト'}と接続中 ${rtt}`,
+        netText: this.paused ? '⏸ 一時停止中' : `📶 ${this.serverSim ? 'サーバー' : this.isHost ? 'ゲスト' : 'ホスト'}と接続中 ${rtt}`,
         netTone: this.paused ? 'warn' : info.rtt != null && info.rtt > 250 ? 'warn' : 'ok',
       },
       dt,

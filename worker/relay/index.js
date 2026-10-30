@@ -1,4 +1,4 @@
-// Cloudflare Worker + Durable Object: 2 人用の通信の中継サーバー。
+// Cloudflare Worker + Durable Object: 通信の中継サーバー（ロビー）と、試合ごとの計算役（game.js）。
 //
 // ホストとゲストを、Cloudflare の中継（WebSocket）でつなぐ。1 つの部屋 = 1 つの Durable Object。
 // 無料プランで動く（SQLite 版の Durable Object。WebSocket Hibernation を使い、待機中は課金対象の実行時間を使わない）。
@@ -29,7 +29,7 @@ export default {
     if (url.pathname === '/' || url.pathname === '/health') {
       return new Response(JSON.stringify({ ok: true, service: 'wanwan-relay' }), { headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } });
     }
-    if (url.pathname !== '/ws') return new Response('not found', { status: 404 });
+    if (url.pathname !== '/ws' && url.pathname !== '/game') return new Response('not found', { status: 404 });
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
 
     // ブラウザからは許可したサイトだけ（他のサイトのページに無料枠を使われないように）
@@ -37,6 +37,12 @@ export default {
     const origin = request.headers.get('Origin') || '';
     if (allowed.length && origin && !allowed.includes(origin)) return new Response('forbidden', { status: 403 });
 
+    if (url.pathname === '/game') {
+      // サーバー計算（試合ごと）。試合 ID（gid）は推測できない値で、参加者にだけ渡される
+      const gid = url.searchParams.get('gid') || '';
+      if (!/^[A-Za-z0-9]{24,64}$/.test(gid)) return new Response('bad request', { status: 400 });
+      return env.GAMES.get(env.GAMES.idFromName(gid)).fetch(request);
+    }
     const room = url.searchParams.get('room') || '';
     const role = url.searchParams.get('role');
     if (!ROOM_RE.test(room) || (role !== 'host' && role !== 'guest')) return new Response('bad request', { status: 400 });
@@ -44,6 +50,8 @@ export default {
     return stub.fetch(request);
   },
 };
+
+export { Game } from './game.js';
 
 export class Room {
   constructor(state, env) {

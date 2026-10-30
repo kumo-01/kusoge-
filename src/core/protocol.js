@@ -66,7 +66,7 @@ const SCHEMAS = {
   join_rejected: { reason: str(32) },
   room_state: { room: obj },
   ready_change: { ready: bool },
-  game_start: { gameId: id, snapshot: obj, ...MATCH },
+  game_start: { gameId: id, snapshot: obj, server: opt(obj), ...MATCH }, // server: サーバー計算の試合のとき { gid, ticket }（snapshot は空）
   player_input: { ...MATCH, seq: int(0, 1e9), inputs: arr(32, int(0, 255)) },
   game_snapshot: { ...MATCH, seq: int(0, 1e9), snap: obj, ev: opt(arr(128, obj)) },
   game_msg: { ...MATCH, data: obj },
@@ -81,12 +81,34 @@ const SCHEMAS = {
   ping: { t: num(0, 1e15) },
   pong: { t: num(0, 1e15) },
   presence: { hidden: bool },
+  // ---- サーバー計算（試合ごとの Cloudflare Durable Object）との通信 ----
+  // ホスト → サーバー（部屋の管理者だけが送れる）
+  e_start: { matchId: id, gen: int(0, 1e9), options: obj, players: arr(3, int(0, 2)), tickets: arr(3, str(64)) },
+  e_sync: { gen: int(0, 1e9) }, // 状態を揃える: 計算を止めて、全員に完全な状態を送る
+  e_pause: {},
+  e_resume: { gen: int(0, 1e9), delayMs: num(0, 10000) },
+  e_abort: {},
+  e_debug: { op: str(20), args: obj }, // 開発用（サーバー側の変数 ALLOW_DEBUG=1 のときだけ動く。本番では無視される）
+  // 誰からでも
+  e_sync_request: {}, // 自分に完全な状態を送ってほしい（再接続したときなど）
+  e_ping: { t: num(0, 1e15) },
+  // サーバー → 全員（game_snapshot は部屋の通信と同じ形）
+  e_started: { matchId: id },
+  e_full: { matchId: id, gen: int(0, 1e9), snapshot: obj },
+  e_result: { matchId: id, result: obj },
+  e_error: { reason: str(40) },
+  e_pong: { t: num(0, 1e15) },
 };
 
 export const FROM_GUEST = new Set([
   'join_request', 'ready_change', 'player_input', 'resume_ack', 'game_msg',
   'leave', 'bye', 'ping', 'pong', 'presence',
 ]);
+/** サーバー計算の通信（worker/relay/game.js ⇔ src/core/engineClient.js） */
+export const ENGINE_FROM_HOST = new Set(['e_start', 'e_sync', 'e_pause', 'e_resume', 'e_abort', 'e_debug', 'e_sync_request', 'e_ping', 'player_input']);
+export const ENGINE_FROM_PLAYER = new Set(['e_sync_request', 'e_ping', 'player_input']);
+export const ENGINE_TO_CLIENT = new Set(['e_started', 'e_full', 'game_snapshot', 'e_result', 'e_error', 'e_pong']);
+
 /** 高速チャンネル（順不同）で受け付けるもの */
 export const FAST_FROM_GUEST = new Set(['player_input']);
 export const FAST_FROM_HOST = new Set(['game_snapshot']);
@@ -190,6 +212,7 @@ export function sanitizeRoomState(r) {
       reason: str(16)(m.reason) ? m.reason : null,
       synced: m.synced === true,
       started: m.started === true,
+      server: m.server === true, // サーバーが計算する試合か
       players: Array.isArray(m.players) ? m.players.filter((v, i, a) => int(0, MAX_PLAYERS - 1)(v) && a.indexOf(v) === i).slice(0, MAX_PLAYERS) : [0, 1],
       opts: cleanOptions(m.opts), // このレースで実際に使う設定（ランダムは確定した値）
     };

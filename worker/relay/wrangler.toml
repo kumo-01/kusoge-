@@ -7,9 +7,18 @@ compatibility_date = "2025-01-01"
 name = "ROOMS"
 class_name = "Room"
 
+# 試合ごとの計算役（サーバー計算）
+[[durable_objects.bindings]]
+name = "GAMES"
+class_name = "Game"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Game"]
 
 [vars]
 # ゲームを公開しているサイトのドメイン（カンマ区切りで複数可）。ここ以外のページからは使えない。
