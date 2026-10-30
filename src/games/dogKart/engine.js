@@ -18,7 +18,16 @@ export class DogKartEngine {
   }
 
   _newQueues() {
-    return Array.from({ length: this.sim.humans }, () => ({ queue: [], held: 0, lastSeq: 0, starved: true, starveTicks: 0, carry: 0 }));
+    return Array.from({ length: this.sim.humans }, () => ({
+      queue: [],
+      held: 0, // 最後にわかっている押しっぱなしの操作（届いていない tick はこれで代用する）
+      lastSeq: 0, // 受け取った最新の seq
+      next: null, // 次の tick に使う seq（null: まだ合わせていない）
+      carry: 0, // 遅れて届いた「押した瞬間」の入力（次の tick に使う）
+      minLead: Infinity, // 直近の区切りで、届いた入力がどれだけ先に届いていたか（tick）の最小
+      adjN: 0,
+      highN: 0, // 余裕がありすぎる区切りが続いた回数
+    }));
   }
 
   /** 状態を読み込み直したあと（一時停止・巻き戻し）に、未処理の入力を捨てて、確定済みの seq から受け直す */
@@ -35,50 +44,93 @@ export class DogKartEngine {
       g.queue = [];
       g.lastSeq = this.sim.s.acks[i] || 0;
       g.held = 0;
-      g.starved = true;
+      g.carry = 0;
+      g.next = null;
+      g.minLead = Infinity;
     });
   }
 
   /** 人 player（車の番号）から届いた入力（直近の複数 tick 分が重なって届く） */
   receiveInput(player, seq, inputs) {
     const g = this.gq[player];
-    if (!g || !Array.isArray(inputs)) return;
+    if (!g || !Array.isArray(inputs) || !inputs.length) return;
     const n = inputs.length;
+    if (g.next === null) g.next = Math.max(g.lastSeq + 1, seq - n + 1);
     for (let i = 0; i < n; i++) {
       const sq = seq - n + 1 + i;
-      if (sq <= g.lastSeq) continue; // 古い入力は無視
-      g.queue.push({ seq: sq, bits: inputs[i] & 255 });
+      if (sq <= g.lastSeq) continue; // 重なって届いた分・古い入力は無視
       g.lastSeq = sq;
+      const bits = inputs[i] & 255;
+      if (sq < g.next) {
+        // その tick はもう計算済み（届く前に「押しっぱなし」で代用した）。押した瞬間の入力だけ次に回す
+        g.carry |= bits & IN.ONESHOT;
+        g.held = bits & IN.HELD;
+        continue;
+      }
+      g.queue.push({ seq: sq, bits });
     }
+    // 最新の入力は送る直前に作られたもの。それが使われるまでの余裕（tick）を測り、遅れの揺れに合わせる
+    if (seq >= g.next - 60) g.minLead = Math.min(g.minLead, seq - g.next);
     if (g.queue.length > 120) g.queue.splice(0, g.queue.length - 120);
   }
 
-  /** 人 i の入力をキューから 1 tick 分取り出す */
+  /**
+   * 人 i の入力を 1 tick 分取り出す。
+   * 送り手の seq と計算の tick を常に 1 対 1 で進める（届いていない tick は押しっぱなしで代用）。
+   * こうすると、送り手の画面の予測とサーバーの結果が食い違わず、「進んでは戻される」動きにならない。
+   * 遅れの揺れに合わせて、ときどき 1 tick だけ待つ・飛ばす。
+   */
   _nextInput(i) {
     const g = this.gq[i];
-    const q = g.queue;
-    // 溜まりすぎたら古い入力を捨てて追いつく（押した瞬間の入力は引き継ぐ）
-    if (q.length > NET.INPUT_BUFFER_MAX) {
-      while (q.length > 2) {
-        const e = q.shift();
-        g.carry |= e.bits & IN.ONESHOT;
-        this.sim.s.acks[i] = e.seq;
+    if (g.next === null) return g.held;
+    if (++g.adjN >= NET.INPUT_ADJUST_TICKS) {
+      const lead = g.minLead;
+      g.adjN = 0;
+      g.minLead = Infinity;
+      g.highN = lead > NET.INPUT_LEAD_MAX && lead !== Infinity ? g.highN + 1 : 0;
+      if (lead < 1) {
+        // 入力が使う時刻より遅れて届いている: この tick は seq を進めずに待つ（予測とのずれは 1 tick 分だけ）
+        // 大きく遅れているときは、次の判定を早める
+        if (lead < -2) g.adjN = NET.INPUT_ADJUST_TICKS - 6;
+        const bits = g.held | g.carry;
+        g.carry = 0;
+        return bits;
+      }
+      if (g.highN >= 4) {
+        // 余裕がありすぎる状態が 2 秒続いた（操作の反映が遅い）: 1 tick 分飛ばす
+        g.highN = 0;
+        const e = g.queue[0]?.seq === g.next ? g.queue.shift() : null;
+        if (e) {
+          g.carry |= e.bits & IN.ONESHOT;
+          g.held = e.bits & IN.HELD;
+        }
+        g.next++;
       }
     }
-    // 入力が途切れたあとは、2 つ溜まるまで待って滑らかにする。ただし「押した瞬間」の入力（アイテム・復帰・タイミング）は待たずに使う
-    if (!q.length || (g.starved && q.length < 2 && !(q[0].bits & IN.ONESHOT))) {
-      g.starved = true;
-      // 入力が途切れた（タブが裏に回った・通信が詰まった）ら、押しっぱなし扱いを解除する
-      if (++g.starveTicks > 15) g.held = 0;
-      return g.held;
+    // 大きく溜まった（端末が止まっていた等）ときは、一気に追いつく
+    if (g.queue.length > NET.INPUT_BUFFER_MAX) {
+      while (g.queue.length > 4) {
+        const e = g.queue.shift();
+        g.carry |= e.bits & IN.ONESHOT;
+        g.held = e.bits & IN.HELD;
+        g.next = e.seq + 1;
+      }
     }
-    g.starved = false;
-    g.starveTicks = 0;
-    const e = q.shift();
-    g.held = e.bits & IN.HELD;
-    this.sim.s.acks[i] = e.seq;
-    const bits = e.bits | g.carry;
+    while (g.queue.length && g.queue[0].seq < g.next) g.queue.shift();
+    let bits;
+    if (g.queue.length && g.queue[0].seq === g.next) {
+      const e = g.queue.shift();
+      g.held = e.bits & IN.HELD;
+      bits = e.bits;
+    } else {
+      // まだ届いていない: 押しっぱなしで代用する。長く届かない（タブが裏に回った等）なら、押しっぱなしを解除する
+      if (g.next - g.lastSeq > 40) g.held = 0;
+      bits = g.held;
+    }
+    bits |= g.carry;
     g.carry = 0;
+    this.sim.s.acks[i] = g.next;
+    g.next++;
     return bits;
   }
 

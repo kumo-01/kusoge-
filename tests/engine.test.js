@@ -43,7 +43,7 @@ test('エンジン: 古い seq は無視・押しっぱなしの解除・キュ�
   // 入力が途切れたら、押しっぱなし扱いが解除される
   const e2 = started();
   e2.receiveInput(1, 2, [IN.UP, IN.UP]);
-  for (let i = 0; i < 40; i++) e2.step(DT);
+  for (let i = 0; i < 50; i++) e2.step(DT);
   assert.equal(e2.gq[1].held, 0, 'held released after starvation');
   // 追いつけないほど溜まったら、押した瞬間の入力は引き継ぐ
   const e3 = started();
@@ -51,6 +51,35 @@ test('エンジン: 古い seq は無視・押しっぱなしの解除・キュ�
   e3.receiveInput(1, many.length, many);
   e3.step(DT);
   assert.ok(e3.gq[1].queue.length <= 3, 'caught up');
+});
+
+test('エンジン: 送り手の seq と計算の tick は 1 対 1。届いていない tick は押しっぱなしで代用し、遅れに合わせて 1 tick だけ待つ', () => {
+  const e = started();
+  e.receiveInput(1, 4, [IN.UP, IN.UP, IN.UP, IN.UP]);
+  for (let i = 0; i < 4; i++) e.step(DT);
+  assert.equal(e.sim.s.acks[1], 4);
+  // 次の入力がまだ届いていなくても、押しっぱなしで代用して seq を進める（予測と食い違わない）
+  e.step(DT);
+  e.step(DT);
+  assert.equal(e.sim.s.acks[1], 6);
+  assert.equal(e.gq[1].held, IN.UP);
+  // 遅れて届いた分は使わない。押した瞬間の入力（アイテム）だけ次の tick に回す
+  e.sim.s.karts[1].item = 1;
+  e.receiveInput(1, 6, [IN.UP | IN.ITEM, IN.UP]);
+  assert.equal(e.gq[1].queue.length, 0);
+  assert.equal(e.gq[1].carry, IN.ITEM);
+  const ev = e.step(DT);
+  assert.ok(ev.some((x) => x.t === 'use'), 'late item press is still used');
+  // 遅れて届き続けると、ときどき 1 tick だけ seq を進めずに待つ
+  const g = e.gq[1];
+  let stalls = 0;
+  for (let t = 0; t < 120; t++) {
+    const before = g.next;
+    e.receiveInput(1, g.next - 1, [IN.UP]); // いつも 1 tick 遅れて届く
+    e.step(DT);
+    if (g.next === before) stalls++;
+  }
+  assert.ok(stalls >= 1 && stalls <= 6, `stalls ${stalls}`);
 });
 
 test('エンジン: 演出イベントは id つきで、3 回の配信にわたって載る', () => {
