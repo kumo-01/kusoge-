@@ -57,6 +57,29 @@ test('loadIceServers: 失敗・不正な返事・遅すぎるときは null（�
   assert.equal(later, first);
 });
 
+test('Worker: Metered（無料枠のある別サービス）でも認証情報を返し、API キーは返さない', async () => {
+  const env = { METERED_APP: 'myapp', METERED_API_KEY: 'metered-secret', ALLOWED_ORIGINS: '' };
+  const real = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url) => {
+    seen.push(String(url));
+    return { ok: true, json: async () => [{ urls: 'stun:stun.relay.metered.ca:80' }, { urls: 'turn:global.relay.metered.ca:80', username: 'mu', credential: 'mc' }] };
+  };
+  try {
+    const res = await worker.fetch(new Request('https://w.example/'), env);
+    assert.equal(res.status, 200);
+    const text = await res.text();
+    assert.ok(!text.includes('metered-secret'));
+    assert.equal(seen[0], 'https://myapp.metered.live/api/v1/turn/credentials?apiKey=metered-secret');
+    const ice = sanitizeIceServers(JSON.parse(text));
+    assert.ok(ice.some((s) => s.username === 'mu'));
+    // アプリ名に変な文字が入っていたら使わない
+    assert.equal((await worker.fetch(new Request('https://w.example/'), { ...env, METERED_APP: 'evil.example/x?' })).status, 503);
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
 test('Worker: 許可したサイトだけに認証情報を返し、TURN のキーは返さない', async () => {
   const env = { TURN_KEY_ID: 'kid', TURN_KEY_API_TOKEN: 'secret-token', ALLOWED_ORIGINS: 'https://ok.example' };
   const real = globalThis.fetch;

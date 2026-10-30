@@ -5,8 +5,13 @@
 //   GET /  →  { "iceServers": [ { urls: [...], username, credential }, ... ] }
 //
 // 設定（wrangler の secret / vars）:
-//   TURN_KEY_ID         Cloudflare ダッシュボードで作った TURN キーの ID
-//   TURN_KEY_API_TOKEN  その TURN キーの API トークン（secret）
+// 使う TURN サービスは次のどちらか（両方あれば Cloudflare を優先）:
+//   [Cloudflare Realtime TURN]
+//     TURN_KEY_ID         Cloudflare ダッシュボードで作った TURN キーの ID
+//     TURN_KEY_API_TOKEN  その TURN キーの API トークン（secret）
+//   [Metered（Open Relay。無料枠あり）]
+//     METERED_APP         アプリのホスト名（例: myapp.metered.live の myapp の部分）
+//     METERED_API_KEY     API キー（secret）
 //   ALLOWED_ORIGINS     呼び出しを許可するサイト（カンマ区切り。例: https://user.github.io）。空なら制限なし
 
 const TTL_SECONDS = 6 * 60 * 60; // 認証情報の有効期間
@@ -34,20 +39,30 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     if (request.method !== 'GET') return new Response('method not allowed', { status: 405, headers: cors });
     if (!originOk) return new Response('forbidden', { status: 403, headers: cors });
-    if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return new Response('not configured', { status: 503, headers: cors });
+    const useCloudflare = !!(env.TURN_KEY_ID && env.TURN_KEY_API_TOKEN);
+    const useMetered = !useCloudflare && !!(env.METERED_APP && env.METERED_API_KEY && /^[a-z0-9-]{1,63}$/i.test(env.METERED_APP));
+    if (!useCloudflare && !useMetered) return new Response('not configured', { status: 503, headers: cors });
 
-    const cacheKey = new Request(`https://turn-credentials.invalid/${env.TURN_KEY_ID}`);
+    const cacheKey = new Request(`https://turn-credentials.invalid/${useCloudflare ? env.TURN_KEY_ID : env.METERED_APP}`);
     const cache = typeof caches !== 'undefined' ? caches.default : null;
     const hit = cache ? await cache.match(cacheKey) : null;
     if (hit) return new Response(hit.body, { status: 200, headers: { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
-    const res = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${env.TURN_KEY_API_TOKEN}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ ttl: TTL_SECONDS }),
-    });
-    if (!res.ok) return new Response('upstream error', { status: 502, headers: cors });
-    const data = await res.json();
+    let data;
+    if (useCloudflare) {
+      const res = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${env.TURN_KEY_API_TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ ttl: TTL_SECONDS }),
+      });
+      if (!res.ok) return new Response('upstream error', { status: 502, headers: cors });
+      data = await res.json();
+    } else {
+      // Metered は iceServers の配列そのものを返す
+      const res = await fetch(`https://${env.METERED_APP}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(env.METERED_API_KEY)}`);
+      if (!res.ok) return new Response('upstream error', { status: 502, headers: cors });
+      data = { iceServers: await res.json() };
+    }
     const iceServers = Array.isArray(data?.iceServers) ? data.iceServers : data?.iceServers ? [data.iceServers] : [];
     const body = JSON.stringify({ iceServers });
     if (cache) await cache.put(cacheKey, new Response(body, { headers: { 'cache-control': `max-age=${CACHE_SECONDS}` } }));

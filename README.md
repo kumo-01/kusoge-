@@ -206,6 +206,10 @@ TURN の鍵を隠すための小さな Worker（`worker/turn/`、Workers の無�
    （`worker/turn/wrangler.toml` の `ALLOWED_ORIGINS` は、公開しているサイトのドメインに合わせてください）
 5. 同じ画面の **Variables** に `TURN_URL` として、その Worker の URL を登録し、Pages のデプロイをもう一度走らせる
 
+**Cloudflare でカード登録を求められる場合**は、無料枠のある別サービスの [Metered（Open Relay）](https://www.metered.ca/tools/openrelay/)（月 20 GB まで。カード登録の要否は未確認）も使えます。
+Worker の Secret を `TURN_KEY_ID` / `TURN_KEY_API_TOKEN` の代わりに `METERED_APP`（アプリ名）と `METERED_API_KEY`（API キー）にするだけです。
+（実際の Metered との接続は未確認です。）
+
 **GitHub Actions を使わず、Cloudflare の画面だけで済ませる方法**もあります（Workers & Pages に GitHub リポジトリをつなぐ）。
 その場合は、プロジェクトの **Settings → Build** で、ルートディレクトリを `worker/turn`、ビルドコマンドは空、デプロイコマンドを `npx wrangler deploy` にし、
 プロジェクト名を `worker/turn/wrangler.toml` の `name`（`kusoge`）と同じにします。
