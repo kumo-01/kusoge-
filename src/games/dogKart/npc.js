@@ -50,7 +50,7 @@ export function npcInput(sim, k, dt) {
 
   // 人間との差で手加減・追い上げ（ラバーバンド）
   let best = -Infinity;
-  for (let i = 0; i < 2 && i < s.karts.length; i++) best = Math.max(best, sim.prog[i]);
+  for (let i = 0; i < sim.humans && i < s.karts.length; i++) best = Math.max(best, sim.prog[i]);
   const gap = sim.prog[k.i] - best;
   const boss = !!k.boss; // ボス犬: 速く、ラインがきれいで、カーブでも減速が少なく、アイテムも上手に使う
   if (boss) k.ms = gap > BOSS.FAR_DIST ? BOSS.SPEED_FAR : gap < -BOSS.BEHIND_DIST ? BOSS.SPEED_BEHIND : BOSS.SPEED;

@@ -1727,9 +1727,9 @@ export class World {
   }
 
   /** 車の見た目を必要な台数だけ用意する（NPC の数はスナップショットで決まる） */
-  ensureKarts(n, boss = -1) {
-    while (this.karts.length < n) {
-      const k = new KartView(this.karts.length === boss ? 6 : this.karts.length); // 6 = ボス犬の見た目
+  ensureKarts(styles) {
+    while (this.karts.length < styles.length) {
+      const k = new KartView(styles[this.karts.length]); // 見た目の番号（6 = ボス犬）
       this.scene.add(k.group, k.blob);
       this.karts.push(k);
     }

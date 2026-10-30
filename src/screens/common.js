@@ -1,13 +1,16 @@
 // 画面共通のパーツ（犬のアバター、プレイヤーカードなど）
 import { h } from '../core/util.js';
 
-export const PLAYERS = {
-  host: { name: '柴犬', role: 'ホスト', kind: 'shiba', color: 'red' },
-  guest: { name: 'コーギー', role: 'ゲスト', kind: 'corgi', color: 'blue' },
-};
+/** 席ごとの見た目（席 0 = ホスト, 1・2 = ゲスト）。ゲーム中の車の見た目・名前と同じ */
+export const PLAYERS = [
+  { name: '柴犬', role: 'ホスト', kind: 'shiba', color: 'red', colorName: '赤', icon: '🔴' },
+  { name: 'コーギー', role: 'ゲスト1', kind: 'corgi', color: 'blue', colorName: '青', icon: '🔵' },
+  { name: 'プードル', role: 'ゲスト2', kind: 'poodle', color: 'pink', colorName: 'ピンク', icon: '🩷' },
+];
 
 /** 犬の顔の SVG（外部画像なし） */
 export function dogAvatar(kind, size = 96) {
+  if (kind === 'poodle') return poodleAvatar(size);
   const shiba = kind === 'shiba';
   const fur = shiba ? '#f2a04b' : '#e8893a';
   const furDark = shiba ? '#d9822e' : '#c96d22';
@@ -41,6 +44,27 @@ export function dogAvatar(kind, size = 96) {
   </svg>`;
 }
 
+/** プードル（ピンクのふわふわ） */
+function poodleAvatar(size) {
+  const fur = '#f6b3d6';
+  const furDark = '#d98ab7';
+  return `<svg viewBox="0 0 120 120" width="${size}" height="${size}" aria-hidden="true">
+    <ellipse cx="22" cy="62" rx="16" ry="30" fill="${fur}" stroke="${furDark}" stroke-width="2"/>
+    <ellipse cx="98" cy="62" rx="16" ry="30" fill="${fur}" stroke="${furDark}" stroke-width="2"/>
+    <circle cx="60" cy="22" r="17" fill="${fur}" stroke="${furDark}" stroke-width="2"/>
+    <circle cx="44" cy="28" r="11" fill="${fur}" stroke="${furDark}" stroke-width="2"/>
+    <circle cx="76" cy="28" r="11" fill="${fur}" stroke="${furDark}" stroke-width="2"/>
+    <ellipse cx="60" cy="68" rx="36" ry="34" fill="#fff0f7" stroke="${furDark}" stroke-width="2"/>
+    <ellipse cx="46" cy="62" rx="5.5" ry="6.5" fill="#2b2118"/><circle cx="48" cy="59.5" r="2" fill="#fff"/>
+    <ellipse cx="74" cy="62" rx="5.5" ry="6.5" fill="#2b2118"/><circle cx="76" cy="59.5" r="2" fill="#fff"/>
+    <ellipse cx="60" cy="77" rx="7" ry="5" fill="#2b2118"/><circle cx="58" cy="75.5" r="1.6" fill="#fff"/>
+    <path d="M60 82 Q60 89 53 89 M60 82 Q60 89 67 89" stroke="#2b2118" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+    <path d="M56 92 Q60 104 64 92 Z" fill="#ff7a93"/>
+    <ellipse cx="33" cy="78" rx="6" ry="3.6" fill="#ff9aa8" opacity=".75"/>
+    <ellipse cx="87" cy="78" rx="6" ry="3.6" fill="#ff9aa8" opacity=".75"/>
+  </svg>`;
+}
+
 const LINK_LABEL = {
   connected: ['オンライン', 'ok'],
   waiting: ['復帰待ち', 'warn'],
@@ -56,28 +80,42 @@ export function statusPill(state, extra) {
   return h(`span.pill.pill-${tone}`, null, h('span.dot'), label, extra ? ` ${extra}` : '');
 }
 
-/** プレイヤーカード */
-export function playerCard(who, { me = false, status = 'connected', ready = null, extra = null } = {}) {
-  const p = PLAYERS[who];
+/** プレイヤーカード。slot: 席（0 = ホスト, 1・2 = ゲスト） */
+export function playerCard(slot, { me = false, status = 'connected', ready = null, extra = null } = {}) {
+  const p = PLAYERS[slot];
+  const empty = status === 'none';
   return h(
-    `div.player-card.player-${p.color}${me ? '.is-me' : ''}`,
+    `div.player-card.player-${p.color}${me ? '.is-me' : ''}${empty ? '.is-empty' : ''}`,
     null,
     me ? h('span.me-badge', null, 'あなた') : null,
     h('div.avatar', { html: dogAvatar(p.kind, 88) }),
     h('div.player-name', null, p.name),
-    h('div.player-role', null, `${p.role}・${p.color === 'red' ? '赤' : '青'}のカート`),
+    h('div.player-role', null, `${p.role}・${p.colorName}のカート`),
     statusPill(status),
-    ready === null ? null : h(`div.ready-badge${ready ? '.on' : ''}`, null, ready ? '✔ 準備OK' : '準備中…'),
+    ready === null || empty ? null : h(`div.ready-badge${ready ? '.on' : ''}`, null, ready ? '✔ 準備OK' : '準備中…'),
     extra,
   );
 }
 
-export function guestStatusFor(app) {
-  return app.room.role === 'host' ? app.room.state.guest : app.room.state?.guest || 'connected';
+/** 席 slot のつながり具合（ホスト・ゲストどちらの画面からでも同じ見方） */
+export function linkFor(app, slot) {
+  const room = app.room;
+  const s = room.state;
+  if (room.role === 'host') return slot === 0 ? 'connected' : s.players[slot].link;
+  if (slot === 0) {
+    const ls = room.linkState;
+    return ls === 'connected' ? 'connected' : ls === 'failed' ? 'failed' : 'reconnecting';
+  }
+  if (slot === room.slot) return room.linkState === 'connected' ? 'connected' : 'reconnecting';
+  return s?.players?.[slot]?.link || 'none';
 }
 
-export function hostStatusFor(app) {
-  if (app.room.role === 'host') return 'connected';
-  const ls = app.room.linkState;
-  return ls === 'connected' ? 'connected' : ls === 'failed' ? 'failed' : 'reconnecting';
+/** 部屋の人数のまとめ（使われている席・全員つながっているか・開始に足りているか） */
+export function roomSummary(state) {
+  const occupied = state.players.map((p, i) => (p.link !== 'none' ? i : -1)).filter((i) => i >= 0);
+  return {
+    occupied,
+    allConnected: state.players.every((p) => p.link === 'none' || p.link === 'connected'),
+    enough: occupied.length >= 2,
+  };
 }

@@ -20,7 +20,7 @@ export function mount(el, app) {
         h('div.hero-dog.bounce-a', { html: dogAvatar('shiba', 110) }),
         h('div.hero-vs', null, 'VS'),
         h('div.hero-dog.bounce-b', { html: dogAvatar('corgi', 110) })),
-      h('h1.logo', null, h('span.logo-sub', null, '2人で遊ぶミニゲーム集'), 'わんわんパーティー'),
+      h('h1.logo', null, h('span.logo-sub', null, '2〜3人で遊ぶミニゲーム集'), 'わんわんパーティー'),
       h('p.lead', null, '招待URLを送るだけで、友だちとオンライン対戦！'),
     );
   }
@@ -41,7 +41,7 @@ export function mount(el, app) {
           { onclick: () => app.createRoom(), disabled: info.busy },
           info.busy ? '部屋を作っています…' : '🏠 部屋を作る',
         ),
-        h('p.small', null, '部屋を作るとあなたが「ホスト（柴犬）」になります。表示された招待URLを相手に送ってください。'),
+        h('p.small', null, '部屋を作るとあなたが「ホスト（柴犬）」になります。表示された招待URLを、遊ぶ相手（1〜2人）に送ってください。'),
         h('p.small.muted', null, '招待された人は、URLを開くだけで参加できます（コード入力は不要）。'),
       ),
     );
@@ -58,15 +58,15 @@ export function mount(el, app) {
         'div.card.connect-card',
         null,
         h('h2', null, '🎉 部屋ができました！'),
-        h('p', null, 'この招待URLを相手に送ってください。'),
+        h('p', null, 'この招待URLを相手に送ってください。最大3人（ホスト + ゲスト2人）で遊べます。'),
         h('div.invite-row', null,
           input,
           h('button.btn.btn-secondary', { onclick: () => app.copyText(url) }, '📋 コピー')),
-        h('div.waiting', null, h('span.paw-spinner', null, '🐾'), 'ゲストの参加を待っています…'),
+        h('div.waiting', null, h('span.paw-spinner', null, '🐾'), 'ゲストの参加を待っています…（1人でもそろえば先へ進めます）'),
         signalingNote(room),
         h('details.hint', null,
           h('summary', null, '1台のPCでテストするには？'),
-          h('p', null, '別のブラウザ、またはシークレットウィンドウでこのURLを開くと、2人目として参加できます。同じブラウザの別タブでも参加できます。')),
+          h('p', null, '別のブラウザ、またはシークレットウィンドウでこのURLを開くと、2人目として参加できます（3人目も同じ方法です）。同じブラウザの別タブでも参加できます。')),
         h('button.btn.btn-ghost', { onclick: () => app.disband() }, '部屋を閉じる'),
       ),
     );
@@ -100,7 +100,7 @@ export function mount(el, app) {
         'div.card.connect-card',
         null,
         h('div.waiting.big', null, h('span.paw-spinner', null, '🐾'), label),
-        h('p.small.muted', null, 'あなたは「ゲスト（コーギー）」として参加します。'),
+        h('p.small.muted', null, 'あなたは「ゲスト」として参加します（1人目はコーギー、2人目はプードル）。'),
         h('button.btn.btn-ghost', { onclick: () => app.goTop() }, 'やめて戻る'),
       ),
     );

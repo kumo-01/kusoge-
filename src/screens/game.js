@@ -1,6 +1,7 @@
 // ⑤ ゲーム画面のオーバーレイ（3D描画とHUDはゲームモジュールが担当）
 // ホスト専用ボタン（一時停止・中止・解散）と、一時停止/再接続/再開カウントダウンの表示。
 import { h, now } from '../core/util.js';
+import { PLAYERS } from './common.js';
 
 const REASON_TEXT = {
   disconnect: '通信が切れたため一時停止中',
@@ -65,9 +66,17 @@ export function mount(el, app) {
       : h('div.game-topbar', null, muteBtn);
 
     let panel = null;
-    if (m && m.status === 'loading') {
+    const guests = (m?.players || []).filter((slot) => slot > 0);
+    const sitting = !isHost && m && !m.players.includes(room.slot);
+    if (sitting) {
+      // この試合に参加していない人（試合の途中で入ってきた人）は、終わるまで待つ
       panel = h('div.pause-panel.card', null,
-        h('div.waiting.big', null, h('span.paw-spinner', null, '🐾'), isHost ? (s.guest === 'connected' || s.guest === 'syncing' ? 'ゲストの読み込みを待っています…' : 'ゲストの接続を待っています…') : 'ゲームを読み込んでいます…'),
+        h('div.waiting.big', null, h('span.paw-spinner', null, '🐾'), 'いま対戦中です。終わるまでお待ちください'),
+        h('p.small.muted', null, '次のレースから参加できます。'));
+    } else if (m && m.status === 'loading') {
+      const away = guests.some((g) => s.players[g].link !== 'connected' && s.players[g].link !== 'syncing');
+      panel = h('div.pause-panel.card', null,
+        h('div.waiting.big', null, h('span.paw-spinner', null, '🐾'), isHost ? (away ? 'みんなの接続を待っています…' : 'みんなの読み込みを待っています…') : 'ゲームを読み込んでいます…'),
         isHost ? hostPanelButtons(false) : null);
     } else if (m && m.status === 'paused') {
       panel = h('div.pause-panel.card', null,
@@ -82,13 +91,18 @@ export function mount(el, app) {
   }
 
   function statusLine(room) {
+    const m = room.state.match;
     if (room.role === 'host') {
-      const g = room.state.guest;
-      if (g === 'waiting') return h('div.waiting', null, h('span.paw-spinner', null, '🐾'), 'ゲストの再接続を待っています…（時間制限なし）');
-      if (g === 'none') return h('p.warn-text', null, 'ゲストが退出しました。ゲームを中止してください。');
-      if (g === 'syncing') return h('div.waiting', null, h('span.paw-spinner', null, '🔄'), 'ゲストにゲーム状態を送っています…');
+      const guests = (m?.players || []).filter((slot) => slot > 0);
+      const name = (slot) => PLAYERS[slot].role;
+      const waiting = guests.filter((g) => room.state.players[g].link === 'waiting');
+      const left = guests.filter((g) => room.state.players[g].link === 'none');
+      const syncing = guests.filter((g) => room.state.players[g].link === 'syncing');
+      if (waiting.length) return h('div.waiting', null, h('span.paw-spinner', null, '🐾'), `${waiting.map(name).join('・')}の再接続を待っています…（時間制限なし）`);
+      if (left.length) return h('p.warn-text', null, `${left.map(name).join('・')}が退出しました。ゲームを中止してください。`);
+      if (syncing.length) return h('div.waiting', null, h('span.paw-spinner', null, '🔄'), `${syncing.map(name).join('・')}にゲーム状態を送っています…`);
       if (room.state.hostHidden) return h('p.small', null, 'このタブに戻ると再開できます。');
-      return h('p.ok-text', null, '✔ ゲストと同期しました。再開できます！');
+      return h('p.ok-text', null, '✔ みんなと同期しました。再開できます！');
     }
     if (room.linkState !== 'connected') return h('div.waiting', null, h('span.paw-spinner', null, '🐾'), 'ホストに再接続しています…');
     if (!room.isSynced) return h('div.waiting', null, h('span.paw-spinner', null, '🔄'), 'ゲーム状態を復元しています…');
@@ -104,7 +118,7 @@ export function mount(el, app) {
   }
 
   async function confirmAbort() {
-    const ok = await app.confirm({ title: 'ゲームを中止しますか？', text: '2人ともゲーム選択画面に戻ります。', ok: '中止する', danger: true });
+    const ok = await app.confirm({ title: 'ゲームを中止しますか？', text: '全員がゲーム選択画面に戻ります。', ok: '中止する', danger: true });
     if (ok) app.room.abortGame?.();
   }
 

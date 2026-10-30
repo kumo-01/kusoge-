@@ -1,7 +1,8 @@
 // ④ 準備画面: 遊び方の表示と準備完了ボタン
 import { h, now } from '../core/util.js';
 import { getGame } from '../games/registry.js';
-import { playerCard, guestStatusFor, hostStatusFor } from './common.js';
+import { playerCard, linkFor, roomSummary } from './common.js';
+import { MAX_PLAYERS } from '../core/protocol.js';
 
 export function mount(el, app) {
   let countdownEl = null;
@@ -35,10 +36,11 @@ export function mount(el, app) {
     const s = room.state;
     const isHost = room.role === 'host';
     const def = getGame(s.gameId);
-    const me = isHost ? 'host' : 'guest';
-    const myReady = s.ready[me];
-    const guest = guestStatusFor(app);
-    countdownEl = h('div.start-countdown', { hidden: true }, h('div.cd-label', null, '2人とも準備OK！まもなく開始'), h('div.cd-num', null, '3'));
+    const myReady = s.players[room.slot]?.ready === true;
+    const sum = roomSummary(s);
+    const cards = [];
+    for (let i = 0; i < MAX_PLAYERS; i++) cards.push(playerCard(i, { me: i === room.slot, status: linkFor(app, i), ready: s.players[i].ready }));
+    countdownEl = h('div.start-countdown', { hidden: true }, h('div.cd-label', null, '全員準備OK！まもなく開始'), h('div.cd-num', null, '3'));
     lastShown = null;
 
     el.replaceChildren(
@@ -58,21 +60,19 @@ export function mount(el, app) {
               ? h('table.controls', null,
                   h('tbody', null, def.controls.map(([k, v]) => h('tr', null, h('td', null, h('kbd', null, k)), h('td', null, v)))))
               : null,
-            def?.tips?.length ? [h('h3', null, '💡 ルール'), h('ul.tips', null, def.tips.map((t) => h('li', null, t))), h('p.small', null, '🏁 先に3周したほうが勝ち！')] : null,
+            def?.tips?.length ? [h('h3', null, '💡 ルール'), h('ul.tips', null, def.tips.map((t) => h('li', null, t))), h('p.small', null, '🏁 人間のうち、先に3周した人が勝ち！')] : null,
           ),
           h(
             'div.ready-side',
             null,
             optionsCard(def, s, isHost),
-            h('div.players-row.compact', null,
-              playerCard('host', { me: isHost, status: hostStatusFor(app), ready: s.ready.host }),
-              playerCard('guest', { me: !isHost, status: guest, ready: s.ready.guest })),
+            h('div.players-row.compact.three', null, cards),
             h(
               `button.btn.btn-xl.${myReady ? 'btn-ghost' : 'btn-primary'}`,
               { onclick: () => { app.sound.play('ready'); room.setReady(!myReady); } },
               myReady ? '準備完了を取り消す' : '✋ 準備完了！',
             ),
-            guest !== 'connected' ? h('p.small.warn-text', null, 'ゲストの接続を待っています…（2人そろうと開始できます）') : null,
+            !sum.enough ? h('p.small.warn-text', null, '相手の参加を待っています…（2人以上そろうと開始できます。最大3人）') : !sum.allConnected ? h('p.small.warn-text', null, '接続が切れている人を待っています…') : null,
             isHost ? h('button.btn.btn-ghost', { onclick: () => room.goSelect() }, '← ゲーム選択へ戻る') : null,
             countdownEl,
           ),

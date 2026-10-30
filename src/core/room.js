@@ -2,10 +2,10 @@
 //
 // room state（ゲストへ room_state で配信）:
 //   screen: 'lobby'（ゲスト待ち） | 'home' | 'select' | 'ready' | 'game' | 'result'
-//   guest:  'none' | 'connected' | 'waiting'（復帰待ち） | 'syncing'（状態復元中）
-//   ready:  { host, guest }
-//   gameId, match: { matchId, gen, status: 'loading'|'running'|'paused'|'resuming', reason, synced, started, opts }
-//   series: 連戦の途中経過 { total, round, host, guest, final, history } または null（1 レースだけのとき）
+//   players: 席ごとの [{ link, ready }]（席 0 = ホスト, 1・2 = ゲスト）。
+//            link: 'none'（空き） | 'connected' | 'waiting'（復帰待ち） | 'syncing'（状態復元中）
+//   gameId, match: { matchId, gen, status: 'loading'|'running'|'paused'|'resuming', reason, synced, started, players（参加する席）, opts }
+//   series: 連戦の途中経過 { total, round, scores（席ごと）, final, history } または null（1 レースだけのとき）
 //   result
 //
 // 通信状態（guest フィールド・ゲスト側の linkState）は画面状態とは独立して管理する。
@@ -15,8 +15,11 @@ import { Emitter, randomHex, now } from './util.js';
 import { HostNetwork, GuestNetwork, describePeerError } from './network.js';
 import { GameManager } from './gameManager.js';
 import { getGame, defaultOptions, validOptions, resolveMatchOptions } from '../games/registry.js';
-import { sanitizeRoomState, sanitizeResult, REJECT_REASONS } from './protocol.js';
+import { sanitizeRoomState, sanitizeResult, REJECT_REASONS, MAX_PLAYERS } from './protocol.js';
 import { clearGuestSession } from './reconnect.js';
+
+/** 席の呼び名（トーストなどに使う） */
+export const PLAYER_LABEL = ['ホスト', 'ゲスト1', 'ゲスト2'];
 
 export const ROOM_CONFIG = {
   START_DELAY_MS: 2500, // 2人準備完了 → ゲーム画面へ移るまで
@@ -30,12 +33,12 @@ export class HostRoom extends Emitter {
   constructor({ sound, music, input, layer }) {
     super();
     this.role = 'host';
+    this.slot = 0;
     this.sound = sound;
     this.state = {
       rev: 0,
       screen: 'lobby',
-      guest: 'none',
-      ready: { host: false, guest: false },
+      players: Array.from({ length: MAX_PLAYERS }, (_, i) => ({ link: i === 0 ? 'connected' : 'none', ready: false })),
       gameId: null,
       options: {},
       match: null,
@@ -44,15 +47,16 @@ export class HostRoom extends Emitter {
       hostHidden: document.visibilityState === 'hidden',
     };
     this.signaling = 'connecting';
-    this.lastGuestMsgAt = 0;
+    this.lastMsgAt = Array.from({ length: MAX_PLAYERS }, () => 0); // 席ごとの最後の受信時刻（巻き戻しに使う）
     this.resumeAt = 0;
     this._startAt = 0;
     this._startTimer = null;
     this._resumeTimer = null;
+    this._acks = new Set(); // いまの世代の状態を読み込んだ（ACK した）席
     this._used = {}; // 連戦でこれまでに使った設定（ランダムのコースを重ねないため）
     this.closed = false;
     this.net = new HostNetwork({ getRoomState: () => this.publicState() });
-    this.gm = new GameManager({ role: 'host', net: this.net, input, sound, music, layer });
+    this.gm = new GameManager({ role: 'host', slot: 0, net: this.net, input, sound, music, layer });
     this._onVisibility = () => this._visibilityChanged();
     document.addEventListener('visibilitychange', this._onVisibility);
   }
@@ -64,18 +68,31 @@ export class HostRoom extends Emitter {
     return this.net.rtt;
   }
 
+  /** 席 0（ホスト）を含めて、使われている席（つながっていなくても戻りを待っている席も含む） */
+  get occupied() {
+    return this.state.players.map((p, i) => (p.link !== 'none' ? i : -1)).filter((i) => i >= 0);
+  }
+  /** 使われている席がすべてつながっているか */
+  get allConnected() {
+    return this.state.players.every((p) => p.link === 'none' || p.link === 'connected');
+  }
+  /** 席の数が 2 人以上そろっているか */
+  get enoughPlayers() {
+    return this.occupied.length >= 2;
+  }
+
   async create() {
     await this.net.create();
     const net = this.net;
     net.on('guest-connected', (info) => this._guestConnected(info));
-    net.on('guest-disconnected', () => this._guestLost('waiting'));
-    net.on('guest-left', () => {
-      this._toast('ゲストが退出しました');
-      this._guestLost('none');
+    net.on('guest-disconnected', ({ slot }) => this._guestLost(slot, 'waiting'));
+    net.on('guest-left', ({ slot }) => {
+      this._toast(`${PLAYER_LABEL[slot]}が退出しました`);
+      this._guestLost(slot, 'none');
     });
-    net.on('message', (msg) => {
-      this.lastGuestMsgAt = now();
-      this._onGuestMessage(msg);
+    net.on('message', (msg, slot) => {
+      this.lastMsgAt[slot] = now();
+      this._onGuestMessage(msg, slot);
     });
     net.on('signaling', (s) => {
       this.signaling = s;
@@ -90,10 +107,10 @@ export class HostRoom extends Emitter {
     const s = this.state;
     return {
       ...s,
-      ready: { ...s.ready },
+      players: s.players.map((p) => ({ ...p })),
       options: { ...s.options },
-      match: s.match ? { ...s.match, opts: { ...s.match.opts } } : null,
-      series: s.series ? { ...s.series, history: s.series.history.map((x) => ({ ...x })) } : null,
+      match: s.match ? { ...s.match, players: [...s.match.players], opts: { ...s.match.opts } } : null,
+      series: s.series ? { ...s.series, scores: [...s.series.scores], history: s.series.history.map((x) => ({ ...x, points: [...x.points] })) } : null,
       startInMs: this._startAt ? Math.max(0, this._startAt - now()) : null,
     };
   }
@@ -110,47 +127,59 @@ export class HostRoom extends Emitter {
     this.emit('toast', text);
   }
 
+  /** 試合に参加しているゲストの席（ホストを除く） */
+  _guestsInMatch() {
+    return (this.state.match?.players || []).filter((slot) => slot > 0);
+  }
+
   // ---- 接続イベント ----
-  _guestConnected({ rejoin, replaced }) {
+  _guestConnected({ slot, rejoin, replaced }) {
     this.sound.play('join');
-    this._toast(rejoin ? 'ゲストが戻ってきました！' : 'ゲストが参加しました！');
+    this._toast(rejoin ? `${PLAYER_LABEL[slot]}が戻ってきました！` : `${PLAYER_LABEL[slot]}が参加しました！`);
     const s = this.state;
+    const me = s.players[slot];
     if (s.screen === 'lobby') s.screen = 'home';
     if (s.screen === 'ready') this._resetReady();
-    if (s.screen === 'game' && s.match) {
-      // 再接続したゲストは状態を失っている可能性があるので、必ず一時停止して完全同期する
-      if (s.match.status === 'running' || s.match.status === 'resuming') this._pauseMatch('disconnect', replaced);
-      s.guest = 'syncing';
+    const inMatch = s.screen === 'game' && s.match && s.match.players.includes(slot);
+    if (inMatch) {
+      // 再接続したゲストは状態を失っている可能性があるので、必ず一時停止して全員に完全同期する
+      if (s.match.status === 'running' || s.match.status === 'resuming') this._pauseMatch('disconnect', replaced, slot);
+      me.link = 'syncing';
       if (this.gm.game && this.gm.matchId === s.match.matchId) this._sendFullSync();
     } else {
-      s.guest = 'connected';
+      me.link = 'connected';
     }
-    this.lastGuestMsgAt = now(); // 巻き戻し（古い接続の最終受信時刻を使う）の後で更新する
+    this.lastMsgAt[slot] = now(); // 巻き戻し（古い接続の最終受信時刻を使う）の後で更新する
     this._changed();
   }
 
-  _guestLost(next) {
+  _guestLost(slot, next) {
     const s = this.state;
-    if (s.guest === next) return;
-    if (next === 'waiting') this._toast('ゲストとの通信が切れました。再接続を待っています…');
-    s.guest = next;
+    const me = s.players[slot];
+    if (me.link === next) return;
+    if (next === 'waiting') this._toast(`${PLAYER_LABEL[slot]}との通信が切れました。再接続を待っています…`);
+    me.link = next;
+    me.ready = false;
     if (s.screen === 'ready') this._resetReady();
-    if (s.screen === 'game' && s.match) this._pauseMatch('disconnect', true);
+    this._acks.delete(slot);
+    // 参加者がいなくなったら一時停止（戻ってくるのを待つか、ホストがゲームを中止する）
+    if (s.screen === 'game' && s.match && s.match.players.includes(slot)) this._pauseMatch('disconnect', true, slot);
     this._changed();
   }
 
-  _onGuestMessage(msg) {
+  _onGuestMessage(msg, slot) {
     const s = this.state;
     switch (msg.type) {
       case 'ready_change':
-        if (s.screen === 'ready') this._setReady('guest', msg.ready);
+        if (s.screen === 'ready') this._setReady(slot, msg.ready);
         break;
       case 'resume_ack': {
         const m = s.match;
-        if (!m || msg.matchId !== m.matchId || msg.gen !== m.gen) return;
-        m.synced = true;
-        s.guest = 'connected';
-        if (!m.started && !s.hostHidden) {
+        if (!m || msg.matchId !== m.matchId || msg.gen !== m.gen || !m.players.includes(slot)) return;
+        this._acks.add(slot);
+        s.players[slot].link = 'connected';
+        this._updateSynced();
+        if (m.synced && !m.started && !s.hostHidden) {
           this._startRunning(0); // 初回開始はレース内のカウントダウンがあるので即開始
         } else {
           this._changed();
@@ -159,11 +188,18 @@ export class HostRoom extends Emitter {
       }
       case 'player_input':
       case 'game_msg':
-        if (s.screen === 'game') this.gm.handleMessage(msg);
+        if (s.screen === 'game') this.gm.handleMessage(msg, slot);
         break;
       default:
         break;
     }
+  }
+
+  /** 試合の参加者（ゲスト）全員が、いまの世代の状態を読み込んだか */
+  _updateSynced() {
+    const m = this.state.match;
+    if (!m) return;
+    m.synced = this._guestsInMatch().every((slot) => this._acks.has(slot) && this.state.players[slot].link === 'connected');
   }
 
   _visibilityChanged() {
@@ -183,7 +219,7 @@ export class HostRoom extends Emitter {
 
   // ---- 準備 ----
   _resetReady() {
-    this.state.ready = { host: false, guest: false };
+    for (const p of this.state.players) p.ready = false;
     this._cancelStart();
   }
 
@@ -193,10 +229,12 @@ export class HostRoom extends Emitter {
     this._startAt = 0;
   }
 
-  _setReady(who, value) {
+  /** 使われている席の全員がつながっていて準備完了なら、開始のカウントを始める */
+  _setReady(slot, value) {
     const s = this.state;
-    s.ready[who] = value;
-    if (s.ready.host && s.ready.guest && s.guest === 'connected') {
+    s.players[slot].ready = value;
+    const ok = this.enoughPlayers && this.allConnected && this.occupied.every((i) => s.players[i].ready);
+    if (ok) {
       if (!this._startTimer) {
         this._startAt = now() + ROOM_CONFIG.START_DELAY_MS;
         this._startTimer = setTimeout(() => this._beginMatch(), ROOM_CONFIG.START_DELAY_MS);
@@ -248,7 +286,7 @@ export class HostRoom extends Emitter {
   }
 
   setReady(value) {
-    if (this.state.screen === 'ready') this._setReady('host', value);
+    if (this.state.screen === 'ready') this._setReady(0, value);
   }
 
   async _beginMatch() {
@@ -256,13 +294,13 @@ export class HostRoom extends Emitter {
     this._startTimer = null;
     this._startAt = 0;
     const def = getGame(s.gameId);
-    if (s.screen !== 'ready' || !def || !(s.ready.host && s.ready.guest) || s.guest !== 'connected') {
+    if (s.screen !== 'ready' || !def || !this.enoughPlayers || !this.allConnected || !this.occupied.every((i) => s.players[i].ready)) {
       this._changed();
       return;
     }
     // 連戦（設定 races が 2 以上）は、結果画面から「次のレースへ」で続ける
     const races = validOptions(def, s.options).races | 0;
-    s.series = races > 1 ? { total: races, round: 1, host: 0, guest: 0, final: false, history: [] } : null;
+    s.series = races > 1 ? { total: races, round: 1, scores: Array.from({ length: MAX_PLAYERS }, () => 0), final: false, history: [] } : null;
     this._used = {};
     await this._launchMatch(def);
   }
@@ -271,15 +309,17 @@ export class HostRoom extends Emitter {
   async _launchMatch(def) {
     const s = this.state;
     const matchId = randomHex(8);
+    const players = this.occupied; // 参加する席（ホストが先頭）。車はこの順
     const opts = { ...resolveMatchOptions(def, s.options, this._used), round: s.series?.round ?? 1 };
     for (const opt of def.options || []) if (opt.choices.some((c) => c.random)) (this._used[opt.key] ||= []).push(opts[opt.key]);
     s.screen = 'game';
-    s.ready = { host: false, guest: false };
+    for (const p of s.players) p.ready = false;
     s.result = null;
-    s.match = { matchId, gen: 1, status: 'loading', reason: null, synced: false, started: false, opts };
+    s.match = { matchId, gen: 1, status: 'loading', reason: null, synced: false, started: false, players, opts };
+    this._acks.clear();
     this._changed();
     try {
-      await this.gm.create(def, matchId, 1, opts);
+      await this.gm.create(def, matchId, 1, opts, players);
       await this.gm.firstFrame;
     } catch (err) {
       console.error(err);
@@ -296,20 +336,26 @@ export class HostRoom extends Emitter {
   nextRace() {
     const s = this.state;
     const def = getGame(s.gameId);
-    if (s.screen !== 'result' || !s.series || s.series.final || !def || s.guest !== 'connected') return;
+    if (s.screen !== 'result' || !s.series || s.series.final || !def || !this.enoughPlayers || !this.allConnected) return;
     s.series.round++;
     this._launchMatch(def);
   }
 
-  /** ゲストへ完全な状態を送り、ACK を待つ */
+  /** 試合に参加しているゲスト全員へ完全な状態を送り、ACK を待つ */
   _sendFullSync() {
     const m = this.state.match;
     if (!m || !this.gm.game) return;
     m.gen++;
     m.synced = false;
+    this._acks.clear();
     this.gm.setGen(m.gen);
-    this.state.guest = 'syncing';
-    this.net.send({ type: 'game_start', gameId: this.state.gameId, matchId: m.matchId, gen: m.gen, snapshot: this.gm.getSnapshot() });
+    const msg = { type: 'game_start', gameId: this.state.gameId, matchId: m.matchId, gen: m.gen, snapshot: this.gm.getSnapshot() };
+    for (const slot of this._guestsInMatch()) {
+      if (!this.net.isConnected(slot)) continue;
+      this.state.players[slot].link = 'syncing';
+      this.net.sendTo(slot, msg);
+    }
+    this._updateSynced();
   }
 
   _startRunning(delayMs) {
@@ -337,15 +383,15 @@ export class HostRoom extends Emitter {
     this._changed();
   }
 
-  /** ゲームを一時停止する。rollback=true なら切断を検出する前の状態へ巻き戻す */
-  _pauseMatch(reason, rollback = false) {
+  /** ゲームを一時停止する。rollback=true なら、席 slot の切断を検出する前の状態へ巻き戻す */
+  _pauseMatch(reason, rollback = false, slot = 0) {
     const m = this.state.match;
     if (!m) return;
     clearTimeout(this._resumeTimer);
     const wasRunning = m.status === 'running';
     if (m.status === 'running' || m.status === 'resuming') {
       this.gm.pause();
-      if (rollback && wasRunning && this.gm.rollbackTo(this.lastGuestMsgAt - 50)) {
+      if (rollback && wasRunning && this.gm.rollbackTo(this.lastMsgAt[slot] - 50)) {
         this._toast('通信が切れる直前の状態に戻しました');
       }
       m.status = 'paused';
@@ -354,12 +400,17 @@ export class HostRoom extends Emitter {
     }
     m.reason = reason;
     m.synced = false;
+    this._acks.clear();
     if (reason !== 'disconnect' && this.net.guestConnected && this.gm.game) {
       // 接続中の一時停止: ゲストに停止時点の状態を渡して揃えてもらう
       m.gen++;
       this.gm.setGen(m.gen);
-      this.state.guest = 'syncing';
-      this.net.send({ type: 'pause', matchId: m.matchId, gen: m.gen, reason, snapshot: this.gm.getSnapshot() });
+      const msg = { type: 'pause', matchId: m.matchId, gen: m.gen, reason, snapshot: this.gm.getSnapshot() };
+      for (const g of this._guestsInMatch()) {
+        if (!this.net.isConnected(g)) continue;
+        this.state.players[g].link = 'syncing';
+        this.net.sendTo(g, msg);
+      }
     }
   }
 
@@ -372,7 +423,7 @@ export class HostRoom extends Emitter {
 
   get canResume() {
     const m = this.state.match;
-    return !!m && m.status === 'paused' && m.synced && this.state.guest === 'connected' && !this.state.hostHidden;
+    return !!m && m.status === 'paused' && m.synced && this.state.players.every((p, i) => !m.players.includes(i) || p.link === 'connected') && !this.state.hostHidden;
   }
 
   resumeGame() {
@@ -391,7 +442,7 @@ export class HostRoom extends Emitter {
     s.series = null;
     s.screen = 'select';
     s.gameId = null;
-    if (s.guest === 'syncing') s.guest = 'connected';
+    for (const p of s.players) if (p.link === 'syncing') p.link = 'connected';
     this._changed();
   }
 
@@ -403,24 +454,28 @@ export class HostRoom extends Emitter {
     s.result = sanitizeResult(result);
     const se = s.series;
     if (se && s.result?.points) {
-      // 連戦: このレースのポイントを足す
-      se.host += s.result.points.host;
-      se.guest += s.result.points.guest;
-      se.history.push({ name: s.result.course, host: s.result.points.host, guest: s.result.points.guest });
+      // 連戦: このレースのポイントを席ごとに足す
+      const pts = Array.from({ length: MAX_PLAYERS }, () => 0);
+      s.result.players.forEach((p, i) => {
+        pts[p.slot] = s.result.points[i] || 0;
+        se.scores[p.slot] += pts[p.slot];
+      });
+      se.history.push({ name: s.result.course, points: pts });
       se.final = se.round >= se.total;
     }
     this.net.send({ type: 'game_result', matchId, result: s.result });
     s.match = null;
     s.screen = 'result';
-    if (s.guest === 'syncing') s.guest = 'connected';
+    for (const p of s.players) if (p.link === 'syncing') p.link = 'connected';
     this._changed();
   }
 
-  /** 戻ってこないゲストの枠を空けて、新しいゲストを招待できるようにする */
-  freeGuestSlot() {
-    this.net.freeGuestSlot();
-    this._guestLost('none');
-    this._toast('ゲスト枠を空けました。招待URLを送り直してください');
+  /** 戻ってこないゲストの席を空けて、新しいゲストを招待できるようにする */
+  freeGuestSlot(slot) {
+    if (!(slot >= 1 && slot < MAX_PLAYERS)) return;
+    this.net.freeGuestSlot(slot);
+    this._guestLost(slot, 'none');
+    this._toast('席を空けました。招待URLを送り直してください');
   }
 
   /** 部屋を解散する */
@@ -444,6 +499,7 @@ export class GuestRoom extends Emitter {
   constructor({ invite, token, sound, music, input, layer }) {
     super();
     this.role = 'guest';
+    this.slot = null; // 部屋の席（join_accepted で決まる。1・2）
     this.sound = sound;
     this.state = null; // ホストから受け取った部屋の状態
     this.linkState = 'connecting'; // 'connecting' | 'connected' | 'reconnecting' | 'failed'
@@ -464,6 +520,8 @@ export class GuestRoom extends Emitter {
     this.net.on('lost', () => this._toast('ホストとの通信が切れました。再接続しています…'));
     this.net.on('joined', (msg) => {
       this.failure = null;
+      this.slot = msg.slot;
+      this.gm.slot = msg.slot;
       this.sound.play('join');
       this._toast(this.joinedOnce || msg.rejoin ? '部屋に戻りました！' : '部屋に参加しました！');
       this.joinedOnce = true;
@@ -523,7 +581,7 @@ export class GuestRoom extends Emitter {
         if (!def || this.state?.screen !== 'game') return;
         if (!this.gm.game || this.gm.matchId !== msg.matchId) {
           try {
-            await this.gm.create(def, msg.matchId, msg.gen, { ...validOptions(def, this.state?.options), ...this.state?.match?.opts });
+            await this.gm.create(def, msg.matchId, msg.gen, { ...validOptions(def, this.state?.options), ...this.state?.match?.opts }, this.state?.match?.players);
             await this.gm.firstFrame; // 重い初回描画を済ませてから ACK する
           } catch (err) {
             console.error(err);
@@ -588,6 +646,8 @@ export class GuestRoom extends Emitter {
     if (this.state && room.rev < this.state.rev) return; // 古い状態
     this.state = room;
     if (room.screen !== 'game' && this.gm.game) this.gm.destroy();
+    // 他の人の切断などでホストが一時停止したら、自分も止める（再開は完全同期のあとでホストが指示する）
+    if (room.match?.status === 'paused' && this.gm.game) this.gm.pause();
     this.net.setGameMode(room.match?.status === 'running');
     if (room.result) room.result = sanitizeResult(room.result);
     if (room.startInMs != null) this.startAt = now() + room.startInMs;

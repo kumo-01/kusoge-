@@ -7,7 +7,7 @@ import { maxSpeedOf as maxSpeedFor } from '../src/games/dogKart/physics.js';
 import { spinKart, itemWeights, chooseItem } from '../src/games/dogKart/items.js';
 import { IN, ITEMS, RACE, KART, TIMING, RAIN, PAD, FOOD, SCORE } from '../src/games/dogKart/constants.js';
 import { getGame, resolveMatchOptions, validOptions } from '../src/games/registry.js';
-import { decode, encode, FROM_GUEST, FROM_HOST, sanitizeRoomState } from '../src/core/protocol.js';
+import { decode, encode, FROM_GUEST, FROM_HOST, sanitizeRoomState, sanitizeResult } from '../src/core/protocol.js';
 
 const DT = 1 / 60;
 const track = new Track();
@@ -69,7 +69,9 @@ test('ボット同士で3周レースが完走し、勝者が決まる', () => {
   assert.ok(w.ft > 120 && w.ft < 420, `finish time ${w.ft}`);
   assert.ok(laps >= RACE.LAPS);
   const r = sim.buildResult();
-  assert.equal(r.winner, sim.s.winner === 0 ? 'host' : 'guest');
+  assert.equal(r.winner, sim.s.winner, 'winner is the seat (0 = host, 1 = guest)');
+  assert.equal(r.players.length, 2);
+  assert.deepEqual(r.points.length, 2);
   assert.ok(r.stats.length > 3);
 });
 
@@ -242,8 +244,15 @@ test('プロトコル: 方向・形式・サイズが不正なメッセージは
   assert.equal(decode('x'.repeat(70000), FROM_HOST), null);
   assert.equal(decode(JSON.stringify({ type: 'player_input', matchId: 'a', gen: 1, seq: 1, inputs: [999] }), FROM_GUEST), null);
   assert.ok(decode(JSON.stringify({ type: 'player_input', matchId: 'a', gen: 1, seq: 1, inputs: [1, 5] }), FROM_GUEST));
-  assert.equal(sanitizeRoomState({ screen: 'hack', guest: 'none', rev: 1, ready: {} }), null);
-  assert.ok(sanitizeRoomState({ screen: 'home', guest: 'connected', rev: 1, ready: { host: true } }));
+  const pl = (links) => links.map((link, i) => ({ link, ready: i === 0 }));
+  assert.equal(sanitizeRoomState({ screen: 'hack', players: pl(['connected', 'none', 'none']), rev: 1 }), null);
+  assert.equal(sanitizeRoomState({ screen: 'home', players: pl(['connected', 'none']), rev: 1 }), null, '席の数が違う');
+  assert.equal(sanitizeRoomState({ screen: 'home', players: pl(['connected', 'bad', 'none']), rev: 1 }), null);
+  const ok = sanitizeRoomState({ screen: 'home', players: pl(['waiting', 'connected', 'syncing']), rev: 1 });
+  assert.ok(ok);
+  assert.equal(ok.players[0].link, 'connected', 'host seat is always connected');
+  assert.equal(ok.players[2].link, 'syncing');
+  assert.equal(ok.players[0].ready, true);
 });
 
 test('アイテムを持っている車はボックスをすり抜け、箱は消えない（総取り防止）', () => {
@@ -288,7 +297,7 @@ test('NPC 2 台入りのレース: NPC が自分で走って周回し、人間�
   assert.ok(npcLaps >= 4, `npc laps ${npcLaps}`);
   assert.ok(npcItems >= 1, `npc items ${npcItems}`);
   const r = sim.buildResult();
-  assert.ok(r.stats[0].host.includes('/ 4台'));
+  assert.ok(r.stats[0].values[0].includes('/ 4台'));
   const snap = JSON.parse(encode(sim.getSnapshot()));
   const other = new RaceSim(track, { npcs: 2 });
   other.loadSnapshot(snap);
@@ -350,7 +359,7 @@ test('全コース: NPC 4 台（6 台）でレースが決着し、NPC も周回
     assert.equal(sim.s.phase, 'finished', `${c.name} finished`);
     for (let i = 2; i < 6; i++) assert.ok(npcLaps[i] >= 2, `${c.name} npc ${i} laps ${npcLaps[i]}`);
     const r = sim.buildResult();
-    assert.ok(r.stats[0].host.includes('/ 6台'));
+    assert.ok(r.stats[0].values[0].includes('/ 6台'));
   });
 });
 
@@ -971,8 +980,8 @@ test('連戦のポイント: 順位・ドッグフード・体当たり・アイ
   assert.equal(sim.calcScores()[0].fastPts, SCORE.FAST);
   // 結果オブジェクトにも載る
   const r = sim.buildResult();
-  assert.equal(r.points.host, sim.calcScores()[0].total);
-  assert.equal(r.points.guest, sim.calcScores()[1].total);
+  assert.equal(r.points[0], sim.calcScores()[0].total);
+  assert.equal(r.points[1], sim.calcScores()[1].total);
   assert.equal(r.course, track.name);
   assert.ok(r.score.length >= 5 && r.score.at(-1).label === '今回の合計');
   assert.ok(SCORE.RANK.every((v, i) => i === 0 || v < SCORE.RANK[i - 1]), '順位ポイントは下位ほど少ない');
@@ -998,16 +1007,97 @@ test('コース設定: ランダムは使っていないコースから選ぶ。
 });
 
 test('部屋の状態: 連戦の途中経過とレースごとの設定を検証して受け取る', () => {
-  const base = { rev: 3, screen: 'result', guest: 'connected', ready: { host: false, guest: false }, options: { course: 99, races: 3 }, match: null, result: null };
-  const ok = sanitizeRoomState({ ...base, series: { total: 3, round: 2, host: 31, guest: 22, final: false, history: [{ name: 'A', host: 15, guest: 12 }, { name: 'B', host: 16, guest: 10 }] } });
+  const base = { rev: 3, screen: 'result', players: [0, 1, 2].map((i) => ({ link: i < 2 ? 'connected' : 'none', ready: false })), options: { course: 99, races: 3 }, match: null, result: null };
+  const ok = sanitizeRoomState({ ...base, series: { total: 3, round: 2, scores: [31, 22, 5], final: false, history: [{ name: 'A', points: [15, 12, 0] }, { name: 'B', points: [16, 10, 5] }] } });
   assert.equal(ok.series.round, 2);
   assert.equal(ok.series.history.length, 2);
-  assert.equal(ok.series.host, 31);
+  assert.deepEqual(ok.series.scores, [31, 22, 5]);
+  assert.deepEqual(ok.series.history[1].points, [16, 10, 5]);
   assert.equal(sanitizeRoomState({ ...base, series: { total: 99, round: 2 } }).series, null, '範囲外は捨てる');
   assert.equal(sanitizeRoomState({ ...base, series: 'x' }).series, null);
-  const m = sanitizeRoomState({ ...base, screen: 'game', match: { matchId: 'abc', gen: 1, status: 'running', synced: true, started: true, opts: { course: 7, round: 2, bad: 'x'.repeat(40), npcs: 3 } } });
+  const m = sanitizeRoomState({ ...base, screen: 'game', match: { matchId: 'abc', gen: 1, status: 'running', synced: true, started: true, players: [0, 2, 2, 9], opts: { course: 7, round: 2, bad: 'x'.repeat(40), npcs: 3 } } });
   assert.equal(m.match.opts.course, 7);
   assert.equal(m.match.opts.round, 2);
   assert.equal(m.match.opts.npcs, 3);
   assert.equal(m.match.opts.bad, undefined);
+  assert.deepEqual(m.match.players, [0, 2], 'players: 席の範囲外・重複は捨てる');
+});
+
+test('3 人対戦: 人間が 3 人・NPC は 6 - 人間の数 台まで・見た目は席に対応・入力は人ごと', () => {
+  const sim = new RaceSim(track, { players: [0, 1, 2], npcs: 9, boss: 1 });
+  assert.equal(sim.humans, 3);
+  assert.equal(sim.s.karts.length, 3 + 3 + 1, '3 人 + 通常の NPC 3 台 + ボス');
+  assert.deepEqual(sim.s.karts.map((k) => k.npc), [0, 0, 0, 1, 1, 1, 1]);
+  assert.deepEqual(sim.s.karts.map((k) => k.style), [0, 1, 2, 3, 4, 5, 6], 'styles: seats first, then free dogs, boss last');
+  assert.equal(sim.s.acks.length, 3);
+  // 2 人 + NPC 4 台（今までどおり）
+  const two = new RaceSim(track, { npcs: 9 });
+  assert.equal(two.humans, 2);
+  assert.equal(two.s.karts.length, 6);
+  assert.deepEqual(two.s.karts.map((k) => k.style), [0, 1, 2, 3, 4, 5]);
+  // 席 0 と 2 だけ（1 は空き）: 車 1 は席 2 の人。NPC には空いている犬が回る
+  const gap = new RaceSim(track, { players: [0, 2], npcs: 2 });
+  assert.deepEqual(gap.slots, [0, 2]);
+  assert.deepEqual(gap.s.karts.map((k) => k.style), [0, 2, 1, 3]);
+  assert.deepEqual(gap.s.karts.map((k) => k.npc), [0, 0, 1, 1]);
+  assert.equal(kartName(gap.s.karts[1]), 'プードル');
+  // 不正な席の指定は 2 人の既定に戻る
+  assert.deepEqual(new RaceSim(track, { players: [5, 5] }).slots, [0, 1]);
+  assert.deepEqual(new RaceSim(track, { players: [0] }).slots, [0, 1]);
+});
+
+test('3 人対戦: ボットが 3 人で完走し、結果・ポイント・順位が 3 人分そろう', () => {
+  const sim = new RaceSim(track, { players: [0, 1, 2], npcs: 2 });
+  while (sim.s.phase === 'countdown') sim.step(DT, [0, 0, 0]);
+  for (let i = 0; i < 60 * 480 && sim.s.phase !== 'finished'; i++) {
+    const [a, b, c] = sim.s.karts;
+    sim.step(DT, [bot(a, 3), bot(b, -3), bot(c, 0)]);
+    sim.drainEvents();
+  }
+  assert.equal(sim.s.phase, 'finished');
+  assert.ok(sim.s.winner >= 0 && sim.s.winner < 3, 'winner is human');
+  const r = sim.buildResult();
+  assert.equal(r.players.length, 3);
+  assert.deepEqual(r.players.map((p) => p.slot), [0, 1, 2]);
+  assert.equal(r.points.length, 3);
+  assert.equal(r.winner, sim.s.winner, 'winner is a seat number');
+  assert.ok(r.players[sim.s.winner].headline.includes('勝ち'));
+  assert.ok(r.players.filter((p, i) => i !== sim.s.winner).every((p) => /位…/.test(p.headline)), 'others show their rank among humans');
+  assert.ok(r.stats.every((row) => row.text != null || row.values.length === 3));
+  assert.ok(r.stats.some((row) => row.label === '着順' && typeof row.text === 'string'));
+  assert.ok(r.score.every((row) => row.values.length === 3));
+  // 結果の検証を通る形
+  const clean = sanitizeResult(JSON.parse(JSON.stringify(r)));
+  assert.equal(clean.players.length, 3);
+  assert.equal(clean.points.length, 3);
+  assert.deepEqual(clean.stats.find((x) => x.label === '着順').text, r.stats.find((x) => x.label === '着順').text);
+  assert.equal(sanitizeResult({ players: [{ slot: 0 }] }), null, '1 人分しかない結果は捨てる');
+});
+
+test('3 人対戦: 3 人のポイント・ファステストラップ・定期配信の往復（acks）', () => {
+  const sim = new RaceSim(track, { players: [0, 1, 2], npcs: 1 });
+  while (sim.s.phase === 'countdown') sim.step(DT, [0, 0, 0]);
+  const [a, b, c] = sim.s.karts;
+  const seg = track.length / RACE.CHECKPOINTS;
+  for (const [k, at] of [[b, 900], [a, 700], [c, 500]]) {
+    place(k, at);
+    k.cp = Math.floor(at / seg);
+  }
+  sim.step(DT, [0, 0, 0]);
+  a.best = 80;
+  b.best = 70;
+  c.best = 90;
+  const sc = sim.calcScores();
+  assert.equal(sc.length, 3);
+  assert.deepEqual(sc.map((p) => p.fastPts), [0, SCORE.FAST, 0], 'only the fastest gets the bonus');
+  b.best = 80; // a と同タイム → 該当者なし
+  assert.deepEqual(sim.calcScores().map((p) => p.fastPts), [0, 0, 0]);
+  // 定期配信（acks は人ごと）
+  sim.s.acks = [0, 11, 22];
+  const back = sanitizeSnapshot(unpackNet(JSON.parse(encode(packNet(sim.getSnapshot())))), new RaceSim(track, { players: [0, 1, 2], npcs: 1 }).s, 30);
+  assert.deepEqual(back.acks, [0, 11, 22]);
+  assert.equal(back.karts.length, 4);
+  assert.deepEqual(back.karts.map((k) => k.npc), [0, 0, 0, 1]);
+  assert.deepEqual(back.karts.map((k) => k.style), [0, 1, 2, 3]);
+  assert.equal(back.winner, -1);
 });

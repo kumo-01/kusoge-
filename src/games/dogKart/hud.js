@@ -257,7 +257,7 @@ export class Hud {
       const [px, py] = this._map(k.x, k.z);
       x.beginPath();
       x.arc(px, py, i === this.me ? 7 : 6, 0, Math.PI * 2);
-      x.fillStyle = k.boss ? BOSS_COLOR : KART_COLORS[i] || '#999';
+      x.fillStyle = k.boss ? BOSS_COLOR : KART_COLORS[k.style ?? i] || '#999';
       x.fill();
       x.lineWidth = 2.5;
       x.strokeStyle = '#fff';

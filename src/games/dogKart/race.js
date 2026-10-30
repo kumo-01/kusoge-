@@ -13,7 +13,7 @@ export const KART_NAMES = ['柴犬', 'コーギー', 'プードル', 'パグ', '
 export const BOSS_NAME = 'ドーベルマン';
 
 /** 車の名前（ボス犬は台数に関係なく専用の名前） */
-export const kartName = (k) => (k?.boss ? BOSS_NAME : KART_NAMES[k?.i] || '');
+export const kartName = (k) => (k?.boss ? BOSS_NAME : KART_NAMES[k?.style ?? k?.i] || '');
 
 export class RaceSim {
   /** @param {{ npcs?: number, boss?: number }} options npcs: ふつうの NPC の台数, boss: ボス犬を出すか */
@@ -21,15 +21,24 @@ export class RaceSim {
     this.track = track;
     this.boxPos = track.itemBoxes();
     this.events = [];
+    // 人間の席（部屋の 0 = ホスト, 1・2 = ゲスト）。車の番号 i の人間は slots[i] の席
+    const slots = Array.isArray(options.players) ? options.players.filter((v, i, a) => Number.isInteger(v) && v >= 0 && v < RACE.MAX_HUMANS && a.indexOf(v) === i).slice(0, RACE.MAX_HUMANS) : [];
+    this.slots = slots.length >= 2 ? slots : [0, 1];
+    this.humans = this.slots.length;
     this.boss = options.boss ? 1 : 0;
-    this.npcs = Math.max(0, Math.min(RACE.MAX_NPCS - 1, options.npcs | 0)) + this.boss;
+    const maxNormal = RACE.MAX_KARTS - 1 - this.humans; // 通常の NPC は 6 - 人間の数 台まで（ボスは別枠）
+    this.normalNpcs = Math.max(0, Math.min(maxNormal, options.npcs | 0));
+    this.npcs = this.normalNpcs + this.boss;
+    // NPC の見た目: 人間が使っていない犬を順に使う（ボスは専用）
+    const pool = [1, 2, 3, 4, 5].filter((v) => !this.slots.includes(v));
+    this.npcStyles = Array.from({ length: this.normalNpcs }, (_, i) => pool[i]).concat(this.boss ? [6] : []);
     this.prog = [];
     this.reset();
   }
 
   reset() {
     const t = this.track;
-    const n = RACE.HUMANS + this.npcs;
+    const n = this.humans + this.npcs;
     this.s = {
       v: 2,
       tick: 0,
@@ -37,14 +46,14 @@ export class RaceSim {
       t: -RACE.COUNTDOWN, // レース時間（0 でスタート）
       endT: 0,
       winner: -1,
-      karts: Array.from({ length: n }, (_, i) => createKart(i, t.startPos(i), !!this.boss && i === n - 1)),
+      karts: Array.from({ length: n }, (_, i) => createKart(i, t.startPos(i), !!this.boss && i === n - 1, i >= this.humans, i < this.humans ? this.slots[i] : this.npcStyles[i - this.humans])),
       boxes: this.boxPos.map(() => 0),
       foods: t.foods.map(() => 0), // ドッグフードが次に出るまでの残り時間（0 なら落ちている）
       proj: [],
       bananas: [],
       nextId: 1,
       rng: (Math.random() * 4294967296) >>> 0,
-      ack: 0, // 最後に適用したゲスト入力の seq
+      acks: Array.from({ length: this.humans }, () => 0), // 人間（車の番号）ごとに、最後に適用した入力の seq
       tc: [], // タイミングブーストのチャンス地点（スタートからの走行距離）
       rain: 0, // 豪雨の残り時間
       rk: -1, // 豪雨を使った車
@@ -172,7 +181,7 @@ export class RaceSim {
       s.foods[j] = FOOD.RESPAWN;
       k.fd++;
       k.stats.foods++;
-      if (k.i < RACE.HUMANS) this.events.push({ t: 'food', k: k.i, n: k.fd, x: foods[j].x, z: foods[j].z });
+      if (!k.npc) this.events.push({ t: 'food', k: k.i, n: k.fd, x: foods[j].x, z: foods[j].z });
       if (k.fd >= FOOD.MAX) break;
     }
   }
@@ -197,7 +206,7 @@ export class RaceSim {
         if (k.lap >= RACE.LAPS && !k.fin) {
           k.fin = 1;
           k.ft = s.t;
-          // 勝敗は人間（ホスト・ゲスト）のうち先にゴールしたほう。NPC がゴールしてもレースは続く
+          // 勝敗は人間のうち先にゴールした人。NPC がゴールしてもレースは続く
           if (s.winner < 0 && !k.npc) {
             s.winner = k.i;
             s.phase = 'finished';
@@ -231,7 +240,7 @@ export class RaceSim {
     if (k.rc > 0 || (k.fin && !k.npc)) return;
     const track = this.track;
     const s0 = k.lap === 0 && k.cp === 0 ? -10 : track.cpS(k.cp) + 3;
-    const p = track.pointAt(s0, [5, -5, 1.5, -1.5, 8, -8][k.i] ?? 0);
+    const p = track.pointAt(s0, [5, -5, 1.5, -1.5, 8, -8, 3][k.i] ?? 0);
     k.x = p.x;
     k.z = p.z;
     k.h = p.h;
@@ -265,10 +274,18 @@ export class RaceSim {
     return r;
   }
 
-  /** 人間 2 人のうち前にいるほう */
+  /** 人間のうち一番前にいる人（車の番号） */
   leaderIndex() {
-    const [a, b] = this.s.karts;
-    return this.progressOf(a) >= this.progressOf(b) ? 0 : 1;
+    let best = 0;
+    let bp = -Infinity;
+    for (let i = 0; i < this.humans; i++) {
+      const p = this.progressOf(this.s.karts[i]);
+      if (p > bp) {
+        bp = p;
+        best = i;
+      }
+    }
+    return best;
   }
 
   drainEvents() {
@@ -285,14 +302,15 @@ export class RaceSim {
     this.s = sanitizeSnapshot(snap, this.s, this.boxPos.length);
   }
 
-  /** 連戦のポイント: 総合順位ポイント + ドッグフード + 体当たり + アイテム命中 + ファステストラップ（人間 2 人それぞれ） */
+  /** 連戦のポイント: 総合順位ポイント + ドッグフード + 体当たり + アイテム命中 + ファステストラップ（人間それぞれ。車の番号の順） */
   calcScores(prog = null) {
     const s = this.s;
     const pr = prog || s.karts.map((k) => this.progressOf(k));
-    const humans = s.karts.slice(0, RACE.HUMANS);
-    // ベストラップが 2 人のうち速かったほう（周回を終えている人だけ。同じタイムなら無し）
+    const humans = s.karts.slice(0, this.humans);
+    // ベストラップが一番速い人（周回を終えている人だけ。同じタイムの人がいれば無し）
     const bests = humans.map((k) => (k.best > 0 ? k.best : Infinity));
-    const fastest = bests[0] < bests[1] ? 0 : bests[1] < bests[0] ? 1 : -1;
+    const min = Math.min(...bests);
+    const fastest = Number.isFinite(min) && bests.filter((v) => v === min).length === 1 ? bests.indexOf(min) : -1;
     return humans.map((k) => {
       const rank = this.rankOf(k.i, pr);
       const rankPts = SCORE.RANK[Math.min(rank, SCORE.RANK.length) - 1] || 0;
@@ -304,20 +322,25 @@ export class RaceSim {
     });
   }
 
-  /** 結果画面用の成績 */
+  /**
+   * 結果画面用の成績。players / stats / score の values は、人間の順（車の番号の順）。
+   * players[i].slot はその人の席（部屋の 0 = ホスト, 1・2 = ゲスト）
+   */
   buildResult() {
     const s = this.s;
-    const [a, b] = s.karts;
-    const winner = s.winner === 0 ? 'host' : s.winner === 1 ? 'guest' : this.leaderIndex() === 0 ? 'host' : 'guest';
-    const name = { host: '柴犬', guest: 'コーギー' };
+    const humans = s.karts.slice(0, this.humans);
+    const winIdx = s.winner >= 0 ? s.winner : this.leaderIndex();
     const prog = s.karts.map((k) => this.progressOf(k));
     const total = s.karts.length;
-    const winIdx = winner === 'host' ? 0 : 1;
-    const line = (k) => ({
-      headline: k.i === winIdx ? '🏆 勝ち！' : '負け…',
+    // 人間どうしの順位（勝者が 1 位）
+    const hOrder = humans.map((k) => k.i).sort((x, y) => (x === winIdx ? -1 : y === winIdx ? 1 : prog[y] - prog[x]));
+    const hRank = (i) => hOrder.indexOf(i) + 1;
+    const players = humans.map((k) => ({
+      slot: k.style,
+      headline: k.i === winIdx ? '🏆 勝ち！' : this.humans === 2 ? '負け…' : `${hRank(k.i)}位…`,
       detail: `${k.fin ? `ゴール ${formatTime(k.ft)}` : `ゴールならず（${Math.min(k.lap, RACE.LAPS)}/${RACE.LAPS}周）`}・総合 ${this.rankOf(k.i, prog)}位`,
-    });
-    const stat = (label, f) => ({ label, host: f(a), guest: f(b) });
+    }));
+    const stat = (label, f) => ({ label, values: humans.map(f) });
     const stats = [
       stat('総合順位', (k) => `${this.rankOf(k.i, prog)}位 / ${total}台`),
       stat('走行時間', (k) => (k.fin ? formatTime(k.ft) : `${formatTime(Math.max(0, s.t))}（未ゴール）`)),
@@ -330,15 +353,13 @@ export class RaceSim {
       stat('使ったアイテム', (k) => `${k.stats.items} 個`),
       stat('壁ドン', (k) => `${k.stats.walls} 回`),
     ];
-    if (total > 2) {
+    if (total > this.humans) {
       const order = s.karts.map((k) => k.i).sort((x, y) => this.rankOf(x, prog) - this.rankOf(y, prog));
-      const names = order.map((i, n) => `${n + 1}.${kartName(s.karts[i])}`);
-      const half = Math.ceil(names.length / 2);
-      stats.push({ label: '着順', host: names.slice(0, half).join(' '), guest: names.slice(half).join(' ') });
+      stats.push({ label: '着順', text: order.map((i, n) => `${n + 1}.${kartName(s.karts[i])}`).join('　') });
     }
     // ポイントの内訳
-    const [ha, gu] = this.calcScores(prog);
-    const row = (label, f) => ({ label, host: f(ha), guest: f(gu) });
+    const sc = this.calcScores(prog);
+    const row = (label, f) => ({ label, values: sc.map(f) });
     const score = [
       row('🏁 順位ポイント', (p) => `${p.rank}位 → ${p.rankPts}`),
       row('🍖 ドッグフード', (p) => `${p.foods}個 → ${p.foodPts}`),
@@ -349,14 +370,13 @@ export class RaceSim {
     ];
     return {
       gameId: 'dogKart',
-      winner,
-      title: `${name[winner]}の勝ち！ワン！`,
+      winner: humans[winIdx].style,
+      title: `${kartName(humans[winIdx])}の勝ち！ワン！`,
       course: this.track.name,
-      host: line(a),
-      guest: line(b),
+      players,
       stats,
       score,
-      points: { host: ha.total, guest: gu.total },
+      points: sc.map((p) => p.total),
     };
   }
 }
@@ -377,7 +397,9 @@ function sanitizeKart(r, i, prev) {
   k.ms = num(r.ms, 1, 0.5, 1.2);
   k.spinDur = Math.max(0.1, k.spinDur);
   k.i = i;
-  k.npc = i >= RACE.HUMANS ? 1 : 0;
+  k.npc = r.npc === 1 || r.npc === 0 ? r.npc : prev.npc ? 1 : 0; // 人間か NPC かは、完全な状態でだけ届く（定期配信の間は変わらない）
+  k.style = int(r.style, prev.style ?? i, 0, 6);
+  k.boss = r.boss === 1 || r.boss === 0 ? r.boss : prev.boss ? 1 : 0;
   k.grass = r.grass ? 1 : 0;
   k.fin = r.fin ? 1 : 0;
   k.lap = int(r.lap, 0, 0, 99);
@@ -404,8 +426,7 @@ function sanitizeFoods(r, prev) {
 }
 
 export function sanitizeSnapshot(r, prev, boxCount) {
-  const maxKarts = RACE.HUMANS + RACE.MAX_NPCS;
-  if (!r || typeof r !== 'object' || !Array.isArray(r.karts) || r.karts.length < RACE.HUMANS || r.karts.length > maxKarts) return prev;
+  if (!r || typeof r !== 'object' || !Array.isArray(r.karts) || r.karts.length < 2 || r.karts.length > RACE.MAX_KARTS) return prev;
   const owner = (o) => (Number.isInteger(o) && o >= 0 && o < r.karts.length ? o : 0);
   const s = {
     v: 2,
@@ -413,7 +434,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
     phase: ['countdown', 'racing', 'finished'].includes(r.phase) ? r.phase : 'countdown',
     t: num(r.t, -RACE.COUNTDOWN, -10, 1e5),
     endT: num(r.endT, 0, 0, 10),
-    winner: r.winner === 0 || r.winner === 1 ? r.winner : -1,
+    winner: Number.isInteger(r.winner) && r.winner >= 0 && r.winner < r.karts.length ? r.winner : -1,
     karts: r.karts.map((rk, i) => sanitizeKart(rk, i, prev.karts[i] || createKart(i, { x: 0, z: 0, h: 0 }))),
     boxes: Array.from({ length: boxCount }, (_, i) => num(Array.isArray(r.boxes) ? r.boxes[i] : 0, 0, 0, 60)),
     foods: sanitizeFoods(r, prev),
@@ -421,7 +442,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
     bananas: [],
     nextId: int(r.nextId, 1),
     rng: int(r.rng, 1, 0, 4294967295) >>> 0,
-    ack: int(r.ack, 0),
+    acks: Array.from({ length: Math.min(RACE.MAX_HUMANS, r.karts.length) }, (_, i) => int(Array.isArray(r.acks) ? r.acks[i] : 0, 0)),
     tc: Array.isArray(r.tc) ? r.tc.slice(0, 2).map((v) => num(v, 0, 0, 1e5)) : prev.tc || [],
     rain: num(r.rain, 0, 0, RAIN.DURATION),
     rk: Number.isInteger(r.rk) && r.rk >= 0 && r.rk < r.karts.length ? r.rk : -1,
@@ -463,7 +484,7 @@ export function packNet(s) {
     t: s.t,
     e: s.endT,
     w: s.winner,
-    a: s.ack,
+    a: s.acks,
     tc: s.tc,
     rn: [s.rain, s.rk],
     k: s.karts.map((k) => NET_KART_FIELDS.map((f) => k[f])),
@@ -489,11 +510,11 @@ export function unpackNet(p) {
     t: p.t,
     endT: p.e,
     winner: p.w,
-    ack: p.a,
+    acks: p.a,
     tc: p.tc,
     rain: Array.isArray(p.rn) ? p.rn[0] : 0,
     rk: Array.isArray(p.rn) ? p.rn[1] : -1,
-    karts: p.k.slice(0, RACE.HUMANS + RACE.MAX_NPCS).map((a) => row(a, NET_KART_FIELDS)),
+    karts: p.k.slice(0, RACE.MAX_KARTS).map((a) => row(a, NET_KART_FIELDS)),
     boxes: p.b,
     foodTaken: Array.isArray(p.fo) ? p.fo.slice(0, 400) : [],
     proj: Array.isArray(p.pr) ? p.pr.slice(0, 32).map((a) => row(a, ['id', 'o', 'x', 'z', 'vx', 'vz', 'life', 'age', 'b', 'f', 't', 'd'])) : [],

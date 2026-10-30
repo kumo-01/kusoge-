@@ -9,7 +9,7 @@
 
 import Peer from 'peerjs';
 import { Emitter, randomHex, randomToken, safeEqual, now } from './util.js';
-import { PROTOCOL_VERSION, FROM_GUEST, FROM_HOST, FAST_FROM_GUEST, FAST_FROM_HOST, encode, decode } from './protocol.js';
+import { PROTOCOL_VERSION, FROM_GUEST, FROM_HOST, FAST_FROM_GUEST, FAST_FROM_HOST, MAX_PLAYERS, encode, decode } from './protocol.js';
 import { buildInviteUrl, saveGuestSession, backoffDelay } from './reconnect.js';
 import { RelayPeer, relayBase, isRelayRoom, RELAY_ROOM_PREFIX } from './relay.js';
 
@@ -263,8 +263,8 @@ export class HostNetwork extends Emitter {
     this.peer = null;
     this.roomId = null;
     this.inviteKey = null;
-    this.guestToken = null; // 現在のゲストに紐付いた再参加トークン（null = ゲスト枠が空き）
-    this.guest = null; // 認証済みの Link
+    // ゲストの席。slots[i] は部屋の席 i + 1（0 はホスト）。token = その席の再参加トークン（null = 空き）、link = 認証済みの接続
+    this.slots = Array.from({ length: MAX_PLAYERS - 1 }, () => ({ token: null, link: null }));
     this.pending = new Set();
     this.signaling = 'connecting'; // 'online' | 'reconnecting'
     this.destroyed = false;
@@ -276,14 +276,33 @@ export class HostNetwork extends Emitter {
   get inviteUrl() {
     return this.roomId ? buildInviteUrl(this.roomId, this.inviteKey) : '';
   }
+  /** 席 slot（1 以降）のゲストの接続 */
+  linkOf(slot) {
+    return this.slots[slot - 1]?.link || null;
+  }
+  /** 席 slot のゲストがつながっているか */
+  isConnected(slot) {
+    return !!this.linkOf(slot)?.open;
+  }
+  /** 席 slot が使われているか（つながっていなくても、戻ってくるのを待っている席も含む） */
+  isTaken(slot) {
+    return !!this.slots[slot - 1]?.token;
+  }
+  /** いまつながっているゲストの数 */
+  get guestCount() {
+    return this.slots.filter((x) => x.link?.open).length;
+  }
   get guestConnected() {
-    return !!this.guest && this.guest.open;
+    return this.guestCount > 0;
   }
-  get guestSlotTaken() {
-    return !!this.guestToken;
-  }
+  /** 一番遅い人の RTT（誰もいなければ null） */
   get rtt() {
-    return this.guest?.rtt ?? null;
+    let m = null;
+    for (const x of this.slots) if (x.link?.rtt != null) m = Math.max(m ?? 0, x.link.rtt);
+    return m;
+  }
+  rttOf(slot) {
+    return this.linkOf(slot)?.rtt ?? null;
   }
 
   async create() {
@@ -372,8 +391,8 @@ export class HostNetwork extends Emitter {
     // ゲストの高速チャンネル: join_accepted で渡した使い捨て ID が一致するときだけ受け入れる
     const fastId = conn.metadata && typeof conn.metadata.fast === 'string' ? conn.metadata.fast : null;
     if (fastId) {
-      const g = this.guest;
-      if (!this.destroyed && g && g.fastId && safeEqual(fastId, g.fastId)) g.attachFast(conn, FAST_FROM_GUEST);
+      const g = this.destroyed ? null : this.slots.map((x) => x.link).find((l) => l?.fastId && safeEqual(fastId, l.fastId));
+      if (g) g.attachFast(conn, FAST_FROM_GUEST);
       else {
         try {
           conn.close();
@@ -417,69 +436,84 @@ export class HostNetwork extends Emitter {
     };
     if (msg.v !== PROTOCOL_VERSION) return reject('version');
     if (!safeEqual(msg.key, this.inviteKey)) return reject('bad_key');
-    let rejoin = false;
-    if (this.guestToken) {
-      // ゲスト枠が埋まっている: 正しい再参加トークンを持つ本人だけ受け入れる
-      if (!msg.token || !safeEqual(msg.token, this.guestToken)) return reject('room_full');
-      rejoin = true;
-    } else {
-      this.guestToken = randomToken(24);
+    // 再参加トークンが合う席があればその席へ。なければ一番若い空き席へ
+    let idx = msg.token ? this.slots.findIndex((x) => x.token && safeEqual(msg.token, x.token)) : -1;
+    const rejoin = idx >= 0;
+    if (!rejoin) {
+      idx = this.slots.findIndex((x) => !x.token);
+      if (idx < 0) return reject('room_full');
+      this.slots[idx].token = randomToken(24);
     }
-    const old = this.guest;
-    this.guest = link;
-    if (old) old.close('replaced'); // 古い接続を切り替える（close ハンドラは this.guest !== old なので何もしない）
+    const slot = idx + 1;
+    const seat = this.slots[idx];
+    const old = seat.link;
+    seat.link = link;
+    if (old) old.close('replaced'); // 古い接続を切り替える（close ハンドラは seat.link !== old なので何もしない）
     if (this._gameMode) link.setGameMode(true);
 
-    link.on('message', (m) => this._onGuestMessage(link, m));
+    link.on('message', (m) => this._onGuestMessage(slot, link, m));
     link.on('close', (reason) => {
-      if (this.guest !== link) return;
-      this.guest = null;
-      this.emit('guest-disconnected', reason);
+      if (seat.link !== link) return;
+      seat.link = null;
+      this.emit('guest-disconnected', { slot, reason });
     });
     link.fastId = randomToken(12);
-    link.send({ type: 'join_accepted', token: this.guestToken, rejoin, room: this.getRoomState(), fast: link.fastId });
-    this.emit('guest-connected', { rejoin, replaced: !!old });
+    link.send({ type: 'join_accepted', token: seat.token, rejoin, slot, room: this.getRoomState(), fast: link.fastId });
+    this.emit('guest-connected', { slot, rejoin, replaced: !!old });
   }
 
-  _onGuestMessage(link, msg) {
+  _onGuestMessage(slot, link, msg) {
+    const seat = this.slots[slot - 1];
     if (msg.type === 'leave') {
-      // ゲストが自分の意思で退出: 枠を空ける
-      this.guestToken = null;
-      this.guest = null;
+      // ゲストが自分の意思で退出: 席を空ける
+      seat.token = null;
+      seat.link = null;
       link.close('leave');
-      this.emit('guest-left');
+      this.emit('guest-left', { slot });
       return;
     }
     if (msg.type === 'bye') {
-      // タブを閉じる/更新する直前の通知。枠は維持して切断扱いにする
+      // タブを閉じる/更新する直前の通知。席は維持して切断扱いにする
       link.close('bye');
       return;
     }
-    this.emit('message', msg);
+    this.emit('message', msg, slot);
   }
 
   setGameMode(inGame) {
-    this.guest?.setGameMode(inGame);
+    for (const x of this.slots) x.link?.setGameMode(inGame);
     this._gameMode = inGame;
   }
 
+  /** つながっているゲスト全員へ送る */
   send(msg) {
-    return this.guest ? this.guest.send(msg) : false;
+    let any = false;
+    for (const x of this.slots) if (x.link?.send(msg)) any = true;
+    return any;
+  }
+
+  /** 席 slot のゲストだけへ送る */
+  sendTo(slot, msg) {
+    return this.linkOf(slot)?.send(msg) || false;
   }
 
   sendFast(msg) {
-    return this.guest ? this.guest.sendFast(msg) : false;
+    let any = false;
+    for (const x of this.slots) if (x.link?.sendFast(msg)) any = true;
+    return any;
   }
 
   get congested() {
-    return !!this.guest?.congested;
+    return this.slots.some((x) => x.link?.congested);
   }
 
-  /** ゲスト枠を空けて新しいゲストを受け付けられるようにする */
-  freeGuestSlot() {
-    this.guestToken = null;
-    const g = this.guest;
-    this.guest = null;
+  /** 席 slot を空けて、新しいゲストを受け付けられるようにする（戻ってこないゲストの代わりに） */
+  freeGuestSlot(slot) {
+    const seat = this.slots[slot - 1];
+    if (!seat) return;
+    seat.token = null;
+    const g = seat.link;
+    seat.link = null;
     if (g) {
       g.send({ type: 'room_close', reason: 'kicked' });
       setTimeout(() => g.close('kicked'), 300);
@@ -492,14 +526,14 @@ export class HostNetwork extends Emitter {
     this.destroyed = true;
     clearTimeout(this._sigTimer);
     clearInterval(this._watchdog);
-    const g = this.guest;
-    this.guest = null;
-    if (g) g.send({ type: 'room_close', reason });
+    const gs = this.slots.map((x) => x.link).filter(Boolean);
+    for (const x of this.slots) x.link = null;
+    for (const g of gs) g.send({ type: 'room_close', reason });
     for (const p of this.pending) p.close('room-closed');
     this.pending.clear();
     const peer = this.peer;
     setTimeout(() => {
-      g?.close('room-closed');
+      for (const g of gs) g.close('room-closed');
       try {
         peer?.destroy();
       } catch {
@@ -657,6 +691,7 @@ export class GuestNetwork extends Emitter {
   _onJoined(link, msg) {
     this.link = link;
     this.token = msg.token;
+    this.slot = msg.slot; // 部屋の席（1・2）
     this.everJoined = true;
     this.retryCount = 0;
     this.lastError = null;

@@ -5,8 +5,8 @@ export const RACE = {
   COUNTDOWN: 3.6, // 開始カウントダウン（秒）。raceTime は -COUNTDOWN から始まり 0 で GO
   END_DELAY: 4.0, // 勝者確定から結果画面までの演出時間
   CHECKPOINTS: 12, // 1周あたりのチェックポイント数（0番がスタートライン）。長いコースなので復帰位置が遠くなりすぎないよう多めに
-  HUMANS: 2, // 0 = ホスト, 1 = ゲスト。2 以降は NPC
-  MAX_NPCS: 5, // 通常の NPC 最大 4 台 + ボス 1 台
+  MAX_HUMANS: 3, // 人間は最大 3 人（部屋の 0 = ホスト, 1・2 = ゲスト）。車は人間が先、そのあとに NPC
+  MAX_KARTS: 7, // 全部で 7 台まで（人間 + 通常の NPC + ボス）。通常の NPC は 6 - 人間の数 台まで
 };
 
 export const KART = {

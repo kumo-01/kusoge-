@@ -5,9 +5,10 @@
 
 import { KART, IN, RAIN, PAD, FOOD, ITEMS } from './constants.js';
 
-export function createKart(index, pos, boss = false) {
+export function createKart(index, pos, boss = false, npc = index >= 2, style = index) {
   return {
     i: index,
+    style, // 見た目と名前（0 柴犬 / 1 コーギー / 2 プードル / 3 パグ / 4 ダックス / 5 ハスキー / 6 ボス犬）。人間は部屋の席の番号
     x: pos.x,
     z: pos.z,
     y: 0,
@@ -36,7 +37,7 @@ export function createKart(index, pos, boss = false) {
     lapStart: 0,
     best: 0,
     bc: 0, // 体当たり演出のクールダウン
-    npc: index >= 2 ? 1 : 0,
+    npc: npc ? 1 : 0,
     boss: boss ? 1 : 0, // ボス犬（かなり強い NPC）
     fd: 0, // 持っているドッグフードの数（多いほど少し速い）
     ms: 1, // 最高速の倍率（NPC の手加減・追い上げ用）

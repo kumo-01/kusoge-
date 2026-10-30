@@ -4,10 +4,13 @@
 // PeerJS の DataConnection は serialization: 'raw' で使い、文字列の長さを
 // パース前に確認してから JSON.parse する（巨大データでクラッシュさせないため）。
 
-export const PROTOCOL_VERSION = 4; // 4: 飼い主・豪雨・犬小屋のアイテム化で状態の形が変わった（3: ドッグフード・ボス犬・連戦）（古いページとは遊べないように）
+export const PROTOCOL_VERSION = 5; // 5: 3 人対戦（部屋の状態・結果の形が変わった） / 4: 飼い主・豪雨・犬小屋のアイテム化で状態の形が変わった（3: ドッグフード・ボス犬・連戦）（古いページとは遊べないように）
 
 /** 1 メッセージの最大文字数 */
 export const MAX_MESSAGE_CHARS = 60000;
+
+/** 部屋の人数（席 0 = ホスト, 1・2 = ゲスト） */
+export const MAX_PLAYERS = 3;
 
 export const MSG = Object.freeze({
   // 接続・入室
@@ -40,7 +43,7 @@ export const MSG = Object.freeze({
 export const REJECT_REASONS = Object.freeze({
   version: 'アプリのバージョンが異なります。ページを再読み込みしてください。',
   bad_key: '招待URLが正しくありません。ホストに新しいURLをもらってください。',
-  room_full: 'この部屋はすでに2人そろっています。',
+  room_full: 'この部屋はすでに3人そろっています。',
   bad_request: '参加リクエストが不正です。',
 });
 
@@ -59,7 +62,7 @@ const MATCH = { matchId: id, gen: int(0, 1e9) };
 
 const SCHEMAS = {
   join_request: { v: int(0, 1000), key: str(64), token: opt(str(64)) },
-  join_accepted: { token: str(64), room: obj, rejoin: bool, fast: opt(str(32)) },
+  join_accepted: { token: str(64), room: obj, rejoin: bool, fast: opt(str(32)), slot: int(1, MAX_PLAYERS - 1) },
   join_rejected: { reason: str(32) },
   room_state: { room: obj },
   ready_change: { ready: bool },
@@ -140,30 +143,35 @@ function cleanOptions(o) {
   return out;
 }
 
-/** 連戦の途中経過（何戦目か・合計ポイント・各レースのポイント） */
+/** 連戦の途中経過（何戦目か・席ごとの合計ポイント・各レースのポイント） */
 function cleanSeries(r) {
   if (!obj(r) || !int(2, 12)(r.total) || !int(1, 12)(r.round)) return null;
   const pt = (v) => (int(0, 99999)(v) ? v : 0);
   const name = (v) => (typeof v === 'string' ? v.slice(0, 30) : '');
+  const pts = (a) => Array.from({ length: MAX_PLAYERS }, (_, i) => pt(Array.isArray(a) ? a[i] : 0));
   return {
     total: r.total,
     round: r.round,
-    host: pt(r.host),
-    guest: pt(r.guest),
+    scores: pts(r.scores),
     final: r.final === true,
-    history: Array.isArray(r.history) ? r.history.slice(0, 12).filter(obj).map((x) => ({ name: name(x.name), host: pt(x.host), guest: pt(x.guest) })) : [],
+    history: Array.isArray(r.history) ? r.history.slice(0, 12).filter(obj).map((x) => ({ name: name(x.name), points: pts(x.points) })) : [],
   };
 }
 
 export function sanitizeRoomState(r) {
   if (!obj(r)) return null;
-  if (!oneOf(...SCREENS)(r.screen) || !oneOf(...GUEST_LINK)(r.guest)) return null;
-  if (!int(0, 1e9)(r.rev) || !obj(r.ready)) return null;
+  if (!oneOf(...SCREENS)(r.screen) || !Array.isArray(r.players) || r.players.length !== MAX_PLAYERS) return null;
+  if (!int(0, 1e9)(r.rev)) return null;
+  const players = [];
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    const p = r.players[i];
+    if (!obj(p) || !oneOf(...GUEST_LINK)(p.link)) return null;
+    players.push({ link: i === 0 ? 'connected' : p.link, ready: p.ready === true });
+  }
   const room = {
     rev: r.rev,
     screen: r.screen,
-    guest: r.guest,
-    ready: { host: r.ready.host === true, guest: r.ready.guest === true },
+    players,
     startInMs: num(0, 10000)(r.startInMs) ? r.startInMs : null,
     gameId: id(r.gameId) ? r.gameId : null,
     options: cleanOptions(r.options),
@@ -182,31 +190,33 @@ export function sanitizeRoomState(r) {
       reason: str(16)(m.reason) ? m.reason : null,
       synced: m.synced === true,
       started: m.started === true,
+      players: Array.isArray(m.players) ? m.players.filter((v, i, a) => int(0, MAX_PLAYERS - 1)(v) && a.indexOf(v) === i).slice(0, MAX_PLAYERS) : [0, 1],
       opts: cleanOptions(m.opts), // このレースで実際に使う設定（ランダムは確定した値）
     };
   }
   return room;
 }
 
-/** 結果オブジェクトを画面表示用に安全な形へ整える（文字列のみ・長さ制限） */
+/** 結果オブジェクトを画面表示用に安全な形へ整える（文字列のみ・長さ制限）。values / points は人間の順（players の順） */
 export function sanitizeResult(r) {
   const s = (v, max = 40) => (typeof v === 'string' ? v.slice(0, max) : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
   if (!obj(r)) return null;
-  const rows = (a, max) => (Array.isArray(a) ? a.slice(0, max).filter(obj).map((x) => ({ label: s(x.label, 24), host: s(x.host), guest: s(x.guest) })) : []);
+  const players = Array.isArray(r.players) ? r.players.slice(0, MAX_PLAYERS).filter(obj) : [];
+  if (players.length < 2) return null;
+  const n = players.length;
+  const rows = (a, max) =>
+    Array.isArray(a)
+      ? a.slice(0, max).filter(obj).map((x) => (typeof x.text === 'string' ? { label: s(x.label, 24), text: s(x.text, 120) } : { label: s(x.label, 24), values: Array.from({ length: n }, (_, i) => s(Array.isArray(x.values) ? x.values[i] : '')) }))
+      : [];
   const pts = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(99999, Math.round(v))) : 0);
-  const player = (p) => ({
-    headline: s(p?.headline, 24),
-    detail: s(p?.detail, 60),
-  });
   return {
     gameId: id(r.gameId) ? r.gameId : '',
-    winner: r.winner === 'host' || r.winner === 'guest' ? r.winner : null,
+    winner: int(0, MAX_PLAYERS - 1)(r.winner) ? r.winner : null,
     title: s(r.title, 60),
-    host: player(r.host),
-    guest: player(r.guest),
+    players: players.map((p) => ({ slot: int(0, MAX_PLAYERS - 1)(p.slot) ? p.slot : 0, headline: s(p.headline, 24), detail: s(p.detail, 60) })),
     stats: rows(r.stats, 16),
     score: rows(r.score, 10),
     course: s(r.course, 30),
-    points: obj(r.points) ? { host: pts(r.points.host), guest: pts(r.points.guest) } : null,
+    points: Array.isArray(r.points) ? Array.from({ length: n }, (_, i) => pts(r.points[i])) : null,
   };
 }

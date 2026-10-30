@@ -29,9 +29,10 @@ export const LOOP_CONFIG = {
 const NET_EVERY = Math.max(1, Math.round(1 / LOOP_CONFIG.FIXED_DT / LOOP_CONFIG.SNAPSHOT_HZ)); // 60Hz ÷ 30Hz = 2 tick ごと
 
 export class GameManager extends Emitter {
-  constructor({ role, net, input, sound, music, layer }) {
+  constructor({ role, slot = null, net, input, sound, music, layer }) {
     super();
     this.role = role;
+    this.slot = slot; // 部屋の席（ホスト 0 / ゲスト 1・2）
     this.net = net;
     this.input = input;
     this.sound = sound;
@@ -55,7 +56,8 @@ export class GameManager extends Emitter {
   }
 
   /** ゲームモジュールを読み込んで起動する（一時停止状態で開始） */
-  async create(def, matchId, gen, options = {}) {
+  /** players: この試合に参加する席（ホストが先頭）。車の番号はこの順 */
+  async create(def, matchId, gen, options = {}, players = [0, 1]) {
     this.destroy();
     const token = ++this._token;
     const mod = await def.load();
@@ -67,13 +69,15 @@ export class GameManager extends Emitter {
     this.def = def;
     this.matchId = matchId;
     this.gen = gen;
+    this.players = players;
     this.running = false;
     this._history = [];
     this._container = container;
     const context = {
       role: this.role,
       isHost: this.isHost,
-      playerIndex: this.isHost ? 0 : 1,
+      players, // 参加する席。車の番号 i の人は players[i] の席
+      playerIndex: Math.max(0, players.indexOf(this.slot ?? 0)), // 自分の車の番号
       container,
       input: this.input,
       sound: this.sound,
@@ -186,14 +190,15 @@ export class GameManager extends Emitter {
     return false;
   }
 
-  /** 受信したゲーム関連メッセージを振り分ける */
-  handleMessage(msg) {
+  /** 受信したゲーム関連メッセージを振り分ける。slot: ホストが受け取ったときの送り主の席 */
+  handleMessage(msg, slot = null) {
     const game = this.game;
     if (!game || msg.matchId !== this.matchId) return;
     if (msg.gen !== this.gen) return; // 古い世代（一時停止・再同期前）のメッセージは無視
     try {
       if (msg.type === 'player_input' && this.isHost) {
-        if (this.running) game.onMessage({ type: 'player_input', seq: msg.seq, inputs: msg.inputs });
+        const player = this.players.indexOf(slot);
+        if (this.running && player > 0) game.onMessage({ type: 'player_input', player, seq: msg.seq, inputs: msg.inputs });
       } else if (msg.type === 'game_snapshot' && !this.isHost) {
         if (this.running) game.applyNetSnapshot(msg.snap, msg.ev || [], msg.seq);
       } else if (msg.type === 'game_msg') {

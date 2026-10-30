@@ -27,7 +27,7 @@ const EVENT_TYPES = new Set(['go', 'box', 'item', 'use', 'hit', 'slip', 'block',
 function cleanEvent(e) {
   if (!e || typeof e !== 'object' || !EVENT_TYPES.has(e.t)) return null;
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-  const idx = (v) => (Number.isInteger(v) && v >= 0 && v < RACE.HUMANS + RACE.MAX_NPCS ? v : 0);
+  const idx = (v) => (Number.isInteger(v) && v >= 0 && v < RACE.MAX_KARTS ? v : 0);
   return { id: n(e.id), t: e.t, k: idx(e.k), by: idx(e.by), r: idx(e.r), v: idx(e.v), x: n(e.x), z: n(e.z), s: n(e.s), b: Math.max(0, Math.min(64, n(e.b) | 0)), item: n(e.item) | 0, lap: n(e.lap) | 0, q: Math.max(-1, Math.min(2, n(e.q) | 0)), grant: !!e.grant, big: !!e.big, n: Math.max(0, Math.min(99, n(e.n) | 0)) };
 }
 
@@ -118,10 +118,10 @@ class DogKartGame {
   start(ctx) {
     this.ctx = ctx;
     this.isHost = ctx.isHost;
-    this.me = ctx.playerIndex;
+    this.me = ctx.playerIndex; // 自分の車の番号（人間は部屋の席の順に 0, 1, 2）
     this.sound = ctx.sound;
     this.track = new Track(ctx.options?.course ?? 0);
-    this.sim = new RaceSim(this.track, { npcs: ctx.options?.npcs ?? 0, boss: ctx.options?.boss ?? 0 });
+    this.sim = new RaceSim(this.track, { npcs: ctx.options?.npcs ?? 0, boss: ctx.options?.boss ?? 0, players: ctx.players });
     this.paused = true;
     this.finished = false;
     this.hud = new Hud(ctx.container, this.track, this.me, { round: ctx.options?.round, races: ctx.options?.races });
@@ -150,12 +150,7 @@ class DogKartGame {
     }
     // ホスト用
     this.prev = this.sim.s.karts.map((k) => ({ x: k.x, z: k.z, y: k.y, h: k.h }));
-    this.guestQueue = [];
-    this.guestHeld = 0;
-    this.lastQueuedSeq = 0;
-    this.starved = true;
-    this.starveTicks = 0;
-    this.carryOneshot = 0;
+    this.gq = this._newGuestQueues(); // ゲストごとの入力キュー（車の番号 1 以降）
     this.netEvents = [];
     this.evSeq = 0;
     // ゲスト用
@@ -221,43 +216,51 @@ class DogKartGame {
     return b;
   }
 
-  /** ホスト: キューからゲスト入力を 1 tick 分取り出す */
-  _nextGuestInput() {
-    const q = this.guestQueue;
+  _newGuestQueues() {
+    return Array.from({ length: this.sim.humans }, () => ({ queue: [], held: 0, lastSeq: 0, starved: true, starveTicks: 0, carry: 0 }));
+  }
+
+  /** ホスト: 人間 i（車の番号）の入力をキューから 1 tick 分取り出す */
+  _nextGuestInput(i) {
+    const g = this.gq[i];
+    const q = g.queue;
     // 溜まりすぎたら古い入力を捨てて追いつく（押した瞬間の入力は引き継ぐ）
     if (q.length > NET.INPUT_BUFFER_MAX) {
       while (q.length > 2) {
         const e = q.shift();
-        this.carryOneshot |= e.bits & IN.ONESHOT;
-        this.sim.s.ack = e.seq;
+        g.carry |= e.bits & IN.ONESHOT;
+        this.sim.s.acks[i] = e.seq;
       }
     }
-    if (!q.length || (this.starved && q.length < 2)) {
-      this.starved = true;
+    if (!q.length || (g.starved && q.length < 2)) {
+      g.starved = true;
       // 入力が途切れた（タブが裏に回った・通信が詰まった）ら、押しっぱなし扱いを解除する
-      if (++this.starveTicks > 15) this.guestHeld = 0;
-      return this.guestHeld;
+      if (++g.starveTicks > 15) g.held = 0;
+      return g.held;
     }
-    this.starved = false;
-    this.starveTicks = 0;
+    g.starved = false;
+    g.starveTicks = 0;
     const e = q.shift();
-    this.guestHeld = e.bits & IN.HELD;
-    this.sim.s.ack = e.seq;
-    const bits = e.bits | this.carryOneshot;
-    this.carryOneshot = 0;
+    g.held = e.bits & IN.HELD;
+    this.sim.s.acks[i] = e.seq;
+    const bits = e.bits | g.carry;
+    g.carry = 0;
     return bits;
   }
 
+  /** msg.player: 入力を送ってきた人の車の番号（ホストが、つながっている相手から決める） */
   onMessage(msg) {
     if (!this.isHost || msg.type !== 'player_input') return;
+    const g = this.gq[msg.player];
+    if (!g || !(msg.player > 0)) return;
     const n = msg.inputs.length;
     for (let i = 0; i < n; i++) {
       const seq = msg.seq - n + 1 + i;
-      if (seq <= this.lastQueuedSeq) continue; // 古い入力は無視
-      this.guestQueue.push({ seq, bits: msg.inputs[i] & 255 });
-      this.lastQueuedSeq = seq;
+      if (seq <= g.lastSeq) continue; // 古い入力は無視
+      g.queue.push({ seq, bits: msg.inputs[i] & 255 });
+      g.lastSeq = seq;
     }
-    if (this.guestQueue.length > 120) this.guestQueue.splice(0, this.guestQueue.length - 120);
+    if (g.queue.length > 120) g.queue.splice(0, g.queue.length - 120);
   }
 
   // ---- 固定ステップ更新 ----
@@ -272,9 +275,9 @@ class DogKartGame {
         p.y = ks[i].y;
         p.h = ks[i].h;
       }
-      const hostIn = this._readInput();
-      const guestIn = this._nextGuestInput();
-      this.sim.step(dt, [hostIn, guestIn]);
+      const inputs = [this._readInput()];
+      for (let i = 1; i < this.sim.humans; i++) inputs.push(this._nextGuestInput(i));
+      this.sim.step(dt, inputs);
       const ev = this.sim.drainEvents();
       if (ev.length) {
         this._handleEvents(ev);
@@ -301,9 +304,9 @@ class DogKartGame {
         this.ctx.sendInput(this.seq, this.sentInputs.slice());
         this.pending = [];
       }
-      if (NET.PREDICTION && this.pred.k && this.sim.s.karts[1].ow > 0) {
+      if (NET.PREDICTION && this.pred.k && this.sim.s.karts[this.me].ow > 0) {
         // 飼い主モード中は自動で走るのでホストの状態をそのまま使う（予測しない）
-        this.pred.reset(this.sim.s.karts[1]);
+        this.pred.reset(this.sim.s.karts[this.me]);
       } else if (NET.PREDICTION && this.pred.k) {
         const s = this.sim.s;
         const raceT = this._guestRaceTime();
@@ -351,17 +354,16 @@ class DogKartGame {
     if (this.isHost) {
       // 巻き戻し: 未処理のゲスト入力は破棄して確定済みの seq から受け直す
       this.prev = s.karts.map((k) => ({ x: k.x, z: k.z, y: k.y, h: k.h }));
-      this.guestQueue = [];
-      this.lastQueuedSeq = s.ack;
-      this.starved = true;
+      this.gq = this._newGuestQueues();
+      this.gq.forEach((g, i) => (g.lastSeq = s.acks[i] || 0));
       this.finished = false;
       this.netEvents = [];
     } else {
       this.sentInputs = [];
       this.buffer = [{ t: s.tick * this.ctx.fixedDt, s }];
       this.clockInit = false;
-      this.pred.reset(s.karts[1]);
-      this.seq = s.ack;
+      this.pred.reset(s.karts[this.me]);
+      this.seq = s.acks[this.me] || 0;
       this.pending = [];
     }
     this.cam?.reset();
@@ -404,7 +406,7 @@ class DogKartGame {
       this.clock += (t - this.clock) * 0.08;
     }
     this.sim.s = s;
-    if (NET.PREDICTION) this.pred.reconcile(s.karts[1], s.ack);
+    if (NET.PREDICTION) this.pred.reconcile(s.karts[this.me], s.acks[this.me] || 0);
     if (ev.length) this._handleEvents(ev.sort((a, b) => a.id - b.id));
   }
 
@@ -414,10 +416,12 @@ class DogKartGame {
     this.sound.setRain(0);
     this.tapPressed = false;
     if (this.isHost) {
-      this.guestQueue = [];
-      this.lastQueuedSeq = this.sim.s.ack;
-      this.guestHeld = 0;
-      this.starved = true;
+      this.gq.forEach((g, i) => {
+        g.queue = [];
+        g.lastSeq = this.sim.s.acks[i] || 0;
+        g.held = 0;
+        g.starved = true;
+      });
     } else {
       this.pending = [];
     }
@@ -637,7 +641,7 @@ class DogKartGame {
         karts[i] = { ...k, x: k.x + (Math.sin(k.h) * k.sp + k.kx) * ex, z: k.z + (Math.cos(k.h) * k.sp + k.kz) * ex };
       }
     }
-    if (NET.PREDICTION && this.pred.k && !(n.s.karts[1].ow > 0)) {
+    if (NET.PREDICTION && this.pred.k && !(n.s.karts[this.me]?.ow > 0)) {
       this.pred.decay(dt);
       const k = this.pred.k;
       // 画面の更新と 60Hz の更新はずれるので、直前の位置との間を補間して動きを滑らかにする
@@ -647,7 +651,7 @@ class DogKartGame {
       const pz = p ? lerp(p.z, k.z, al) : k.z;
       const py = p ? lerp(p.y, k.y, al) : k.y;
       const ph = p ? lerpAngle(p.h, k.h, al) : k.h;
-      karts[1] = { ...k, x: px + this.pred.off.x, z: pz + this.pred.off.z, y: py, h: ph + this.pred.off.h };
+      karts[this.me] = { ...k, x: px + this.pred.off.x, z: pz + this.pred.off.z, y: py, h: ph + this.pred.off.h };
     }
     // 飛んでいるホネは id で対応付けて補間
     const prevProj = new Map(a.s.proj.map((p) => [p.id, p]));
@@ -732,9 +736,9 @@ class DogKartGame {
     if (this.world) {
       const w = this.world;
       const winner = s.winner;
-      w.ensureKarts(karts.length, karts.findIndex((k) => k.boss));
+      w.ensureKarts(karts.map((k) => (k.boss ? 6 : k.style ?? 0)));
       karts.forEach((k, i) => {
-        const mood = winner < 0 ? 0 : i >= 2 ? (k.fin ? 1 : 0) : winner === i ? 1 : -1;
+        const mood = winner < 0 ? 0 : k.npc ? (k.fin ? 1 : 0) : winner === i ? 1 : -1;
         w.karts[i].setFirstPerson(firstPerson && i === this.me);
         w.karts[i].own = i === this.me;
         w.karts[i].update(k, dt, mood);

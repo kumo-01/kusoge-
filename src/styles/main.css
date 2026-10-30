@@ -217,6 +217,9 @@ p {
 .role-badge.blue {
   background: var(--blue);
 }
+.role-badge.pink {
+  background: #e0679f;
+}
 .status-group {
   font-size: 0.85rem;
   display: inline-flex;
@@ -483,6 +486,41 @@ p {
 .player-card.player-blue {
   border-color: #b9d6ff;
   background: linear-gradient(180deg, #fff 60%, #eef5ff);
+}
+.player-card.player-pink {
+  border-color: #f6c3dc;
+  background: linear-gradient(180deg, #fff 60%, #fff0f8);
+}
+.player-card.is-empty {
+  opacity: 0.6;
+  filter: grayscale(0.4);
+}
+/* 3 人分のカードは少し小さくして横に並べる */
+.players-row.three .player-card {
+  width: 190px;
+}
+.players-row.compact.three {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.players-row.compact.three .player-card {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  padding: 12px 4px;
+}
+.players-row.compact.three .player-name {
+  font-size: 1rem;
+}
+.players-row.compact.three .player-role {
+  font-size: 0.7rem;
+}
+.players-row.compact.three .player-card .avatar svg {
+  width: 64px;
+  height: 64px;
+}
+.players-row.compact.three .vs-badge {
+  display: none;
 }
 .player-card.is-me {
   transform: translateY(-4px);
@@ -754,6 +792,9 @@ kbd {
 }
 .result-player.player-blue {
   border-color: #b9d6ff;
+}
+.result-player.player-pink {
+  border-color: #f6c3dc;
 }
 .result-player.is-winner {
   transform: scale(1.05);
@@ -1281,9 +1322,10 @@ body[data-screen='game'] .toasts {
     gap: 10px;
   }
   .players-row.compact .player-card,
-  .player-card {
-    width: min(200px, 42vw);
-    padding: 14px 8px;
+  .player-card,
+  .players-row.three .player-card {
+    width: min(200px, 28vw);
+    padding: 14px 6px;
   }
   .player-name {
     font-size: 1.05rem;

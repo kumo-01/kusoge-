@@ -12,7 +12,7 @@ import { readInviteParams, loadGuestSession, clearInviteParams, clearGuestSessio
 const CLOSE_TEXT = {
   disband: 'ホストが部屋を解散しました。',
   host_left: 'ホストがページを閉じたため、部屋は終了しました。',
-  kicked: 'ホストがゲスト枠をリセットしました。',
+  kicked: 'ホストが席をリセットしました。',
   left: '部屋から退出しました。',
   self: '部屋を解散しました。',
 };
@@ -121,7 +121,7 @@ class App {
     if (this.room?.role !== 'host') return;
     const ok = await this.confirm({
       title: '部屋を解散しますか？',
-      text: '2人とも接続画面に戻り、部屋は削除されます。この操作は取り消せません。',
+      text: '全員が接続画面に戻り、部屋は削除されます。この操作は取り消せません。',
       ok: '解散する',
       danger: true,
     });
@@ -130,18 +130,18 @@ class App {
 
   async leave() {
     if (this.room?.role !== 'guest') return;
-    const ok = await this.confirm({ title: '部屋から退出しますか？', text: 'ゲスト枠が空き、もう一度参加するには招待URLを開き直す必要があります。', ok: '退出する', danger: true });
+    const ok = await this.confirm({ title: '部屋から退出しますか？', text: '席が空き、もう一度参加するには招待URLを開き直す必要があります。', ok: '退出する', danger: true });
     if (ok && this.room?.role === 'guest') this.room.leave();
   }
 
-  async confirmFreeSlot() {
+  async confirmFreeSlot(slot) {
     const ok = await this.confirm({
       title: '新しいゲストを招待しますか？',
-      text: '今のゲストの復帰を待つのをやめて枠を空けます。今のゲストは同じ部屋に戻れなくなります。',
-      ok: '枠を空ける',
+      text: '今のゲストの復帰を待つのをやめて席を空けます。今のゲストは同じ部屋に戻れなくなります。',
+      ok: '席を空ける',
       danger: true,
     });
-    if (ok && this.room?.role === 'host') this.room.freeGuestSlot();
+    if (ok && this.room?.role === 'host') this.room.freeGuestSlot(slot);
   }
 
   showInvite() {
@@ -151,7 +151,7 @@ class App {
       h('div.invite-row', null,
         h('input.invite-input', { value: url, readonly: true, onfocus: (e) => e.target.select() }),
         h('button.btn.btn-secondary', { onclick: () => this.copyText(url) }, '📋 コピー')),
-      h('p.small.muted', null, 'ゲスト枠が空いているときだけ、新しい人が参加できます。')));
+      h('p.small.muted', null, '席（ゲスト2人まで）が空いているときだけ、新しい人が参加できます。')));
   }
 
   toggleMute() {

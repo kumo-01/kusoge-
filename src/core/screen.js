@@ -6,7 +6,7 @@ import * as select from '../screens/select.js';
 import * as ready from '../screens/ready.js';
 import * as game from '../screens/game.js';
 import * as result from '../screens/result.js';
-import { statusPill } from '../screens/common.js';
+import { statusPill, PLAYERS } from '../screens/common.js';
 
 const SCREENS = { connect, home, select, ready, game, result };
 
@@ -64,20 +64,24 @@ export class ScreenRouter {
     const isHost = room.role === 'host';
     const rtt = room.rtt != null ? `${Math.round(room.rtt)}ms` : '';
     let status;
-    if (isHost) status = h('span.status-group', null, 'ゲスト: ', statusPill(room.state.guest, room.state.guest === 'connected' ? rtt : ''));
-    else status = h('span.status-group', null, 'ホスト: ', statusPill(room.linkState === 'connected' ? 'connected' : room.linkState, room.linkState === 'connected' ? rtt : ''));
+    if (isHost) {
+      // ゲストの席ごとの状態（空いている席は「未参加」）
+      status = h('span.status-group', null, ...[1, 2].flatMap((slot) => [`${PLAYERS[slot].role}: `, statusPill(room.state.players[slot].link, room.state.players[slot].link === 'connected' ? (room.net.rttOf(slot) != null ? `${Math.round(room.net.rttOf(slot))}ms` : '') : '')]));
+    } else {
+      status = h('span.status-group', null, 'ホスト: ', statusPill(room.linkState === 'connected' ? 'connected' : room.linkState, room.linkState === 'connected' ? rtt : ''));
+    }
+    const mine = PLAYERS[room.slot ?? 1] || PLAYERS[1];
+    const waiting = isHost ? [1, 2].filter((slot) => room.state.players[slot].link === 'waiting') : [];
 
     this.header.replaceChildren(
       h('div.header-left', null,
         h('span.header-logo', null, '🐾 わんわんパーティー'),
-        h(`span.role-badge.${isHost ? 'red' : 'blue'}`, null, isHost ? '🔴 ホスト（柴犬）' : '🔵 ゲスト（コーギー）')),
+        h(`span.role-badge.${mine.color}`, null, `${mine.icon} ${mine.role}（${mine.name}）`)),
       h('div.header-right', null,
         status,
         isHost && room.signaling !== 'online' ? h('span.pill.pill-warn', { title: 'シグナリングサーバーとの接続。ゲーム中のデータ通信には影響しません' }, '仲介サーバー再接続中') : null,
         isHost ? h('button.btn.btn-small.btn-light', { onclick: () => app.showInvite() }, '🔗 招待URL') : null,
-        isHost && room.state.guest === 'waiting'
-          ? h('button.btn.btn-small.btn-light', { onclick: () => app.confirmFreeSlot() }, '新しいゲストを招待')
-          : null,
+        ...waiting.map((slot) => h('button.btn.btn-small.btn-light', { onclick: () => app.confirmFreeSlot(slot) }, waiting.length > 1 ? `${PLAYERS[slot].role}の席を空ける` : '新しいゲストを招待')),
         h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
         h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'),
         isHost
