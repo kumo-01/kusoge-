@@ -21,8 +21,8 @@ import { EngineClient } from './engineClient.js';
 export const LOOP_CONFIG = {
   FIXED_DT: 1 / 60, // ゲーム更新 60Hz
   SNAPSHOT_HZ: 30, // ネットワーク配信（毎秒30回）
-  MAX_FRAME_DT: 0.25, // 長いフレームでも物理が暴走しないように
-  MAX_STEPS: 8,
+  MAX_FRAME_DT: 1.0, // 端末が止まっていた時間のうち、追いつく上限（これより長く止まっていた分は捨てる）
+  MAX_STEPS: 24, // 1 フレームで進める更新の上限（止まっていた分はこの速さで追いつく。受け取る側は、追いつけない分をサーバーの進みに合わせて別途追いつく）
   HISTORY_SEC: 6, // 切断時に巻き戻せる範囲
   MIN_RENDER_MS: 14, // 描画は最大 60fps（120Hz の画面では 1 フレームおきに描いて電池と発熱を抑える）
 };
@@ -293,7 +293,9 @@ export class GameManager extends Emitter {
     const FIXED = LOOP_CONFIG.FIXED_DT;
 
     if (this.running) {
-      this._acc += dt;
+      // 長いフレーム（端末が一瞬止まった）のあとは、捨てずに数フレームかけて追いつく。
+      // 捨てると、自分の操作の番号（seq）がサーバーの時間より遅れて、自分の車が後ろに戻されたり飛んだりする
+      this._acc = Math.min(LOOP_CONFIG.MAX_FRAME_DT, this._acc + dt);
       let steps = 0;
       while (this._acc >= FIXED && steps < LOOP_CONFIG.MAX_STEPS) {
         game.update(FIXED);
@@ -303,7 +305,6 @@ export class GameManager extends Emitter {
         if (this.isHost && !this.serverSim && this.running && this.game === game && (this._netTick = (this._netTick | 0) + 1) % NET_EVERY === 0) this._sendSnapshot();
         if (this.game !== game || !this.running) break;
       }
-      if (steps >= LOOP_CONFIG.MAX_STEPS) this._acc = 0;
     }
     if (this.game !== game) return;
     // 画面の更新間隔を測り、120Hz などの高リフレッシュの画面だけ描画を間引く

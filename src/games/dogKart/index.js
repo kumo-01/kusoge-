@@ -99,6 +99,15 @@ class DogKartGame {
     this.lateMax = 0;
     this.interp = NET.INTERP_DELAY; // 今の補間遅延（通信の揺れに合わせて増減）
     this.pred = new Predictor();
+    // 通信の診断（画面の隅に出せる。snaps: 瞬間移動で合わせた回数、nohist: 履歴がなく補正できなかった回数、corr: 直近の補正の最大）
+    this.diag = { snaps: 0, nohist: 0, corr: 0, corrT: 0, corrShown: 0, lead: 0, catchup: 0, resync: 0, slowed: 0, frames: 0, long: 0, fps: 0, fpsT: 0 };
+    try {
+      this.diagOn = /[?&]diag=1/.test(location.search) || localStorage.getItem('wanwan.diag') === '1';
+      if (/[?&]diag=1/.test(location.search)) localStorage.setItem('wanwan.diag', '1');
+      else if (/[?&]diag=0/.test(location.search)) localStorage.removeItem('wanwan.diag');
+    } catch {
+      this.diagOn = false;
+    }
     this.remote = new RemoteKarts();
     this.seq = 0;
     this.pending = [];
@@ -178,46 +187,86 @@ class DogKartGame {
       if (result) this.ctx.finish(result);
     } else {
       const bits = this._readInput();
-      this.seq++;
-      this.pending.push(bits);
-      // 順番どおり確実に届く通信（WebSocket）なら、新しい分だけ送る。取りこぼしがある通信（P2P の高速チャンネル）は、直近の分を重ねて送る
-      const reliable = !!this.ctx.reliableInput;
-      if (!reliable) {
-        this.sentInputs.push(bits);
-        if (this.sentInputs.length > NET.INPUT_REDUNDANCY) this.sentInputs.shift();
+      const ack = this.sim.s.acks[this.me] || 0;
+      // サーバーより先に進みすぎている（サーバーの計算が遅い・詰まった）なら、ときどき 1 tick 止まって合わせる。
+      // 先に進みすぎると、操作がサーバーで使われるまでの待ちが長くなる（操作が遅れて効く）
+      const rttTicks = ((this.ctx.getNetInfo().rtt ?? 100) / 1000) * 60;
+      this._leadHigh = this.seq - ack > rttTicks + NET.LEAD_SLACK ? (this._leadHigh || 0) + 1 : 0;
+      if (this._leadHigh > 120 && !(bits & IN.ONESHOT) && (this._skipN = (this._skipN | 0) + 1) % 4 === 0) {
+        this.diag.slowed++;
+        return;
       }
-      // 入力が変わらない間は送る回数を減らす（変わったらすぐ送る）。受け取る側は押しっぱなしを保つので、見た目や操作感は変わらない
-      this._same = bits === this._lastBits && !(bits & IN.ONESHOT) ? this._same + 1 : 0;
-      this._lastBits = bits;
-      // （何も押していない間は 1 秒に 2 回、押しっぱなしの間は約 8 回。サーバーは前の入力を保つ）
-      const every = this._same >= 30 && bits === 0 ? 30 : this._same >= 8 ? 8 : NET.INPUT_SEND_EVERY;
-      if (this.pending.length >= every || bits & IN.ONESHOT) {
-        this.ctx.sendInput(this.seq, reliable ? this.pending.slice() : this.sentInputs.slice());
-        this.pending = [];
+      this._stepLocal(dt, bits);
+      // サーバーの時間に遅れていたら（端末が止まっていた・とても重い）、同じ操作のまま先へ進めて追いつく。
+      // 遅れたままだと、確定状態と照らし合わせる履歴がなくなり、自分の車が補正されずにずれてから瞬間移動する
+      const lead = this.seq - ack;
+      if (this.pred.k && lead < NET.CATCHUP_LEAD) {
+        const behind = ack + NET.CATCHUP_LEAD - this.seq;
+        const dg = this.diag;
+        if (behind > NET.CATCHUP_RESYNC) {
+          // 遅れすぎ: 確定状態に合わせ直す
+          this.seq = ack + NET.CATCHUP_LEAD - 1;
+          this.pred.reset(this.sim.s.karts[this.me]);
+          this.remote.reset();
+          this.pending = [];
+          dg.resync++;
+        } else {
+          const n = Math.min(behind, NET.CATCHUP_PER_FRAME);
+          for (let i = 0; i < n; i++) this._stepLocal(dt, bits & IN.HELD);
+          dg.catchup += n;
+        }
+        this.predPrev = this.pred.k ? { x: this.pred.k.x, z: this.pred.k.z, y: this.pred.k.y, h: this.pred.k.h } : null;
       }
-      if (NET.PREDICTION && this.pred.k && this.sim.s.karts[this.me].ow > 0) {
-        // 飼い主モード中は自動で走る（操作はできない）。自分の車も、ほかの車と同じく確定状態から同じ時刻まで先を推定して使う
-        // （確定状態をそのまま使うと、自分の車とまわりが数メートル後ろへ飛び、終わったときに前へ飛ぶ）
-        const s = this.sim.s;
-        const run = s.phase === 'racing';
-        const pk = this.pred.k;
-        this.predPrev = { x: pk.x, z: pk.z, y: pk.y, h: pk.h };
-        this.remote.step(this.track, run, dt);
-        const g = this.remote.g[this.me];
-        if (g) this.pred.reset(g);
-        else stepKart(pk, s.karts[this.me].in, dt, this.track, run, true);
-      } else if (NET.PREDICTION && this.pred.k) {
-        const s = this.sim.s;
-        const raceT = this._guestRaceTime();
-        const active = s.phase === 'racing' || (s.phase === 'countdown' && raceT >= 0);
-        // タイミングブーストのリングは自分の車の予測で出す（判定はホストが入力の順番どおりに行う）
-        if (active && s.phase !== 'finished') stepTiming(this.pred.k, this.sim.progressOf(this.pred.k), s.tc, !!(bits & IN.TAP), dt, null);
-        const pk = this.pred.k;
-        this.predPrev = { x: pk.x, z: pk.z, y: pk.y, h: pk.h };
-        stepKart(this.pred.k, bits, dt, this.track, active && s.phase !== 'finished');
-        this.pred.record(this.seq);
-        this.remote.step(this.track, active && s.phase !== 'finished', dt);
-      }
+    }
+  }
+
+  /** 受け取る側の 1 tick: 操作を記録して送り、自分の車を予測し、ほかの車の推定も進める */
+  _stepLocal(dt, bits) {
+    // 1 回の描画の間に進めた tick 数（端末が止まったあとの追いつき）。描画のときに、飛んだ分を少しずつ追いつかせる
+    if (!this._burstN && this.pred.k) {
+      const k = this.pred.k;
+      this._burstFrom = { x: k.x + this.pred.off.x, z: k.z + this.pred.off.z, others: this.remote.g.map((g) => g && { x: g.x, z: g.z }) };
+    }
+    this._burstN = (this._burstN | 0) + 1;
+    this.seq++;
+    this.pending.push(bits);
+    // 順番どおり確実に届く通信（WebSocket）なら、新しい分だけ送る。取りこぼしがある通信（P2P の高速チャンネル）は、直近の分を重ねて送る
+    const reliable = !!this.ctx.reliableInput;
+    if (!reliable) {
+      this.sentInputs.push(bits);
+      if (this.sentInputs.length > NET.INPUT_REDUNDANCY) this.sentInputs.shift();
+    }
+    // 入力が変わらない間は送る回数を減らす（変わったらすぐ送る）。受け取る側は押しっぱなしを保つので、見た目や操作感は変わらない
+    this._same = bits === this._lastBits && !(bits & IN.ONESHOT) ? this._same + 1 : 0;
+    this._lastBits = bits;
+    // （何も押していない間は 1 秒に 2 回、押しっぱなしの間は約 8 回。サーバーは前の入力を保つ）
+    const every = this._same >= 30 && bits === 0 ? 30 : this._same >= 8 ? 8 : NET.INPUT_SEND_EVERY;
+    if (this.pending.length >= every || bits & IN.ONESHOT) {
+      this.ctx.sendInput(this.seq, reliable ? this.pending.slice() : this.sentInputs.slice());
+      this.pending = [];
+    }
+    if (NET.PREDICTION && this.pred.k && this.sim.s.karts[this.me].ow > 0) {
+      // 飼い主モード中は自動で走る（操作はできない）。自分の車も、ほかの車と同じく確定状態から同じ時刻まで先を推定して使う
+      // （確定状態をそのまま使うと、自分の車とまわりが数メートル後ろへ飛び、終わったときに前へ飛ぶ）
+      const s = this.sim.s;
+      const run = s.phase === 'racing';
+      const pk = this.pred.k;
+      this.predPrev = { x: pk.x, z: pk.z, y: pk.y, h: pk.h };
+      this.remote.step(this.track, run, dt);
+      const g = this.remote.g[this.me];
+      if (g) this.pred.reset(g);
+      else stepKart(pk, s.karts[this.me].in, dt, this.track, run, true);
+    } else if (NET.PREDICTION && this.pred.k) {
+      const s = this.sim.s;
+      const raceT = this._guestRaceTime();
+      const active = s.phase === 'racing' || (s.phase === 'countdown' && raceT >= 0);
+      // タイミングブーストのリングは自分の車の予測で出す（判定はホストが入力の順番どおりに行う）
+      if (active && s.phase !== 'finished') stepTiming(this.pred.k, this.sim.progressOf(this.pred.k), s.tc, !!(bits & IN.TAP), dt, null);
+      const pk = this.pred.k;
+      this.predPrev = { x: pk.x, z: pk.z, y: pk.y, h: pk.h };
+      stepKart(this.pred.k, bits, dt, this.track, active && s.phase !== 'finished');
+      this.pred.record(this.seq);
+      this.remote.step(this.track, active && s.phase !== 'finished', dt);
     }
   }
 
@@ -300,7 +349,12 @@ class DogKartGame {
     }
     this.sim.s = s;
     if (NET.PREDICTION) {
-      this.pred.reconcile(s.karts[this.me], s.acks[this.me] || 0);
+      const r = this.pred.reconcile(s.karts[this.me], s.acks[this.me] || 0);
+      const dg = this.diag;
+      if (r.kind === 'snap') dg.snaps++;
+      else if (r.kind === 'nohist') dg.nohist++;
+      if (r.d > dg.corr) dg.corr = r.d;
+      dg.lead = this.seq - (s.acks[this.me] || 0);
       // ほかの車を、自分の車と同じ時刻まで進める（自分の操作がサーバーで使われるのは ack の何 tick 後か = 自分の車がどれだけ先か）
       const ahead = Math.max(0, Math.min(NET.REMOTE_AHEAD_MAX, this.seq - (s.acks[this.me] || 0)));
       const active = s.phase === 'racing' || (s.phase === 'countdown' && this._guestRaceTime() >= 0);
@@ -522,6 +576,23 @@ class DogKartGame {
     }
     // 他の車を描く時刻。補間の遅延が増えたり、端末が一瞬止まったりしても、時刻は戻さない
     // （戻すと、速い車が数メートル後ろへ飛ぶ）。目標との差は、進む速さを変えて少しずつ縮める
+    // 端末が止まったあとの追いつき（1 回の描画の間に何 tick も進めた）は、自分の車もほかの車も急に飛ばさず、少しずつ追いつかせる
+    const burst = this._burstN | 0;
+    this._burstN = 0;
+    if (burst >= NET.BURST_MIN && this._burstFrom && this.pred.k) {
+      const f = this._burstFrom;
+      const k = this.pred.k;
+      const o = this.pred.off;
+      const r = (burst - 1) / burst; // 1 tick 分は通常の動き
+      const jx = (f.x - (k.x + o.x)) * r;
+      const jz = (f.z - (k.z + o.z)) * r;
+      if (Math.hypot(jx, jz) < NET.CATCHUP_SMOOTH) {
+        o.x += jx;
+        o.z += jz;
+        this.remote.absorb(f.others, r);
+      }
+    }
+    this._burstFrom = null;
     const target = this.clock - this.interp;
     let renderT = target;
     if (this._rt !== undefined && !this.paused) {
@@ -657,7 +728,7 @@ class DogKartGame {
     }
     const mine = karts[this.me];
     // テスト用: 画面に出す位置を記録する（VITE_TEST_HOOKS=1 でビルドしたときだけ）
-    if (import.meta.env?.VITE_TEST_HOOKS && globalThis.__wanwanProbe && !this.paused) globalThis.__wanwanProbe.push([performance.now(), this.auth ? s.tick : this.seq - 1 + Math.max(0, Math.min(1, alpha)), karts.map((k) => [k.x, k.z, k.h, k.sp])]);
+    if (import.meta.env?.VITE_TEST_HOOKS && globalThis.__wanwanProbe && !this.paused) globalThis.__wanwanProbe.push([performance.now(), this.auth ? s.tick : this.seq - 1 + Math.max(0, Math.min(1, alpha)), karts.map((k) => [k.x, k.z, k.h, k.sp]), s.acks?.[this.me] || 0, this.diag.snaps, this.diag.nohist, s.tick]);
     const raceT = this.auth ? s.t : this._guestRaceTime();
 
     // カウントダウンの音（双方とも自分の時計で鳴らす）
@@ -700,6 +771,22 @@ class DogKartGame {
     // HUD
     const info = this.ctx.getNetInfo();
     const rtt = info.rtt != null ? `${Math.round(info.rtt)}ms` : '';
+    // 診断表示（URL に ?diag=1 をつけて開くと出る。先行: 自分の操作の番号がサーバーより何 tick 先か / 補正: 直近 3 秒の自分の車の補正の最大 / 飛: 瞬間移動 / 追: 追いついた tick 数 / 履: 履歴がなく補正できなかった回数）
+    const dg = this.diag;
+    dg.frames++;
+    dg.fpsT += dt;
+    if (dt > 0.1) dg.long++;
+    if (dg.fpsT >= 1) {
+      dg.fps = Math.round(dg.frames / dg.fpsT);
+      dg.frames = 0;
+      dg.fpsT = 0;
+    }
+    if ((dg.corrT += dt) > 3) {
+      dg.corrT = 0;
+      dg.corrShown = dg.corr;
+      dg.corr = 0;
+    }
+    const diag = this.diagOn && !this.auth ? ` | ${dg.fps}fps 長${dg.long} 先行${dg.lead}t 補正${(dg.corrShown ?? dg.corr).toFixed(1)}m 飛${dg.snaps} 追${dg.catchup} 待${dg.slowed} 履${dg.nohist} 再${dg.resync}` : '';
     const sk = s.karts[this.me]; // 周回・アイテムは確定状態を表示
     // タイミングブーストと豪雨は、ゲストは自分の予測（押したタイミングがそのまま判定に使われる）で表示する
     const pk = !this.auth && NET.PREDICTION && this.pred.k ? this.pred.k : sk;
@@ -728,7 +815,7 @@ class DogKartGame {
         wet: mine.wet || 0,
         food: sk.fd || 0,
         karts,
-        netText: this.paused ? '⏸ 一時停止中' : `📶 ${this.serverSim ? 'サーバー' : this.isHost ? 'ゲスト' : 'ホスト'}と接続中 ${rtt}`,
+        netText: this.paused ? '⏸ 一時停止中' : `📶 ${this.serverSim ? 'サーバー' : this.isHost ? 'ゲスト' : 'ホスト'}と接続中 ${rtt}${diag}`,
         netTone: this.paused ? 'warn' : info.rtt != null && info.rtt > 250 ? 'warn' : 'ok',
       },
       dt,

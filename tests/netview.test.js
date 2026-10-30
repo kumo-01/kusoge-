@@ -101,3 +101,38 @@ test('見た目のずれの戻し方: 端末が重くて 1 フレームが長く
   for (let i = 0; i < 20; i++) r.decay(0.5);
   assert.ok(Math.abs(r.off[0].x) < 1e-3 && Math.abs(r.off[0].h) < 1e-3);
 });
+
+test('追いつき: 一気に進めた分を見た目のずれに入れ、少しずつ追いつかせる', () => {
+  const e = racing();
+  const r = new RemoteKarts();
+  r.sync(e.sim.s.karts, 1, 5, e.track, true, DT);
+  const before = r.g.map((g) => g && { x: g.x, z: g.z });
+  const shown0 = r.view(0, 1);
+  for (let i = 0; i < 18; i++) r.step(e.track, true, DT); // 0.3 秒止まっていた分を一気に
+  r.absorb(before, 17 / 18);
+  const shown1 = r.view(0, 1);
+  assert.ok(Math.hypot(shown1.x - shown0.x, shown1.z - shown0.z) < 1.2, '見た目は 1 tick 分しか動かない');
+  for (let i = 0; i < 90; i++) r.decay(DT);
+  const o = r.off[0];
+  assert.ok(Math.hypot(o.x, o.z) < 0.05, '1.5 秒で追いつく');
+});
+
+test('自分の車: 復帰（rc の増加）は瞬時に合わせ、それ以外の大きなずれは滑らかに直す', () => {
+  const e = racing();
+  const p = new Predictor();
+  const k0 = e.sim.s.karts[1];
+  p.reset(k0);
+  for (let s = 1; s <= 3; s++) {
+    stepKart(p.k, IN.UP, DT, e.track, true);
+    p.record(s);
+  }
+  const fields = (src) => { const o = { ...src }; for (const f of ['lap', 'cp', 'item', 'roll', 'fin', 'ft', 'lapStart', 'best', 'stats', 'spinDur', 'wrong', 'bump', 'fd', 'ow', 'tb', 'tw']) o[f] = k0[f]; return o; };
+  // 10m ずれていても瞬間移動しない（補正は入るが、見た目は少しずつ）
+  let res = p.reconcile(fields({ ...p.hist[1], x: p.hist[1].x + 10 }), 2);
+  assert.equal(res.kind, 'ok');
+  assert.ok(Math.abs(p.off.x + 10) < 1e-6, 'ずれは見た目のずれに入る');
+  // 復帰（クールダウンが増えた）は瞬時
+  res = p.reconcile(fields({ ...p.hist[1], x: p.hist[1].x + 3, rc: 3 }), 3);
+  assert.equal(res.kind, 'snap');
+  assert.equal(p.off.x, 0);
+});

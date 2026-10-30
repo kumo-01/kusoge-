@@ -47,10 +47,11 @@ export class Predictor {
   }
 
   /** server: ホストが確定したゲストの車, ack: そのとき適用済みだった入力 seq */
+  /** @returns {{ d: number, kind: 'ok'|'snap'|'nohist'|'init' }} 補正の大きさと種類（診断表示用） */
   reconcile(server, ack) {
     if (!this.k) {
       this.reset(server);
-      return;
+      return { d: 0, kind: 'init' };
     }
     for (const f of ['lap', 'cp', 'item', 'roll', 'fin', 'ft', 'lapStart', 'best', 'stats', 'spinDur', 'wrong', 'bump', 'fd', 'ow']) this.k[f] = server[f];
     // タイミングブーストは自分の画面（予測）で進める。ホストのほうが先に進んでいたら合わせる
@@ -62,18 +63,20 @@ export class Predictor {
     const e = this.hist[0];
     if (!e || e.seq !== ack) {
       // 対応する履歴がない（再開直後など）: 大きくずれていれば合わせる
-      if (Math.hypot(server.x - this.k.x, server.z - this.k.z) > NET.SNAP_DIST * 2) this.reset(server);
-      return;
+      const far = Math.hypot(server.x - this.k.x, server.z - this.k.z);
+      if (far > NET.SNAP_FAR) this.reset(server);
+      return { d: far, kind: far > NET.SNAP_FAR ? 'snap' : 'nohist' };
     }
     const dx = server.x - e.x;
     const dz = server.z - e.z;
     const dh = angleDiff(e.h, server.h);
-    if (Math.hypot(dx, dz) > NET.SNAP_DIST || Math.abs(dh) > 1.5) {
+    const respawned = server.rc > e.rc + 0.5; // 復帰のクールダウンが増えた = 復帰した
+    if (respawned || Math.hypot(dx, dz) > NET.SNAP_FAR || Math.abs(dh) > 1.5) {
       // 復帰などの瞬間移動はそのまま合わせる
       for (const key of PHYS_KEYS) this.k[key] = server[key];
       this.hist = [];
       this.off = { x: 0, z: 0, y: 0, h: 0, vx: 0, vz: 0, vh: 0 };
-      return;
+      return { d: Math.hypot(dx, dz), kind: 'snap' };
     }
     // 補正の前後で速度が変わる分も見た目のずれに入れて、動きの速さ・向きの変わり方がつながるようにする
     const k = this.k;
@@ -93,6 +96,7 @@ export class Predictor {
     this.off.h -= dh;
     this.off.vx += vx0 - velX(k);
     this.off.vz += vz0 - velZ(k);
+    return { d: Math.hypot(dx, dz), kind: 'ok' };
   }
 
   decay(dt) {
@@ -137,7 +141,7 @@ export class RemoteKarts {
         // （位置だけでなく速度もつながるので、補正のたびに向きがカクッと変わらない）
         const dx = old.x + o.x - k.x;
         const dz = old.z + o.z - k.z;
-        if (Math.hypot(dx, dz) > NET.SNAP_DIST * 2) {
+        if (k.rc > old.rc + 0.5 || Math.hypot(dx, dz) > NET.SNAP_FAR) {
           o.x = o.z = o.y = o.h = o.vx = o.vz = o.vh = 0; // 復帰などの瞬間移動はそのまま
         } else {
           o.vx += velX(old) - velX(k);
@@ -153,6 +157,18 @@ export class RemoteKarts {
       this.p[i] = prev;
     }
     this.g.length = this.p.length = karts.length;
+  }
+
+  /** 追いつきで一気に進めたあと、進めた分を見た目のずれに入れて少しずつ追いつかせる。before: 進める前の位置 */
+  absorb(before, r = 1) {
+    for (let i = 0; i < this.g.length; i++) {
+      const k = this.g[i];
+      const b = before[i];
+      const o = this.off[i];
+      if (!k || !b || !o) continue;
+      o.x += (b.x - k.x) * r;
+      o.z += (b.z - k.z) * r;
+    }
   }
 
   /** 1 tick 進める（自分の車の予測と同じタイミングで） */
