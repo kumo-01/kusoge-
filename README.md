@@ -211,6 +211,8 @@ npm test         # レースシミュレーション・通信プロトコルの�
    （`version` に、いま動いているサーバーの版が出ます。ゲームの計算 `src/games/dogKart/` を変えたときは `worker/relay/index.js` の `SERVER_VERSION` も上げてください。Cloudflare の自動ビルドは `worker/relay/` の変更でしか動かないことがあります）
 4. このリポジトリの Settings → Secrets and variables → Actions → **Variables** に `RELAY_URL` としてその URL を登録し、Pages のデプロイをやり直す
 
+- 動きがカクつくときは、ゲームの URL の末尾に `?diag=1` をつけて開くと、画面の通信表示に診断（fps・長いフレームの回数・操作の先行 tick 数・自分の車の補正の大きさ・瞬間移動や追いつきの回数）が出ます。`?diag=0` で消えます。
+
 手元でビルドするときは `VITE_RELAY_URL=https://…workers.dev npm run build` です。ローカルで試すだけなら、`worker/relay` で `npx wrangler dev` を動かし、`VITE_RELAY_URL=http://127.0.0.1:8787` でビルドします。
 
 ### 自前の PeerServer を使う場合（任意）

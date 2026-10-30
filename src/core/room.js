@@ -32,6 +32,7 @@ function startFailText(err) {
 export const PLAYER_LABEL = ['ホスト', 'ゲスト1', 'ゲスト2'];
 
 export const ROOM_CONFIG = {
+  SYNC_RETRY_MS: 4000, // 状態を送ってから ACK が来ないとき、送り直すまでの時間
   START_DELAY_MS: 2500, // 2人準備完了 → ゲーム画面へ移るまで
   RESUME_COUNTDOWN_MS: 3000, // 一時停止からの再開カウントダウン
 };
@@ -65,6 +66,9 @@ export class HostRoom extends Emitter {
     this._acks = new Set(); // いまの世代の状態を読み込んだ（ACK した）席
     this._srv = null; // サーバー計算の試合のとき { base, gid, ak, tickets }
     this._hostLoaded = false; // サーバー計算: ホスト自身も、いまの世代の状態を読み込んだか
+    this._syncSentAt = {}; // 席ごとに、いまの世代の状態を送った時刻（ACK が来なければ送り直す）
+    this._hostSyncAt = 0;
+    this._syncTimer = setInterval(() => this._resendStaleSync(), 1000);
     this._used = {}; // 連戦でこれまでに使った設定（ランダムのコースを重ねないため）
     this.closed = false;
     this.net = new HostNetwork({ getRoomState: () => this.publicState() });
@@ -409,13 +413,42 @@ export class HostRoom extends Emitter {
       this._hostLoaded = false;
       this.gm.engineCommand({ type: 'e_sync', gen: m.gen });
     }
-    const base = { type: 'game_start', gameId: this.state.gameId, matchId: m.matchId, gen: m.gen };
+    this._hostSyncAt = now();
     for (const slot of this._guestsInMatch()) {
       if (!this.net.isConnected(slot)) continue;
       this.state.players[slot].link = 'syncing';
-      this.net.sendTo(slot, srv ? { ...base, snapshot: {}, server: { gid: srv.gid, ticket: srv.tickets[slot] } } : { ...base, snapshot: this.gm.getSnapshot() });
+      this._syncSentAt[slot] = now();
+      this.net.sendTo(slot, this._fullSyncMsg(slot));
     }
     this._updateSynced();
+  }
+
+  /** ゲスト slot へ送る「いまの世代の完全な状態」（サーバー計算では、サーバーの試合 ID と席のチケットだけ） */
+  _fullSyncMsg(slot) {
+    const m = this.state.match;
+    const srv = this._srv;
+    const base = { type: 'game_start', gameId: this.state.gameId, matchId: m.matchId, gen: m.gen };
+    return srv ? { ...base, snapshot: {}, server: { gid: srv.gid, ticket: srv.tickets[slot] } } : { ...base, snapshot: this.gm.getSnapshot() };
+  }
+
+  /**
+   * 同期の安全装置（1 秒ごと）: 状態を送ったのに ACK が来ないゲストへ、いまの世代の状態をもう一度送る。
+   * 接続が切り替わる瞬間に送ると届かないことがあり、そのままだと「状態復元中」のまま再開できなくなる
+   */
+  _resendStaleSync() {
+    const m = this.state.match;
+    if (this.closed || !m || !this.gm.game || m.synced || this.state.screen !== 'game') return;
+    const t = now();
+    if (this._srv && !this._hostLoaded && t - this._hostSyncAt > ROOM_CONFIG.SYNC_RETRY_MS) {
+      this._hostSyncAt = t;
+      this.gm.engineCommand({ type: 'e_sync_request' });
+    }
+    for (const slot of this._guestsInMatch()) {
+      if (this._acks.has(slot) || !this.net.isConnected(slot) || this.state.players[slot].link !== 'syncing') continue;
+      if (t - (this._syncSentAt[slot] || 0) < ROOM_CONFIG.SYNC_RETRY_MS) continue;
+      this._syncSentAt[slot] = t;
+      this.net.sendTo(slot, this._fullSyncMsg(slot));
+    }
   }
 
   _startRunning(delayMs) {
@@ -479,9 +512,11 @@ export class HostRoom extends Emitter {
         this.gm.setGen(m.gen);
       }
       const msg = { type: 'pause', matchId: m.matchId, gen: m.gen, reason, snapshot: this._srv ? {} : this.gm.getSnapshot() };
+      this._hostSyncAt = now();
       for (const g of this._guestsInMatch()) {
         if (!this.net.isConnected(g)) continue;
         this.state.players[g].link = 'syncing';
+        this._syncSentAt[g] = now();
         this.net.sendTo(g, msg);
       }
     }
@@ -560,6 +595,7 @@ export class HostRoom extends Emitter {
     this.closed = true;
     this._cancelStart();
     clearTimeout(this._resumeTimer);
+    clearInterval(this._syncTimer);
     document.removeEventListener('visibilitychange', this._onVisibility);
     if (this._srv) this.gm.engineCommand({ type: 'e_abort' });
     this._srv = null;
