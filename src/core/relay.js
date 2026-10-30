@@ -169,7 +169,19 @@ export class RelayPeer extends Ev {
       this.emit('open', this.id);
       return;
     }
-    if (data === '!no') return; // 直後の close(4403) で扱う
+    if (data === '!no') {
+      // 同じ部屋 ID を別のホストが使っている（切断の知らせを待たずにエラーにする）
+      if (!this._everOpened) {
+        this._ws = null;
+        try {
+          ws.close();
+        } catch {
+          /* noop */
+        }
+        this.emit('error', Object.assign(new Error('unavailable-id'), { type: 'unavailable-id' }));
+      }
+      return;
+    }
     if (data.startsWith('!c')) {
       const i = data.indexOf(':');
       const id = data.slice(2, i < 0 ? undefined : i);
