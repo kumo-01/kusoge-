@@ -208,6 +208,7 @@ npm test         # レースシミュレーション・通信プロトコルの�
 1. [Cloudflare](https://dash.cloudflare.com/sign-up) に無料登録し、**Workers & Pages → 作成 → GitHub のリポジトリをインポート**でこのリポジトリを選ぶ（プロジェクト名は `worker/relay/wrangler.toml` の `name`（`kusoge`）と同じにする）
 2. プロジェクトの **設定 → ビルド** で、**ルートディレクトリ** を `worker/relay`、**ビルドコマンド** を空、**デプロイコマンド** を `npx wrangler deploy` にして、再ビルドする
 3. 成功すると `https://kusoge.<サブドメイン>.workers.dev` が使えるようになる。ブラウザで開いて `{"ok":true,...}` と出れば動いています
+   （`version` に、いま動いているサーバーの版が出ます。ゲームの計算 `src/games/dogKart/` を変えたときは `worker/relay/index.js` の `SERVER_VERSION` も上げてください。Cloudflare の自動ビルドは `worker/relay/` の変更でしか動かないことがあります）
 4. このリポジトリの Settings → Secrets and variables → Actions → **Variables** に `RELAY_URL` としてその URL を登録し、Pages のデプロイをやり直す
 
 手元でビルドするときは `VITE_RELAY_URL=https://…workers.dev npm run build` です。ローカルで試すだけなら、`worker/relay` で `npx wrangler dev` を動かし、`VITE_RELAY_URL=http://127.0.0.1:8787` でビルドします。

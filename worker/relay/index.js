@@ -17,6 +17,10 @@
 //   "!x<id>"         ゲスト <id> の接続を切る
 // ゲストへは本文をそのまま渡す。最初に "!ok"（接続できた）か "!no"（ホスト不在など）が届く。
 
+// サーバーの版。ゲームの計算（src/games/dogKart/ の engine・race・physics など）を変えたら、ここも上げる。
+// Cloudflare の自動ビルドは worker/relay/ の変更でしか動かないことがあるため（/health で今の版を確認できる）
+const SERVER_VERSION = '2026-10-30.2';
+
 const ROOM_RE = /^[A-Za-z0-9-]{8,64}$/;
 const MAX_MESSAGE = 70000; // アプリ側の上限（60000 文字）より少し大きく
 const MAX_GUEST_CONNECTIONS = 12; // 同時に受ける「ゲスト側の接続」の数
@@ -27,7 +31,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/' || url.pathname === '/health') {
-      return new Response(JSON.stringify({ ok: true, service: 'wanwan-relay' }), { headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, service: 'wanwan-relay', version: SERVER_VERSION }), { headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } });
     }
     if (url.pathname !== '/ws' && url.pathname !== '/game') return new Response('not found', { status: 404 });
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
