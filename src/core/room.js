@@ -19,6 +19,15 @@ import { getGame, defaultOptions, validOptions, resolveMatchOptions } from '../g
 import { sanitizeRoomState, sanitizeResult, REJECT_REASONS, MAX_PLAYERS } from './protocol.js';
 import { clearGuestSession } from './reconnect.js';
 
+/** ゲームを始められなかった理由を、画面に出す文にする（原因ごとに言い分ける） */
+function startFailText(err) {
+  const m = String(err?.message || err || '');
+  if (/dynamically imported module|Importing a module script|Loading chunk|Failed to fetch/i.test(m)) return 'ゲームの読み込みに失敗しました。ページを再読み込みしてからもう一度お試しください。';
+  if (/full-timeout|no-engine|engine|socket|refused/i.test(m)) return 'ゲームサーバーにつなげませんでした。もう一度お試しください。';
+  if (/WebGL|context/i.test(m)) return 'ゲームの起動に失敗しました（3D表示が使えません。画面は簡易表示になります）';
+  return `ゲームの起動に失敗しました（${m.slice(0, 60) || '原因不明'}）`;
+}
+
 /** 席の呼び名（トーストなどに使う） */
 export const PLAYER_LABEL = ['ホスト', 'ゲスト1', 'ゲスト2'];
 
@@ -368,7 +377,7 @@ export class HostRoom extends Emitter {
       await this.gm.firstFrame;
     } catch (err) {
       console.error(err);
-      this._toast('ゲームの起動に失敗しました（WebGL が使えない可能性があります）');
+      this._toast(startFailText(err));
       this.abortGame();
       return;
     }
@@ -665,7 +674,7 @@ export class GuestRoom extends Emitter {
             await this.gm.firstFrame; // 重い初回描画を済ませてから ACK する
           } catch (err) {
             console.error(err);
-            this._toast('ゲームの起動に失敗しました（WebGL が使えない可能性があります）');
+            this._toast(startFailText(err));
             return;
           }
           if (this.closed || this.state?.screen !== 'game') {
