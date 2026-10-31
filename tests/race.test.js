@@ -1076,7 +1076,8 @@ test('3 人対戦: ボットが 3 人で完走し、結果・ポイント・順�
   assert.equal(clean.players.length, 3);
   assert.equal(clean.points.length, 3);
   assert.deepEqual(clean.stats.find((x) => x.label === '着順').text, r.stats.find((x) => x.label === '着順').text);
-  assert.equal(sanitizeResult({ players: [{ slot: 0 }] }), null, '1 人分しかない結果は捨てる');
+  assert.equal(sanitizeResult({ players: [] }), null, '人のいない結果は捨てる');
+  assert.equal(sanitizeResult({ players: [{ slot: 0 }] }).players.length, 1, 'ひとりモードの結果（1 人分）は受け付ける');
 });
 
 test('3 人対戦: 3 人のポイント・ファステストラップ・定期配信の往復（acks）', () => {

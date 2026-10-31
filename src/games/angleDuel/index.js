@@ -20,15 +20,22 @@ export function createGame() {
 /** 2 つの角度（度）の差（0〜180） */
 export function angleError(a, b) {
   const d = Math.abs((((a - b) % 360) + 360) % 360);
-  return Math.min(d, 360 - d);
+  return Math.round(Math.min(d, 360 - d) * 10) / 10;
 }
+
+/** 角度を 0.1° 単位の文字に（12 → "12.0"） */
+export const fmtDeg = (a) => (Math.round(a * 10) / 10).toFixed(1);
 
 /** 1 回分のポイント（ずれが小さいほど多い。勝った人は +20） */
 export function anglePoints(err, win) {
   return Math.max(0, Math.round(100 - err * 2)) + (win ? 20 : 0);
 }
 
-const norm = (a) => ((Math.round(a) % 360) + 360) % 360;
+/** 0〜359.9 の 0.1° 単位にそろえる */
+export function norm(a) {
+  const v = ((Math.round(a * 10) % 3600) + 3600) % 3600;
+  return v / 10;
+}
 
 const recent = []; // ホスト: 最近のお題（連戦で似た角度が続かないように）
 function pickTarget() {
@@ -61,10 +68,10 @@ class AngleDuel extends HostedGame {
     const num = (v, d, lo, hi) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
     return {
       t: num(r.t, 0, -10, 3600),
-      target: norm(num(r.target, 90, 0, 359)),
-      base: norm(num(r.base, 0, 0, 359)),
+      target: norm(num(r.target, 90, 0, 359.9)),
+      base: norm(num(r.base, 0, 0, 359.9)),
       limit: num(r.limit, 10, 3, 60),
-      ans: Array.from({ length: this.n }, (_, i) => norm(num(Array.isArray(r.ans) ? r.ans[i] : 0, 0, 0, 359))),
+      ans: Array.from({ length: this.n }, (_, i) => norm(num(Array.isArray(r.ans) ? r.ans[i] : 0, 0, 0, 359.9))),
       revealed: !!r.revealed,
       revealT: num(r.revealT, num(r.t, 0, -10, 3600), -10, 3600),
       done: !!r.done,
@@ -125,28 +132,29 @@ class AngleDuel extends HostedGame {
     const errs = s.ans.map((a) => angleError(a, s.target));
     const best = Math.min(...errs);
     const winners = errs.map((e, i) => (e === best ? i : -1)).filter((i) => i >= 0);
-    const win = winners.length === 1 ? winners[0] : -1;
+    const solo = this.n === 1;
+    const win = winners.length === 1 && !solo ? winners[0] : -1; // ひとりモードは勝ちボーナスなし
     const order = errs.map((e, i) => i).sort((a, b) => errs[a] - errs[b]);
     const rank = (i) => 1 + errs.filter((e) => e < errs[i]).length;
     const pts = errs.map((e, i) => anglePoints(e, i === win));
     const players = errs.map((e, i) => ({
       slot: this.who(i).slot,
-      headline: i === win ? '🏆 勝ち！' : win < 0 && e === best ? '🤝 引き分け' : this.n === 2 ? '負け…' : `${rank(i)}位…`,
-      detail: `${s.ans[i]}°（ずれ ${e}°）`,
+      headline: solo ? (e <= 1 ? '🎯 ほぼぴったり！' : e <= 5 ? '😺 おしい！' : '🐶 もう少し') : i === win ? '🏆 勝ち！' : win < 0 && e === best ? '🤝 引き分け' : this.n === 2 ? '負け…' : `${rank(i)}位…`,
+      detail: `${fmtDeg(s.ans[i])}°（ずれ ${fmtDeg(e)}°）`,
     }));
     return {
       gameId: 'angleDuel',
       winner: win >= 0 ? this.who(win).slot : null,
-      title: win >= 0 ? `${this.who(win).name}の勝ち！ずれ ${best}°` : `引き分け！ずれ ${best}°`,
+      title: solo ? `ずれ ${fmtDeg(best)}°！` : win >= 0 ? `${this.who(win).name}の勝ち！ずれ ${fmtDeg(best)}°` : `引き分け！ずれ ${fmtDeg(best)}°`,
       course: `お題 ${s.target}°`,
       players,
       stats: [
-        { label: '作った角度', values: s.ans.map((a) => `${a}°`) },
-        { label: 'ずれ', values: errs.map((e) => `${e}°`) },
-        { label: '順位', text: order.map((i, k) => `${k + 1}. ${this.who(i).name}（${errs[i]}°）`).join('　') },
+        { label: '作った角度', values: s.ans.map((a) => `${fmtDeg(a)}°`) },
+        { label: 'ずれ', values: errs.map((e) => `${fmtDeg(e)}°`) },
+        { label: '順位', text: order.map((i, k) => `${k + 1}. ${this.who(i).name}（${fmtDeg(errs[i])}°）`).join('　') },
       ],
       score: [
-        { label: '🎯 ずれ', values: errs.map((e) => `${e}° → ${Math.max(0, Math.round(100 - e * 2))}`) },
+        { label: '🎯 ずれ', values: errs.map((e) => `${fmtDeg(e)}° → ${Math.max(0, Math.round(100 - e * 2))}`) },
         { label: '🏆 勝ちボーナス', values: errs.map((e, i) => (i === win ? '+20' : '-')) },
         { label: '今回の合計', values: pts.map((p) => `${p} pt`) },
       ],
@@ -171,7 +179,11 @@ class AngleDuel extends HostedGame {
       sub: h('div.ang-sub', null, '基準線から 反時計回り（左回り）に測ります'),
       timer: h('div.g2d-timer', null, h('div.g2d-timer-bar'), h('span.g2d-timer-num', null, '')),
       canvas: h('canvas.ang-canvas'),
-      foot: h('div.ang-foot', { style: { color: me.col } }, `${me.icon} あなた（${me.name}）: 外周の丸をドラッグ、または円の中をタップして動かそう`),
+      foot: h('div.ang-foot', { style: { color: me.col } },
+        h('div', null, `${me.icon} あなた（${me.name}）: 外周の丸をドラッグ、または円の中をタップ。下のボタン・矢印キーで 0.1° ずつ`),
+        h('div.ang-nudge', null,
+          [[-1, '↻ −1°'], [-0.1, '↻ −0.1°'], [0.1, '↺ +0.1°'], [1, '↺ +1°']].map(([d, label]) =>
+            h('button.btn.btn-small.btn-light', { type: 'button', onclick: () => this.nudge(d), 'aria-label': `${d > 0 ? '左回りに' : '右回りに'} ${Math.abs(d)}°` }, label)))),
     };
     this.root.classList.add('ang'); // 「ad」で始まる名前は広告ブロッカーに隠されるので使わない
     // 左の列（横長で低い画面のとき）にまとめる部品は .g2d-side に入れる（ふつうの画面では、上下にばらして並ぶ）
@@ -195,6 +207,23 @@ class AngleDuel extends HostedGame {
     c.addEventListener('pointermove', this._onMove);
     c.addEventListener('pointerup', this._onUp);
     c.addEventListener('pointercancel', this._onUp);
+    // 矢印キー: ↑→ で左回りに 0.1°、↓← で右回りに 0.1°（Shift で 1°）
+    this._onKey = (e) => {
+      const d = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key];
+      if (!d || this.phase !== 'play') return;
+      e.preventDefault();
+      this.nudge(d * (e.shiftKey ? 1 : 0.1));
+    };
+    window.addEventListener('keydown', this._onKey);
+  }
+
+  /** つまみを d 度だけ動かす（反時計回りが +） */
+  nudge(d) {
+    if (this.phase !== 'play' || this.paused) return;
+    this.myA = norm(this.myA + d);
+    if (!this.touched) this.sound.play('click');
+    this.touched = true;
+    this._send(true);
   }
 
   unmount() {
@@ -203,6 +232,7 @@ class AngleDuel extends HostedGame {
     c.removeEventListener('pointermove', this._onMove);
     c.removeEventListener('pointerup', this._onUp);
     c.removeEventListener('pointercancel', this._onUp);
+    window.removeEventListener('keydown', this._onKey);
   }
 
   _aim(e) {
@@ -392,7 +422,7 @@ class AngleDuel extends HostedGame {
         arm(a, p.col, 5, 11 * appear, '');
         g.globalAlpha = 1;
         const [x, y] = pt(a, R + 24);
-        labels.push({ text: `${p.name} ${a}°`, col: p.col, x, y, alpha: appear });
+        labels.push({ text: `${p.name} ${fmtDeg(a)}°`, col: p.col, x, y, alpha: appear });
       });
       // 名前のラベル: 画面からはみ出さず、重ならないように上下にずらす
       g.font = '800 15px "M PLUS Rounded 1c", sans-serif';
@@ -440,7 +470,7 @@ class AngleDuel extends HostedGame {
           h('div.g2d-results', null,
             lines.map((x) => {
               const p = this.who(x.i);
-              return h(`div.g2d-res${x.e === best ? '.best' : ''}`, { style: { '--c': p.col } }, x.e === best ? '👑 ' : '', `${p.name}`, h('b', null, ` ずれ ${x.e}°`), h('small', null, `（${s.ans[x.i]}°）`));
+              return h(`div.g2d-res${x.e === best ? '.best' : ''}`, { style: { '--c': p.col } }, x.e === best ? '👑 ' : '', `${p.name}`, h('b', null, ` ずれ ${fmtDeg(x.e)}°`), h('small', null, `（${fmtDeg(s.ans[x.i])}°）`));
             })),
         );
       }

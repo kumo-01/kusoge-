@@ -39,8 +39,8 @@ export function mount(el, app) {
     const myReady = s.players[room.slot]?.ready === true;
     const sum = roomSummary(s);
     const cards = [];
-    for (let i = 0; i < MAX_PLAYERS; i++) cards.push(playerCard(i, { me: i === room.slot, status: linkFor(app, i), ready: s.players[i].ready, colorWord: def?.colorWord || '' }));
-    countdownEl = h('div.start-countdown', { hidden: true }, h('div.cd-label', null, '全員準備OK！まもなく開始'), h('div.cd-num', null, '3'));
+    for (let i = 0; i < (s.solo ? 1 : MAX_PLAYERS); i++) cards.push(playerCard(i, { me: i === room.slot, status: linkFor(app, i), ready: s.players[i].ready, colorWord: def?.colorWord || '' }));
+    countdownEl = h('div.start-countdown', { hidden: true }, h('div.cd-label', null, app.room?.state?.solo ? 'まもなく開始' : '全員準備OK！まもなく開始'), h('div.cd-num', null, '3'));
     lastShown = null;
 
     el.replaceChildren(
@@ -60,17 +60,17 @@ export function mount(el, app) {
               ? h('table.controls', null,
                   h('tbody', null, def.controls.map(([k, v]) => h('tr', null, h('td', null, h('kbd', null, k)), h('td', null, v)))))
               : null,
-            def?.tips?.length ? [h('h3', null, '💡 ルール'), h('ul.tips', null, def.tips.map((t) => h('li', null, t))), h('p.small', null, '🏁 人間のうち、先に3周した人が勝ち！')] : null,
+            def?.tips?.length ? [h('h3', null, '💡 ルール'), h('ul.tips', null, def.tips.map((t) => h('li', null, t))), def.id === 'dogKart' ? h('p.small', null, '🏁 人間のうち、先に3周した人が勝ち！') : null] : null,
           ),
           h(
             'div.ready-side',
             null,
             optionsCard(def, s, isHost),
-            h('div.players-row.compact.three', null, cards),
+            s.solo ? null : h('div.players-row.compact.three', null, cards),
             h(
               `button.btn.btn-xl.${myReady ? 'btn-ghost' : 'btn-primary'}`,
               { onclick: () => { app.sound.play('ready'); room.setReady(!myReady); } },
-              myReady ? '準備完了を取り消す' : '✋ 準備完了！',
+              s.solo ? (myReady ? 'やめる' : '▶ スタート！') : myReady ? '準備完了を取り消す' : '✋ 準備完了！',
             ),
             !sum.enough ? h('p.small.warn-text', null, '相手の参加を待っています…（2人以上そろうと開始できます。最大3人）') : !sum.allConnected ? h('p.small.warn-text', null, '接続が切れている人を待っています…') : null,
             isHost ? h('button.btn.btn-ghost', { onclick: () => room.goSelect() }, '← ゲーム選択へ戻る') : null,

@@ -49,6 +49,7 @@ class Music {
     this.wanted = null;
     this.tempoScale = 1;
     this.dim = false;
+    this.hold = false;
     this.step = 0;
     this.nextTime = 0;
     this.gain = null;
@@ -119,12 +120,21 @@ class Music {
     if (this.gain && ctx) this.gain.gain.setTargetAtTime(this._vol(), ctx.currentTime, 0.2);
   }
 
+  /** ゲームが BGM を消してほしいとき（リズムのゲームなど）。true の間は音量 0 */
+  setHold(on) {
+    if (this.hold === !!on) return;
+    this.hold = !!on;
+    const ctx = this.sound.ctx;
+    if (this.gain && ctx) this.gain.gain.setTargetAtTime(this._vol(), ctx.currentTime, 0.15);
+  }
+
   setTempoScale(x) {
     this.tempoScale = x;
   }
 
   _vol() {
     const t = TRACKS[this.track];
+    if (this.hold) return 0;
     return (t ? t.volume : 0.4) * (this.dim ? 0.35 : 1) * 0.35;
   }
 

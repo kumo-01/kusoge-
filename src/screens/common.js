@@ -116,6 +116,6 @@ export function roomSummary(state) {
   return {
     occupied,
     allConnected: state.players.every((p) => p.link === 'none' || p.link === 'connected'),
-    enough: occupied.length >= 2,
+    enough: !!state.solo || occupied.length >= 2,
   };
 }

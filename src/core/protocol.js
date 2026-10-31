@@ -225,7 +225,7 @@ export function sanitizeResult(r) {
   const s = (v, max = 40) => (typeof v === 'string' ? v.slice(0, max) : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
   if (!obj(r)) return null;
   const players = Array.isArray(r.players) ? r.players.slice(0, MAX_PLAYERS).filter(obj) : [];
-  if (players.length < 2) return null;
+  if (players.length < 1) return null; // ひとりモードは 1 人
   const n = players.length;
   const rows = (a, max) =>
     Array.isArray(a)

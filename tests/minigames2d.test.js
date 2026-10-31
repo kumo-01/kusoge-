@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { angleError, anglePoints } from '../src/games/angleDuel/index.js';
-import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt, MAX_POINTS } from '../src/games/prefBattle/score.js';
+import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt, MAX_POINTS, unitKm, lengthKm } from '../src/games/prefBattle/score.js';
 
 const DATA = JSON.parse(fs.readFileSync(new URL('../src/games/prefBattle/japan-prefs.json', import.meta.url)));
 const pref = (name) => DATA.prefs.find((p) => p.name === name);
@@ -14,6 +14,9 @@ test('角度: ずれは円の上での差（0〜180）', () => {
   assert.equal(angleError(10, 350), 20);
   assert.equal(angleError(0, 180), 180);
   assert.equal(angleError(359, 0), 1);
+  // 0.1° 単位
+  assert.equal(angleError(90.3, 90), 0.3);
+  assert.equal(angleError(359.9, 0.2), 0.3);
   assert.equal(anglePoints(0, true), 120);
   assert.equal(anglePoints(10, false), 80);
   assert.equal(anglePoints(80, false), 0);
@@ -40,30 +43,48 @@ test('県境データ: 47 都道府県があり、県境は陸の境だけ（北
 });
 
 test('一致率: 本物どおりは 100%、ずれるほど・半分だけ・塗りつぶし・別の県は低い', () => {
-  const K = DATA.view.kmPerUnit;
-  for (const name of ['埼玉県', '香川県', '長野県', '岐阜県']) {
+  const V = DATA.view;
+  for (const name of ['埼玉県', '香川県', '長野県', '岐阜県', '青森県', '鹿児島県']) {
     const p = pref(name);
-    const T = tolerance(p, K);
+    const T = tolerance(p, V);
     const truth = prefLines(p);
-    const shift = (km) => truth.map((l) => l.map(([x, y]) => [x + km / K, y]));
-    const s = (lines) => scoreDrawing(truth, lines, T).pct;
+    const k = unitKm(V, (p.box[1] + p.box[3]) / 2);
+    const shift = (km) => truth.map((l) => l.map(([x, y]) => [x + km / k, y]));
+    const s = (lines) => scoreDrawing(truth, lines, V, T).pct;
     assert.equal(s(truth), 100, name);
-    assert.ok(s(shift(3)) > 70 && s(shift(3)) < 95, `${name} ずれ 3km: ${s(shift(3))}`);
-    assert.ok(s(shift(6)) < s(shift(3)), `${name} ずれ 6km は 3km より低い`);
+    // 満点の距離（T/4）以内のずれは 100%
+    assert.equal(s(shift(T * 0.2)), 100, `${name} ずれ ${T * 0.2}km`);
+    assert.ok(s(shift(T * 0.5)) > 50 && s(shift(T * 0.5)) < 98, `${name} ずれ T/2: ${s(shift(T * 0.5))}`);
+    assert.ok(s(shift(T * 0.8)) < s(shift(T * 0.5)), `${name} 遠いほど低い`);
     assert.ok(s(truth.map((l) => l.slice(0, l.length >> 1))) < 85, `${name} 半分`);
+    // 同じ所を 2 回なぞっても下がらない
+    assert.equal(s([...truth, ...truth]), 100, `${name} 2 回なぞる`);
     const [x0, y0, x1, y1] = p.borderBox;
     const scribble = [Array.from({ length: 400 }, (_, i) => [x0 + ((i * 37) % 100) / 100 * (x1 - x0), y0 + ((i * 61) % 100) / 100 * (y1 - y0)])];
     assert.ok(s(scribble) < 15, `${name} 塗りつぶし ${s(scribble)}`);
     assert.equal(s([]), 0);
+    // 平均のずれは km で測れている
+    const r = scoreDrawing(truth, shift(3), V, T);
+    assert.ok(r.dev > 0.5 && r.dev <= 3.05, `${name} 平均のずれ ${r.dev}`);
   }
-  assert.ok(scoreDrawing(prefLines(pref('埼玉県')), prefLines(pref('鹿児島県')), tolerance(pref('埼玉県'), K)).pct === 0);
-  // 海岸線まで描くと（県全体の形）、県境の外の線が多いので下がる: 神奈川県は県境より海岸線のほうが長い
+  assert.ok(scoreDrawing(prefLines(pref('埼玉県')), prefLines(pref('鹿児島県')), V, tolerance(pref('埼玉県'), V)).pct === 0);
+  // 海岸線まで描くと（県全体の形）、県境の外の線が多いので下がる
   const kana = pref('神奈川県');
-  const T = tolerance(kana, K);
+  const T = tolerance(kana, V);
   const truth = prefLines(kana);
   const [x0, y0, x1, y1] = kana.box;
-  const coast = [[x1, y0], [x1, y1], [x0, y1]]; // 県境でない側をぐるっと
-  assert.ok(scoreDrawing(truth, [...truth, coast], T).pct < scoreDrawing(truth, truth, T).pct);
+  const coast = [[x1, y0], [x1, y1], [x0, y1]];
+  assert.ok(scoreDrawing(truth, [...truth, coast], V, T).pct < scoreDrawing(truth, truth, V, T).pct);
+});
+
+test('距離: メルカトルの縮尺を緯度で直して地上の km で測る', () => {
+  const V = DATA.view;
+  // 北ほど 1 単位が短い（青森は鹿児島より短い）
+  assert.ok(unitKm(V, pref('青森県').box[1]) < unitKm(V, pref('鹿児島県').box[1]));
+  // 地図の範囲の幅（経度 24°）は、北緯 36° で約 2160km
+  const y36 = (() => { let lo = 0, hi = V.h; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; const Y = V.Y0 + m / V.S; const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * Y))) * 180 / Math.PI; if (lat > 36) lo = m; else hi = m; } return lo; })();
+  const len = lengthKm([[[0, y36], [1000, y36]]], V);
+  assert.ok(Math.abs(len - 24 * 111.32 * Math.cos(36 * Math.PI / 180)) < 5, `${len}`);
 });
 
 test('描いた線: 送る形に詰めて戻せる。点が多すぎれば間引いて上限に収める。消しゴムで線が分かれる', () => {
@@ -82,4 +103,32 @@ test('描いた線: 送る形に詰めて戻せる。点が多すぎれば間引
   assert.equal(cut.length, 2);
   assert.ok(cut[0].length + cut[1].length < line.length);
   assert.equal(eraseAt([line], 0, 0, 1)[0], line, '何も消えなければそのまま');
+});
+
+test('反応速度: 速いほど高い。フライング・時間切れは 0', async () => {
+  const { reactionPoints, reactionRank, FOUL, TIMEOUT } = await import('../src/games/reaction/index.js');
+  assert.equal(reactionPoints(150, false), 100);
+  assert.equal(reactionPoints(100, false), 100);
+  assert.equal(reactionPoints(250, false), 80);
+  assert.equal(reactionPoints(250, true), 100);
+  assert.equal(reactionPoints(900, false), 0);
+  assert.equal(reactionPoints(FOUL, true), 0);
+  assert.equal(reactionPoints(TIMEOUT, false), 0);
+  assert.match(reactionRank(FOUL), /フライング/);
+});
+
+test('リズム: お題の間隔ぴったりは 100%、ずれるほど低い。BPM を間隔から求める', async () => {
+  const { rhythmScore } = await import('../src/games/rhythm/index.js');
+  const exact = rhythmScore(Array(7).fill(500), 120);
+  assert.equal(exact.acc, 100);
+  assert.equal(exact.bpm, 120);
+  const slow = rhythmScore(Array(7).fill(550), 120); // 10% 遅い
+  assert.equal(slow.dev, 10);
+  assert.equal(slow.acc, 60);
+  assert.ok(Math.abs(slow.bpm - 109.1) < 0.1);
+  // 平均は合っていても、ばらつくと下がる
+  const wobble = rhythmScore([400, 600, 400, 600, 400, 600, 500], 120);
+  assert.ok(wobble.acc < 80 && wobble.sd > 50);
+  assert.equal(rhythmScore([], 120).acc, 0);
+  assert.equal(rhythmScore(Array(7).fill(1000), 120).acc, 0); // 倍の間隔（半分のテンポ）
 });

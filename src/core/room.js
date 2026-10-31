@@ -13,7 +13,7 @@
 
 import { Emitter, randomHex, randomToken, now } from './util.js';
 import { relayBase } from './relay.js';
-import { HostNetwork, GuestNetwork, describePeerError } from './network.js';
+import { HostNetwork, GuestNetwork, LocalNetwork, describePeerError } from './network.js';
 import { GameManager } from './gameManager.js';
 import { getGame, defaultOptions, validOptions, resolveMatchOptions } from '../games/registry.js';
 import { sanitizeRoomState, sanitizeResult, REJECT_REASONS, MAX_PLAYERS } from './protocol.js';
@@ -41,9 +41,11 @@ export const ROOM_CONFIG = {
 // ホスト
 // ======================================================================
 export class HostRoom extends Emitter {
-  constructor({ sound, music, input, layer }) {
+  /** solo: ひとりモード（部屋を作らない。通信もしない） */
+  constructor({ sound, music, input, layer, solo = false }) {
     super();
     this.role = 'host';
+    this.solo = solo;
     this.slot = 0;
     this.sound = sound;
     this.state = {
@@ -56,6 +58,7 @@ export class HostRoom extends Emitter {
       series: null,
       result: null,
       hostHidden: document.visibilityState === 'hidden',
+      solo,
     };
     this.signaling = 'connecting';
     this.lastMsgAt = Array.from({ length: MAX_PLAYERS }, () => 0); // 席ごとの最後の受信時刻（巻き戻しに使う）
@@ -71,7 +74,7 @@ export class HostRoom extends Emitter {
     this._syncTimer = setInterval(() => this._resendStaleSync(), 1000);
     this._used = {}; // 連戦でこれまでに使った設定（ランダムのコースを重ねないため）
     this.closed = false;
-    this.net = new HostNetwork({ getRoomState: () => this.publicState() });
+    this.net = solo ? new LocalNetwork() : new HostNetwork({ getRoomState: () => this.publicState() });
     this.gm = new GameManager({ role: 'host', slot: 0, net: this.net, input, sound, music, layer });
     this._onVisibility = () => this._visibilityChanged();
     document.addEventListener('visibilitychange', this._onVisibility);
@@ -94,7 +97,7 @@ export class HostRoom extends Emitter {
   }
   /** 席の数が 2 人以上そろっているか */
   get enoughPlayers() {
-    return this.occupied.length >= 2;
+    return this.solo || this.occupied.length >= 2;
   }
 
   /** mode: 'server' | 'p2p'（network.js の create を参照） */
@@ -128,6 +131,7 @@ export class HostRoom extends Emitter {
       this.abortGame();
     });
     this.signaling = net.signaling;
+    if (this.solo) this.state.screen = 'select'; // ひとりモードは、すぐゲーム選択へ
     this._changed();
   }
 
@@ -393,6 +397,14 @@ export class HostRoom extends Emitter {
     }
     if (s.match?.matchId !== matchId || !this.gm.game) return; // 読み込み中に中止された
     if (this.net.guestConnected) this._sendFullSync();
+    if (this.solo) {
+      // ひとりモード: 待つ相手がいないので、すぐ始める
+      s.match.synced = true;
+      if (!s.hostHidden) {
+        this._startRunning(0);
+        return;
+      }
+    }
     this._changed();
   }
 

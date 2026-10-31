@@ -45,6 +45,12 @@ export function mount(el, app) {
         h('p.small', null, '部屋を作るとあなたが「ホスト（柴犬）」になります。表示された招待URLを、遊ぶ相手（1〜2人）に送ってください。'),
         h('p.small.muted', null, '招待された人は、URLを開くだけで参加できます（コード入力は不要）。'),
       ),
+      h(
+        'div.card.connect-card.solo-card',
+        null,
+        h('button.btn.btn-secondary.btn-xl', { onclick: () => app.startSolo(), disabled: info.busy }, '🐶 ひとりで遊ぶ'),
+        h('p.small', null, '部屋を作らずに、すぐ 1 人で遊べます（通信なし）。記録に挑戦したり、練習したりしよう。'),
+      ),
     );
   }
 

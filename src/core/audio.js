@@ -113,6 +113,18 @@ class Sound {
     osc.stop(t0 + 0.2);
   }
 
+  /** メトロノームの音を delay 秒後に鳴らす（音の時計で予約するので、画面の描画に左右されず正確） */
+  metro(delay = 0, accent = false) {
+    if (this.muted) return;
+    const ctx = this._ensure();
+    if (!ctx || ctx.state !== 'running' || delay < -0.05) return;
+    try {
+      this._tone({ type: 'square', from: accent ? 1760 : 1180, dur: 0.05, vol: accent ? 0.22 : 0.16, delay: Math.max(0, delay), attack: 0.002 });
+    } catch {
+      /* noop */
+    }
+  }
+
   /** 効果音を鳴らす。失敗しても例外は外に出さない */
   play(name) {
     if (this.muted) return;

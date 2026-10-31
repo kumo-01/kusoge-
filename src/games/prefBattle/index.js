@@ -14,7 +14,7 @@ import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut } from '../commo
 import DATA from './japan-prefs.json';
 import BASE_URL from './japan-base.jpg';
 import { TileMap } from './tiles.js';
-import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt } from './score.js';
+import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt, lengthKm, unitKm, FULL_RATIO, OVER_LIMIT } from './score.js';
 
 export const PREF = {
   READY: 3, // お題を見せてから描けるまで（秒）
@@ -22,7 +22,6 @@ export const PREF = {
   REVEAL: 11.5, // 答え合わせの演出（秒）
   SYNC_MS: 2500, // 描いている間、線をホストへ送る間隔
 };
-const KM_PER_UNIT = DATA.view.kmPerUnit;
 const MAP_W = DATA.view.w;
 const MAP_H = DATA.view.h;
 const MAX_ZOOM = 60; // 日本全体が見える大きさの何倍まで拡大できるか
@@ -69,7 +68,7 @@ class PrefBattle extends HostedGame {
       limit: [10, 15, 30, 45, 60, 90].includes(o.limit) ? o.limit : 60,
       strokes: Array.from({ length: n }, () => []), // 人ごとの線（×10 の整数。packStrokes の形）
       fin: Array.from({ length: n }, () => false), // 最後の線が届いたか
-      scores: null, // [{ pct, cover, precise, len }]
+      scores: null, // [{ pct, cover, precise, dev, miss, over, T, len }]（len: 描いた線の長さ km）
       revealed: false,
       revealT: 0,
       done: false,
@@ -98,7 +97,7 @@ class PrefBattle extends HostedGame {
     const num = (x, lo, hi) => (typeof x === 'number' && Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : 0);
     return Array.from({ length: this.n }, (_, i) => {
       const s = v[i] || {};
-      return { pct: num(s.pct, 0, 100), cover: num(s.cover, 0, 1), precise: num(s.precise, 0, 1), len: num(s.len, 0, 1e6) };
+      return { pct: num(s.pct, 0, 100), cover: num(s.cover, 0, 1), precise: num(s.precise, 0, 1), dev: num(s.dev, 0, 1e4), miss: num(s.miss, 0, 1), over: num(s.over, 0, 1e3), T: num(s.T, 0, 100), len: num(s.len, 0, 1e6) };
     });
   }
 
@@ -153,12 +152,12 @@ class PrefBattle extends HostedGame {
     const s = this.s;
     const pref = prefOf(s.code);
     const truth = prefLines(pref);
-    const T = tolerance(pref, KM_PER_UNIT);
+    const T = tolerance(pref, DATA.view);
+    const r3 = (x) => Math.round(x * 1000) / 1000;
     s.scores = s.strokes.map((v) => {
       const lines = unpackStrokes(v, MAP_W, MAP_H);
-      const r = scoreDrawing(truth, lines, T);
-      const len = lines.reduce((a, l) => a + l.reduce((b, p, i) => b + (i ? Math.hypot(p[0] - l[i - 1][0], p[1] - l[i - 1][1]) : 0), 0), 0);
-      return { pct: r.pct, cover: r.cover, precise: r.precise, len };
+      const r = scoreDrawing(truth, lines, DATA.view, T);
+      return { pct: r.pct, cover: r3(r.cover), precise: r3(r.precise), dev: Math.round(r.dev * 10) / 10, miss: r3(r.miss), over: Math.round(r.over * 100) / 100, T: Math.round(T * 10) / 10, len: Math.round(lengthKm(lines, DATA.view)) };
     });
     s.revealed = true;
     s.revealT = s.t;
@@ -185,30 +184,38 @@ class PrefBattle extends HostedGame {
   result() {
     const s = this.s;
     const pref = prefOf(s.code);
-    const sc = s.scores || s.strokes.map(() => ({ pct: 0, cover: 0, precise: 0, len: 0 }));
+    const T = tolerance(pref, DATA.view);
+    const sc = s.scores || s.strokes.map(() => ({ pct: 0, cover: 0, precise: 0, dev: 0, miss: 1, over: 0, T, len: 0 }));
     const pcts = sc.map((x) => x.pct);
     const best = Math.max(...pcts);
     const tops = pcts.map((p, i) => (p === best ? i : -1)).filter((i) => i >= 0);
-    const win = tops.length === 1 ? tops[0] : -1;
+    const solo = this.n === 1;
+    const win = tops.length === 1 && !solo ? tops[0] : -1; // ひとりモードは勝ちボーナスなし
     const rank = (i) => 1 + pcts.filter((p) => p > pcts[i]).length;
     const pts = pcts.map((p, i) => Math.round(p) + (i === win ? 20 : 0));
-    const truthLen = prefLines(pref).reduce((a, l) => a + l.reduce((b, p, i) => b + (i ? Math.hypot(p[0] - l[i - 1][0], p[1] - l[i - 1][1]) : 0), 0), 0);
+    const truthLen = lengthKm(prefLines(pref), DATA.view);
+    const pc = (x) => `${(x * 100).toFixed(1)}%`;
     return {
       gameId: 'prefBattle',
       winner: win >= 0 ? this.who(win).slot : null,
-      title: win >= 0 ? `${this.who(win).name}の勝ち！一致率 ${best.toFixed(1)}%` : `引き分け！一致率 ${best.toFixed(1)}%`,
+      title: solo ? `一致率 ${best.toFixed(1)}%！` : win >= 0 ? `${this.who(win).name}の勝ち！一致率 ${best.toFixed(1)}%` : `引き分け！一致率 ${best.toFixed(1)}%`,
       course: `お題 ${pref.name}`,
       players: sc.map((x, i) => ({
         slot: this.who(i).slot,
-        headline: i === win ? '🏆 勝ち！' : win < 0 && x.pct === best ? '🤝 引き分け' : this.n === 2 ? '負け…' : `${rank(i)}位…`,
+        headline: solo ? (x.pct >= 80 ? '🗾 県境マスター！' : x.pct >= 50 ? '😺 いい感じ' : '🐶 もう少し') : i === win ? '🏆 勝ち！' : win < 0 && x.pct === best ? '🤝 引き分け' : this.n === 2 ? '負け…' : `${rank(i)}位…`,
         detail: `一致率 ${x.pct.toFixed(1)}%`,
       })),
       stats: [
         { label: '一致率', values: sc.map((x) => `${x.pct.toFixed(1)}%`) },
-        { label: '境をなぞれた割合', values: sc.map((x) => `${Math.round(x.cover * 100)}%`) },
-        { label: '線の正確さ', values: sc.map((x) => `${Math.round(x.precise * 100)}%`) },
-        { label: '描いた線の長さ', values: sc.map((x) => `約 ${Math.round(x.len * KM_PER_UNIT)} km`) },
-        { label: '本物の県境の長さ', text: `約 ${Math.round(truthLen * KM_PER_UNIT)} km（となりと接している陸の境だけ）` },
+        { label: '① なぞれた割合（網羅）', values: sc.map((x) => pc(x.cover)) },
+        { label: '② 線の正確さ', values: sc.map((x) => pc(x.precise)) },
+        { label: '③ 線の量（本物 = 1）', values: sc.map((x) => (x.len ? `${x.over.toFixed(2)} 倍${x.over > OVER_LIMIT ? `（×${(OVER_LIMIT / x.over).toFixed(2)} 割引）` : ''}` : '-')) },
+        { label: '描いた線の平均のずれ', values: sc.map((x) => (x.len ? `${x.dev.toFixed(1)} km` : '-')) },
+        { label: '取りこぼした県境', values: sc.map((x) => pc(x.miss)) },
+        { label: '描いた線の長さ', values: sc.map((x) => `約 ${x.len} km`) },
+        { label: '本物の県境の長さ', text: `約 ${Math.round(truthLen)} km（となりと接している陸の境だけ）` },
+        { label: '許容距離', text: `満点 ${(T * FULL_RATIO).toFixed(1)} km 以内 → ${T.toFixed(1)} km で 0 点（県境の大きさで決まる）` },
+        { label: '計算式', text: `一致率 = 2×①×②÷(①+②)。③が ${OVER_LIMIT} 倍を超えると割引。距離は緯度ごとの縮尺で地上の km に直して 0.25km ごとに測定` },
         { label: 'となりの都道府県', text: pref.neighbors.map((c) => DATA.prefs.find((p) => p.code === c)?.name).filter(Boolean).join('・') },
       ],
       score: [
@@ -631,6 +638,39 @@ class PrefBattle extends HostedGame {
       g.restore();
     });
 
+    // 3') 採点の範囲（本物の県境から T km 以内に点がもらえる帯、濃い所は満点）。本物の境を描き終えたら出てくる
+    const bandT = easeOut((rt - 5.6) / 0.8);
+    if (bandT > 0) {
+      const map = toRect(C);
+      const T = tolerance(pref, DATA.view);
+      const pxPerKm = C.w / V.w / unitKm(DATA.view, (pref.box[1] + pref.box[3]) / 2);
+      g.save();
+      g.beginPath();
+      g.rect(C.x, C.y, C.w, C.h);
+      g.clip();
+      g.globalAlpha = bandT;
+      this._strokeLines(g, truth, map, 'rgba(255,240,150,0.36)', 2 * T * pxPerKm);
+      this._strokeLines(g, truth, map, 'rgba(255,225,90,0.5)', 2 * T * FULL_RATIO * pxPerKm);
+      g.restore();
+      // 凡例（地図の左下）
+      g.save();
+      g.globalAlpha = bandT;
+      g.font = '800 12px "M PLUS Rounded 1c", sans-serif';
+      const lines2 = [`🟨 濃い帯: 県境から ${(T * FULL_RATIO).toFixed(1)}km 以内 = 満点`, `🟨 うすい帯: ${T.toFixed(1)}km 以内 = 遠いほど減点（外は 0 点）`];
+      const bw = Math.max(...lines2.map((x) => g.measureText(x).width)) + 16;
+      const bx = C.x + 8;
+      const by = C.y + C.h - 8 - lines2.length * 17 - 8;
+      g.fillStyle = 'rgba(30,20,40,0.7)';
+      g.beginPath();
+      roundRect(g, { x: bx, y: by, w: bw, h: lines2.length * 17 + 8 }, 8);
+      g.fill();
+      g.fillStyle = '#fff';
+      g.textAlign = 'left';
+      g.textBaseline = 'top';
+      lines2.forEach((x, k) => g.fillText(x, bx + 8, by + 5 + k * 17));
+      g.restore();
+    }
+
     // 3) 本物の境が光りながら描かれる
     const drawT = easeInOut((rt - 3.8) / 1.8);
     if (drawT > 0) {
@@ -707,8 +747,10 @@ class PrefBattle extends HostedGame {
         this._chips = s.scores.map((x, i) => {
           const p = this.who(i);
           const num = h('b', null, '0.0%');
-          const el = h('div.g2d-res', { style: { '--c': p.col } }, h('span.pb-crown', null, ''), `${p.icon} ${p.name}　`, num);
-          return { el, num, i };
+          const sx = s.scores[i];
+          const det = h('small.pb-detail', null, `なぞれた ${(sx.cover * 100).toFixed(1)}% × 正確さ ${(sx.precise * 100).toFixed(1)}%${sx.over > OVER_LIMIT ? `・線が多すぎ ×${(OVER_LIMIT / sx.over).toFixed(2)}` : ''}・平均のずれ ${sx.dev.toFixed(1)}km`);
+          const el = h('div.g2d-res', { style: { '--c': p.col } }, h('span.pb-crown', null, ''), `${p.icon} ${p.name}　`, num, det);
+          return { el, num, i, det };
         });
         this.el.foot.replaceChildren(h('div.g2d-results', null, this._chips.map((x) => x.el)));
       }
@@ -718,6 +760,7 @@ class PrefBattle extends HostedGame {
         const win = done && s.scores[ch2.i].pct === best;
         ch2.el.classList.toggle('best', win);
         ch2.el.querySelector('.pb-crown').textContent = win ? '👑 ' : '';
+        ch2.det.classList.toggle('on', done);
       }
       if (done && !this._fanfare) {
         this._fanfare = true;

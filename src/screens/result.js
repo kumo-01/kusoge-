@@ -50,7 +50,8 @@ export function mount(el, app) {
 
     let title = r?.title || '結果';
     if (se) {
-      if (se.final) title = winner != null ? `🏆 ${PLAYERS[winner].name}がシリーズ優勝！ワン！` : '🤝 シリーズ引き分け！';
+      if (se.final && players.length === 1) title = `🏁 ${se.total}${word}の合計 ${se.scores[players[0].slot]} pt！`;
+      else if (se.final) title = winner != null ? `🏆 ${PLAYERS[winner].name}がシリーズ優勝！ワン！` : '🤝 シリーズ引き分け！';
       else title = `第${se.round}戦 / 全${se.total}戦　${r?.title || ''}`;
     }
     const seriesRows = se

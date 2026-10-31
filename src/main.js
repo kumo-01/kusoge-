@@ -111,6 +111,17 @@ class App {
     this.render();
   }
 
+  /** ひとりモード: 部屋を作らず、通信もしないで 1 人で遊ぶ */
+  async startSolo() {
+    if (this.room || this.connectInfo.busy) return;
+    this.connectInfo = { busy: false, error: null, notice: null };
+    const room = new HostRoom({ sound, music: this.music, input: this.input, layer: this.gameLayer, solo: true });
+    await room.create('local');
+    this.room = room;
+    this._bindRoom(room);
+    this.render();
+  }
+
   joinRoom(invite) {
     const session = loadGuestSession();
     const token = session && session.room === invite.room && session.key === invite.key ? session.token : null;
@@ -124,10 +135,11 @@ class App {
 
   _onClosed(reason) {
     const wasHost = this.room?.role === 'host';
+    const wasSolo = !!this.room?.solo;
     this.room = null;
     clearInviteParams();
     this.connectInfo = { busy: false, error: null, notice: wasHost ? CLOSE_TEXT.self : CLOSE_TEXT[reason] || '部屋から出ました。' };
-    if (reason === 'failed') this.connectInfo.notice = null;
+    if (reason === 'failed' || wasSolo) this.connectInfo.notice = null;
     this.render();
   }
 
@@ -141,6 +153,11 @@ class App {
 
   async disband() {
     if (this.room?.role !== 'host') return;
+    if (this.room.solo) {
+      // ひとりモードは、待っている人がいないので確かめずにタイトルへ
+      this.room.disband('self');
+      return;
+    }
     const ok = await this.confirm({
       title: '部屋を解散しますか？',
       text: '全員が接続画面に戻り、部屋は削除されます。この操作は取り消せません。',

@@ -62,6 +62,18 @@ export class ScreenRouter {
     }
     this.header.hidden = false;
     const isHost = room.role === 'host';
+    if (room.solo) {
+      this.header.replaceChildren(
+        h('div.header-left', null,
+          h('span.header-logo', null, '🐾 わんわんパーティー'),
+          h('span.role-badge.red', null, '🐶 ひとりモード')),
+        h('div.header-right', null,
+          h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
+          h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'),
+          h('button.btn.btn-small.btn-ghost', { onclick: () => app.disband() }, 'タイトルへ')),
+      );
+      return;
+    }
     const rtt = room.rtt != null ? `${Math.round(room.rtt)}ms` : '';
     let status;
     if (isHost) {

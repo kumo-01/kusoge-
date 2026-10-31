@@ -802,3 +802,40 @@ export class GuestNetwork extends Emitter {
     this.removeAllListeners();
   }
 }
+
+// ======================================================================
+// ひとりモード: 通信しない（HostRoom がそのまま使えるように、ホストの通信と同じ形だけ持つ）
+// ======================================================================
+export class LocalNetwork extends Emitter {
+  constructor() {
+    super();
+    this.transport = 'local';
+    this.signaling = 'online';
+    this.inviteUrl = '';
+    this.rtt = null;
+    this.reliable = true;
+    this.binary = false;
+    this.guestConnected = false;
+    this.guestCount = 0;
+    this.congested = false;
+  }
+  async create() {}
+  linkOf() {
+    return null;
+  }
+  isConnected() {
+    return false;
+  }
+  isTaken() {
+    return false;
+  }
+  rttOf() {
+    return null;
+  }
+  setGameMode() {}
+  send() {}
+  sendTo() {}
+  sendFast() {}
+  freeGuestSlot() {}
+  close() {}
+}
