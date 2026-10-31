@@ -2049,11 +2049,6 @@ canvas {
   font-size: 0.85rem;
   padding: 4px 12px max(12px, env(safe-area-inset-bottom));
 }
-@media (max-width: 720px) {
-  .ad-head {
-    padding-top: 64px;
-  }
-}
 .ad-results {
   display: flex;
   flex-wrap: wrap;
@@ -2181,9 +2176,6 @@ canvas {
   width: 100%;
 }
 @media (max-width: 720px) {
-  .pb-head {
-    padding-top: 56px;
-  }
   .pb-tool {
     min-width: 44px;
     font-size: 0.95rem;
@@ -2353,13 +2345,45 @@ canvas {
 @media (max-width: 1000px) and (min-height: 561px) {
   .ad-head,
   .pb-head {
-    padding-top: 58px;
+    padding-top: max(14px, var(--tb, 58px));
   }
 }
 /* 幅の狭い縦の画面では、右上のボタンが 2 段に折り返すので、見出しをその下から始める */
 @media (max-width: 420px) and (orientation: portrait) {
-  .ad-head,
-  .pb-head {
-    padding-top: 80px;
+  .pb-sub {
+    font-size: 0.68rem;
+  }
+}
+.pb-sub {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--ink-soft);
+  margin-bottom: 2px;
+}
+@media (orientation: landscape) and (max-height: 560px) {
+  .pb-sub {
+    font-size: 0.66rem;
+  }
+}
+/* とても狭い縦の画面: 道具ボタンを 8 等分の 1 段に、一行ヒントは省く（地図を広く） */
+@media (max-width: 380px) and (orientation: portrait) {
+  .pb-tools {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 2px;
+    padding: 4px 3px;
+  }
+  .pb-tool {
+    min-width: 0;
+    padding: 3px 0 2px;
+    font-size: 0.85rem;
+    border-width: 2px;
+  }
+  .pb-tool small {
+    font-size: 0.5rem;
+    white-space: nowrap;
+  }
+  .pb-foot > span:first-child {
+    display: none;
   }
 }

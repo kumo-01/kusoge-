@@ -127,12 +127,14 @@
 
 ### 都道府県県境バトル（2D）
 
-- お題の都道府県がランダムに出る。県境の線が無い、**標高で色分けした日本地図**の上に、その県の境を描く（山の尾根・川・海岸線がヒント）
+- お題の都道府県がランダムに出る。県境の線が無い、**標高で色分けした日本地図**（国土地理院の色別標高図）の上に、その県の**県境**を描く
+- **県境 = となりの都道府県と接している陸の境だけ**。海岸線・島は県境ではないので使わない（描くと線の正確さが下がる）。北海道・沖縄県は陸で接していないのでお題に出ない。山の尾根・川がヒント
+- 地図は画像を引き伸ばすのではなく、**拡大に合わせて細かい地図タイルを読み込む**ので、どこまで拡大してもくっきり。沖縄も本来の位置に描く（別枠にしない）
 - 道具: ✏️ペン / 🧽消しゴム / ↩️戻す（Ctrl+Z） / 🗑️全部リセット / ✋移動 / ➕➖拡大縮小 / 🗾全体。スマホは 2 本指でつまむと拡大・移動、PC はホイールで拡大
-- 制限時間（30〜90秒）で終了。**一致率**（本物の境をどれだけなぞれたか × 描いた線がどれだけ本物の近くか。塗りつぶすように描くと割り引き）が 100% に近い人の勝ち
-- 答え合わせの演出: 「そこまで！」→ みんなが描いた地図がカードで登場 → 中央の地図へ飛んで合体（線が重なる）→ 本物の境が光りながら描かれる → 一致率がカウントアップ → 勝者に 👑
-- 遠くの小さな島（伊豆諸島の南の島など）はお題に含みません。沖縄県は地図の左上の枠（拡大）に描きます。連戦では同じ県は続けて出ません
-- 地図: 国土地理院の[標高タイル](https://maps.gsi.go.jp/development/demtile.html)と[地球地図日本](https://www.gsi.go.jp/kankyochiri/gm_jpn.html)を加工して作成（`tools/japan-map/`。下の「ライセンス・素材」参照）
+- 制限時間（30〜90秒）で終了。**一致率**（本物の県境をどれだけなぞれたか × 描いた線がどれだけ本物の近くか。許容距離は県境の広がりに合わせて 5〜13km。塗りつぶすように描くと割り引き）が 100% に近い人の勝ち
+- 答え合わせの演出: 「そこまで！」→ みんなが描いた地図がカードで登場 → 中央の地図へ飛んで合体（線が重なる）→ 本物の県境が光りながら描かれる → 一致率がカウントアップ → 勝者に 👑
+- 連戦では同じ県は続けて出ません
+- 地図: 国土地理院の[色別標高図](https://maps.gsi.go.jp/development/ichiran.html#relief)（遊ぶときに国土地理院から読み込む）。県境: [地球地図日本](https://www.gsi.go.jp/kankyochiri/gm_jpn.html)を加工（`tools/japan-map/`。下の「ライセンス・素材」参照）
 
 ## 2. 必要な環境
 
@@ -367,8 +369,9 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
         ├── prefBattle/            都道府県県境バトル
         │   ├── index.js           本体（描く道具・拡大縮小・答え合わせの演出）
         │   ├── score.js           一致率の採点・描いた線の詰め方
-        │   ├── japan-prefs.json   都道府県の境界（地図の単位に投影・簡略化済み）
-        │   └── japan-elev.jpg     標高で色分けした日本地図（陰影つき）
+        │   ├── tiles.js           地図タイル（拡大に合わせた細かさで読み込んで描く）
+        │   ├── japan-prefs.json   陸の県境（となりの県と接している線だけ。地図の単位に投影・簡略化済み）
+        │   └── japan-base.jpg     地図の下地（日本全体。読み込み中に使う）
         └── dogKart/               わんわん爆走カート
             ├── index.js           モジュール本体（同期・予測・補間）
             ├── netview.js         受け取る側の表示（自分の車の予測・ほかの車を同じ時刻まで先読み・ずれを滑らかに戻す）
@@ -429,13 +432,13 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
 
 都道府県県境バトルの地図は、次の国土地理院のデータを加工して作成しています（非営利。出典を明記）。
 
-- 標高: 国土地理院「標高タイル（dem_png）」 https://maps.gsi.go.jp/development/demtile.html （標高で色分けし、陰影と湖を加えた画像 `src/games/prefBattle/japan-elev.jpg`）
-- 都道府県の境界: 国土地理院「地球地図日本」 https://www.gsi.go.jp/kankyochiri/gm_jpn.html （[dataofjapan/land](https://github.com/dataofjapan/land) の GeoJSON を投影・簡略化した `src/games/prefBattle/japan-prefs.json`）
+- 地図: 国土地理院「色別標高図」タイル https://maps.gsi.go.jp/development/ichiran.html#relief （遊ぶときに拡大に合わせて国土地理院から読み込む。読み込み中の下地として、同じタイルから作った日本全体の画像 `src/games/prefBattle/japan-base.jpg` を同梱）
+- 県境: 国土地理院「地球地図日本」 https://www.gsi.go.jp/kankyochiri/gm_jpn.html （[dataofjapan/land](https://github.com/dataofjapan/land) の TopoJSON から、となりの県と共有している辺＝陸の県境だけを取り出し、投影・簡略化した `src/games/prefBattle/japan-prefs.json`）
 
 作り直すとき（開発用。Playwright が必要）:
 
 ```bash
-curl -o japan.geojson https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson
-node tools/japan-map/build-prefs.mjs japan.geojson          # 県境 → japan-prefs.json
-node tools/japan-map/render-elevation.mjs ./dem-tiles         # 標高タイルを集めて → japan-elev.jpg
+curl -o japan.topojson https://raw.githubusercontent.com/dataofjapan/land/master/japan.topojson
+node tools/japan-map/build-prefs.mjs japan.topojson         # 陸の県境 → japan-prefs.json
+node tools/japan-map/render-base.mjs ./relief-tiles           # 色別標高図タイルを集めて → japan-base.jpg（下地）
 ```

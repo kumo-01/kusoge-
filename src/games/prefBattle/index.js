@@ -1,16 +1,19 @@
-// 都道府県県境バトル: お題の都道府県の境を、標高で色分けした日本地図の上に描く。時間で終了。
-// 本物の境とのずれを採点（一致率 %）し、100% に近い人の勝ち。
+// 都道府県県境バトル: お題の都道府県の県境を、標高で色分けした日本地図の上に描く。時間で終了。
+// 「県境」は、となりの都道府県と接している陸の境だけ（海岸線・島は境ではないので含まない。北海道・沖縄県はお題に出ない）。
+// 本物の県境とのずれを採点（一致率 %）し、100% に近い人の勝ち。
+// 地図は国土地理院の色別標高図タイルを、拡大に合わせた細かさで読み込んで描く（tiles.js。拡大してもくっきり）。
 //
 // 答え合わせの演出: 「そこまで！」→ みんなが描いた地図がカードになって登場 → 中央の地図へ飛んで合体（線が重なる）
 // → 本物の境が光りながら描かれる → 一致率がカウントアップ → 勝者に王冠。
 //
 // 計算はホスト（common2d.js）。描いた線は、遊んでいる間ときどきと、時間切れのときにホストへ送る。
-// 地図: 標高タイル・地球地図日本（国土地理院）を加工して作成（tools/japan-map/）。
+// 地図: 国土地理院の色別標高図。県境: 地球地図日本（国土地理院）を加工して作成（tools/japan-map/）。
 
 import { h } from '../../core/util.js';
 import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut } from '../common2d.js';
 import DATA from './japan-prefs.json';
-import MAP_URL from './japan-elev.jpg';
+import BASE_URL from './japan-base.jpg';
+import { TileMap } from './tiles.js';
 import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt } from './score.js';
 
 export const PREF = {
@@ -19,20 +22,16 @@ export const PREF = {
   REVEAL: 11.5, // 答え合わせの演出（秒）
   SYNC_MS: 2500, // 描いている間、線をホストへ送る間隔
 };
-const MAP_K = 1.25; // 地図画像の画素 / 地図の単位
-const KM_PER_UNIT = 1.6;
+const KM_PER_UNIT = DATA.view.kmPerUnit;
 const MAP_W = DATA.view.w;
 const MAP_H = DATA.view.h;
+const MAX_ZOOM = 60; // 日本全体が見える大きさの何倍まで拡大できるか
 const usedCodes = []; // ホスト: この部屋で出したお題（連戦で重ならないように）
 
-let mapImg = null;
-function loadMap() {
-  if (!mapImg) {
-    mapImg = new Image();
-    mapImg.decoding = 'async';
-    mapImg.src = MAP_URL;
-  }
-  return mapImg;
+let tileMap = null; // 地図タイル（ゲームをまたいで読み込み済みのタイルを使い回す）
+function getTiles() {
+  tileMap ||= new TileMap(DATA.view, BASE_URL);
+  return tileMap;
 }
 
 export function createGame() {
@@ -45,13 +44,16 @@ function roundRect(g, R, r) {
   else g.rect(R.x, R.y, R.w, R.h);
 }
 
-const prefOf = (code) => DATA.prefs.find((p) => p.code === code) || DATA.prefs[10];
+const prefOf = (code) => DATA.prefs.find((p) => p.code === code && p.borders.length) || DATA.prefs[10];
+
+/** お題になる都道府県（陸の県境があるもの。北海道・沖縄県は海に囲まれているので出ない） */
+const POOL = DATA.prefs.filter((p) => p.borders.length).map((p) => p.code);
 
 function pickCode() {
-  let pool = DATA.prefs.map((p) => p.code).filter((c) => !usedCodes.includes(c));
+  let pool = POOL.filter((c) => !usedCodes.includes(c));
   if (!pool.length) {
     usedCodes.length = 0;
-    pool = DATA.prefs.map((p) => p.code);
+    pool = POOL;
   }
   const c = pool[Math.floor(Math.random() * pool.length)];
   usedCodes.push(c);
@@ -151,7 +153,7 @@ class PrefBattle extends HostedGame {
     const s = this.s;
     const pref = prefOf(s.code);
     const truth = prefLines(pref);
-    const T = tolerance(pref);
+    const T = tolerance(pref, KM_PER_UNIT);
     s.scores = s.strokes.map((v) => {
       const lines = unpackStrokes(v, MAP_W, MAP_H);
       const r = scoreDrawing(truth, lines, T);
@@ -206,7 +208,8 @@ class PrefBattle extends HostedGame {
         { label: '境をなぞれた割合', values: sc.map((x) => `${Math.round(x.cover * 100)}%`) },
         { label: '線の正確さ', values: sc.map((x) => `${Math.round(x.precise * 100)}%`) },
         { label: '描いた線の長さ', values: sc.map((x) => `約 ${Math.round(x.len * KM_PER_UNIT)} km`) },
-        { label: '本物の境の長さ', text: `約 ${Math.round(truthLen * KM_PER_UNIT)} km（地図に載る島を含む）` },
+        { label: '本物の県境の長さ', text: `約 ${Math.round(truthLen * KM_PER_UNIT)} km（となりと接している陸の境だけ）` },
+        { label: 'となりの都道府県', text: pref.neighbors.map((c) => DATA.prefs.find((p) => p.code === c)?.name).filter(Boolean).join('・') },
       ],
       score: [
         { label: '🗾 一致率', values: pcts.map((p) => `${p.toFixed(1)}% → ${Math.round(p)}`) },
@@ -229,7 +232,7 @@ class PrefBattle extends HostedGame {
     this._lastPhase = '';
     this._lastSec = -1;
     this.view = null; // { scale, ox, oy }（画面の画素 / 地図の単位、地図の原点の画面位置）
-    this.img = loadMap();
+    this.tiles = getTiles();
     const o = this.ctx.options || {};
     const races = o.races > 1 ? `第${o.round || 1}戦 / 全${o.races}戦　` : '';
     const me = this.who(this.me);
@@ -238,6 +241,7 @@ class PrefBattle extends HostedGame {
     this.el = {
       round: h('div.pb-round', null, `${races}🗾 都道府県県境バトル`),
       prompt: h('div.pb-prompt', null, ''),
+      sub: h('div.pb-sub', null, 'となりの都道府県と接している陸の境だけ（海岸線・島は描かない）'),
       timer: h('div.ad-timer', null, h('div.ad-timer-bar'), h('span.ad-timer-num', null, '')),
       tools: h('div.pb-tools', null,
         tool('pen', '✏️', 'ペン'),
@@ -251,11 +255,11 @@ class PrefBattle extends HostedGame {
       canvas: h('canvas.pb-canvas'),
       foot: h('div.pb-foot', null,
         h('span', { style: { color: me.col } }, `${me.icon} あなた（${me.name}）: 線をなぞって県境を描こう。2本指でつまむと拡大・移動`),
-        h('span.pb-credit', null, '地図: 国土地理院（標高タイル・地球地図日本）を加工')),
+        h('span.pb-credit', null, '地図: 国土地理院（色別標高図・地球地図日本を加工）')),
     };
     this.root.classList.add('pb');
     // 左の列（横長で低い画面のとき）にまとめる部品は .g2d-side に入れる（ふつうの画面では、上下にばらして並ぶ）
-    this.root.append(h('div.g2d-side', null, h('div.g2d-top', null, h('div.pb-head', null, this.el.round, this.el.prompt, this.el.timer), this.el.tools), this.el.foot), this.el.canvas);
+    this.root.append(h('div.g2d-side', null, h('div.g2d-top', null, h('div.pb-head', null, this.el.round, this.el.prompt, this.el.sub, this.el.timer), this.el.tools), this.el.foot), this.el.canvas);
     this._setTool('pen');
     const c = this.el.canvas;
     this._ptrs = new Map();
@@ -336,7 +340,7 @@ class PrefBattle extends HostedGame {
   _zoomAt(f, sx, sy) {
     const v = this.view;
     if (!v) return;
-    const ns = Math.max(v.fit * 0.8, Math.min(v.fit * 14, v.scale * f));
+    const ns = Math.max(v.fit * 0.8, Math.min(v.fit * MAX_ZOOM, v.scale * f));
     const k = ns / v.scale;
     v.ox = sx - (sx - v.ox) * k;
     v.oy = sy - (sy - v.oy) * k;
@@ -486,6 +490,7 @@ class PrefBattle extends HostedGame {
 
     const c = this.el.canvas;
     const { w, h: hh, dpr } = fitCanvas(c);
+    this._dpr = dpr;
     if (!this.view || this._vw !== w || this._vh !== hh) {
       const keep = this.view && this.view.scale !== this.view.fit;
       this._vw = w;
@@ -494,27 +499,16 @@ class PrefBattle extends HostedGame {
     }
     const g = c.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = '#609ed4';
+    g.fillStyle = '#2f6fc4';
     g.fillRect(0, 0, w, hh);
     if (ph === 'reveal') this._drawReveal(g, w, hh, t - (this._revealAt ?? t), pref);
     else this._drawPlay(g, w, hh, ph);
   }
 
-  _drawMap(g, v) {
-    const img = this.img;
-    if (img.complete && img.naturalWidth) g.drawImage(img, v.ox, v.oy, MAP_W * v.scale, MAP_H * v.scale);
-    // 沖縄の枠
-    const ins = DATA.view.inset;
-    g.strokeStyle = 'rgba(255,255,255,0.85)';
-    g.lineWidth = 1.5;
-    g.setLineDash([6, 4]);
-    g.strokeRect(v.ox + ins.x * v.scale, v.oy + ins.y * v.scale, ins.w * v.scale, ins.h * v.scale);
-    g.setLineDash([]);
-    g.font = `800 ${Math.max(10, Math.min(16, 9 * v.scale))}px "M PLUS Rounded 1c", sans-serif`;
-    g.fillStyle = 'rgba(255,255,255,0.9)';
-    g.textAlign = 'left';
-    g.textBaseline = 'top';
-    g.fillText('沖縄（拡大）', v.ox + (ins.x + 2) * v.scale, v.oy + (ins.y + ins.h + 2) * v.scale);
+  /** 地図を描く（拡大に合わせた細かさのタイル）。clip: 描く範囲（画面の画素の四角） */
+  _drawMap(g, v, clip = null) {
+    const c = this.el.canvas;
+    this.tiles.draw(g, v.scale, v.ox, v.oy, this._vw || c.clientWidth, this._vh || c.clientHeight, this._dpr || 1, clip);
   }
 
   _strokeLines(g, lines, map, col, width) {
@@ -576,15 +570,14 @@ class PrefBattle extends HostedGame {
     const V = { x: (bx0 + bx1) / 2 - vw / 2, y: (by0 + by1) / 2 - vh / 2, w: vw, h: vh };
     const toRect = (R) => ([x, y]) => [R.x + ((x - V.x) / V.w) * R.w, R.y + ((y - V.y) / V.h) * R.h];
     const drawRegion = (R, alpha) => {
-      const img = this.img;
       g.save();
       g.globalAlpha = alpha;
       g.beginPath();
       roundRect(g, R, 14);
       g.clip();
-      g.fillStyle = '#609ed4';
-      g.fillRect(R.x, R.y, R.w, R.h);
-      if (img.complete && img.naturalWidth) g.drawImage(img, V.x * MAP_K, V.y * MAP_K, V.w * MAP_K, V.h * MAP_K, R.x, R.y, R.w, R.h);
+      // 範囲 V が四角 R にぴったり入る拡大で、地図そのもの（タイル）を描く
+      const scale = R.w / V.w;
+      this._drawMap(g, { scale, ox: R.x - V.x * scale, oy: R.y - V.y * scale }, R);
       g.restore();
     };
 

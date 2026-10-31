@@ -109,6 +109,13 @@ export class HostedGame {
   }
 
   render(alpha, dt) {
+    // 右上のボタン（一時停止など。ホストは 2 段になることもある）の下端を CSS の --tb に。見出しはその下から始める
+    const tb = document.querySelector('.game-topbar')?.getBoundingClientRect();
+    const need = tb && tb.height ? Math.round(tb.bottom + 6) : 0;
+    if (need !== this._tb) {
+      this._tb = need;
+      this.root.style.setProperty('--tb', `${need}px`);
+    }
     this.draw(dt);
   }
 

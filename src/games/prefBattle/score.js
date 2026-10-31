@@ -1,25 +1,26 @@
 // 都道府県県境バトルの採点と、描いた線の扱い（画面に依存しない。単体テストでも使う）。
 //
-// 座標は「地図の単位」（本土の幅 = 1000。tools/japan-map/view.mjs）。データの中では ×10 の整数。
-// 一致率 = 「本物の境界のうち、描いた線が近くを通っている割合（網羅）」と
-//          「描いた線のうち、本物の境界の近くにある割合（正確さ）」の調和平均。
-// 近さは、許容距離 T の中で近いほど高い（距離 0 で 1、T で 0）。T は県の大きさに合わせる。
+// 座標は「地図の単位」（範囲の幅 = 1000、1 単位 ≒ 2.2km。tools/japan-map/view.mjs）。データの中では ×10 の整数。
+// お題の「県境」は、となりの都道府県と接している陸の境だけ（海岸線・島は含まない。borders）。
+// 一致率 = 「本物の県境のうち、描いた線が近くを通っている割合（網羅）」と
+//          「描いた線のうち、本物の県境の近くにある割合（正確さ）」の調和平均。
+// 近さは、許容距離 T の中で近いほど高い（距離 0 で 1、T で 0）。T は県境の広がりに合わせる。
 // 描いた線の総延長が本物の 1.5 倍を超えたら、その分だけ割り引く（塗りつぶし対策）。
 
-/** 県のデータ（rings: ×10 の整数の配列）→ 閉じた折れ線（地図の単位）の配列 */
+/** 県のデータ（borders: ×10 の整数の配列）→ 陸の県境の折れ線（地図の単位）の配列 */
 export function prefLines(pref) {
-  return pref.rings.map((r) => {
+  return (pref.borders || []).map((r) => {
     const pts = [];
     for (let i = 0; i < r.length; i += 2) pts.push([r[i] / 10, r[i + 1] / 10]);
-    if (pts.length > 1) pts.push(pts[0]);
     return pts;
   });
 }
 
-/** 許容距離（地図の単位、1 ≒ 1.6km）: 県の大きさ（外接箱の対角）の 7%、3〜8 の間 */
-export function tolerance(pref) {
-  const [x0, y0, x1, y1] = pref.box;
-  return Math.max(3, Math.min(8, 0.07 * Math.hypot(x1 - x0, y1 - y0)));
+/** 許容距離（地図の単位）: 県境の広がり（外接箱の対角）の 7%。5〜13km の間 */
+export function tolerance(pref, kmPerUnit) {
+  const [x0, y0, x1, y1] = pref.borderBox || pref.box;
+  const km = Math.max(5, Math.min(13, 0.07 * Math.hypot(x1 - x0, y1 - y0) * kmPerUnit));
+  return km / kmPerUnit;
 }
 
 /** 折れ線を step ごとの点にする */
