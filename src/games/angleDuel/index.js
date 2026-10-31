@@ -4,7 +4,7 @@
 // 計算はホスト（common2d.js）。ゲストは自分の角度をホストへ送り、ホストは時間切れで締め切って答え合わせを配る。
 
 import { h } from '../../core/util.js';
-import { HostedGame, fitCanvas, easeOut, easeInOut } from '../common2d.js';
+import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut } from '../common2d.js';
 
 export const ANGLE = {
   READY: 2.5, // お題を見せてから操作できるまで（秒）
@@ -174,7 +174,8 @@ class AngleDuel extends HostedGame {
       foot: h('div.ad-foot', { style: { color: me.col } }, `${me.icon} あなた（${me.name}）: 外周の丸をドラッグ、または円の中をタップして動かそう`),
     };
     this.root.classList.add('ad');
-    this.root.append(h('div.ad-head', null, this.el.round, this.el.prompt, this.el.sub, this.el.timer), this.el.canvas, this.el.foot);
+    // 左の列（横長で低い画面のとき）にまとめる部品は .g2d-side に入れる（ふつうの画面では、上下にばらして並ぶ）
+    this.root.append(h('div.g2d-side', null, h('div.ad-head.g2d-top', null, this.el.round, this.el.prompt, this.el.sub, this.el.timer), this.el.foot), this.el.canvas);
     const c = this.el.canvas;
     this._down = false;
     this._onDown = (e) => {
@@ -262,11 +263,15 @@ class AngleDuel extends HostedGame {
     const g = c.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, hh);
+    // 右上のボタンに重なる所は避ける（横長の画面では、キャンバスがボタンの下まで来る）
+    const top = Math.min(hh * 0.4, topbarInset(c));
+    const ah = hh - top;
     // 答え合わせではラベルを外側に並べるので、円を少し小さく
-    const R = Math.max(40, Math.min(w / 2, hh / 2) - (ph === 'reveal' ? 64 : 22));
+    const R = Math.max(30, Math.min(w / 2, ah / 2) - (ph === 'reveal' ? 64 : 22));
     const cx = w / 2;
-    const cy = hh / 2;
+    const cy = top + ah / 2;
     this._cx = cx;
+    this._R = R;
     this._cy = cy;
     const dir = (deg) => ((s.base + deg) * Math.PI) / 180; // 画面上の向き（反時計回り）
     const pt = (deg, r) => [cx + Math.cos(dir(deg)) * r, cy - Math.sin(dir(deg)) * r];
@@ -364,14 +369,49 @@ class AngleDuel extends HostedGame {
       arm(cur, '#f0a500', 8, 13, `${Math.round(cur)}°`, R * 0.62);
       const errs = s.ans.map((a) => angleError(a, s.target));
       const best = Math.min(...errs);
+      const labels = [];
       s.ans.forEach((a, i) => {
         const appear = easeOut((rt - 1.9 - i * 0.45) / 0.5);
         if (appear <= 0) return;
         const p = this.who(i);
         g.globalAlpha = appear;
-        arm(a, p.col, 5, 11 * appear, `${p.name} ${a}°`, R + 26 + (i + 1) * 20);
+        arm(a, p.col, 5, 11 * appear, '');
         g.globalAlpha = 1;
+        const [x, y] = pt(a, R + 24);
+        labels.push({ text: `${p.name} ${a}°`, col: p.col, x, y, alpha: appear });
       });
+      // 名前のラベル: 画面からはみ出さず、重ならないように上下にずらす
+      g.font = '800 15px "M PLUS Rounded 1c", sans-serif';
+      const LH = 19;
+      for (const L of labels) {
+        L.hw = g.measureText(L.text).width / 2 + 4;
+        L.x = Math.max(L.hw, Math.min(w - L.hw, L.x));
+        L.y = Math.max(top + 10, Math.min(hh - 10, L.y));
+      }
+      labels.sort((a, b) => a.y - b.y);
+      for (let k = 0; k < 3; k++) {
+        for (let i = 1; i < labels.length; i++) {
+          const A = labels[i - 1];
+          const B = labels[i];
+          if (B.y - A.y < LH && Math.abs(B.x - A.x) < A.hw + B.hw) B.y = A.y + LH;
+        }
+        const last = labels[labels.length - 1];
+        if (last && last.y > hh - 10) {
+          const d = last.y - (hh - 10);
+          for (const L of labels) L.y -= d;
+        }
+      }
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.lineWidth = 4;
+      for (const L of labels) {
+        g.globalAlpha = L.alpha;
+        g.strokeStyle = '#fff';
+        g.strokeText(L.text, L.x, L.y);
+        g.fillStyle = L.col;
+        g.fillText(L.text, L.x, L.y);
+      }
+      g.globalAlpha = 1;
       // お題と、ずれの小さい順の結果（結果は画面下に）
       g.textAlign = 'center';
       g.textBaseline = 'middle';

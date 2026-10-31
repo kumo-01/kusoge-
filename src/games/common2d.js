@@ -131,6 +131,19 @@ export function fitCanvas(canvas) {
   return { w: r.width, h: r.height, dpr };
 }
 
+/**
+ * 画面右上のボタン（一時停止・中止など。.game-topbar）がキャンバスの上に重なっている高さ（CSS ピクセル）。
+ * 大事な表示（円・地図）は、この下に置く
+ */
+export function topbarInset(canvas) {
+  const tb = document.querySelector('.game-topbar');
+  if (!tb) return 0;
+  const c = canvas.getBoundingClientRect();
+  const t = tb.getBoundingClientRect();
+  if (t.width < 1 || t.right <= c.left || t.left >= c.right || t.bottom <= c.top || t.top >= c.bottom) return 0;
+  return Math.max(0, t.bottom - c.top + 6);
+}
+
 /** 0〜1 の進み具合を、最初は速く最後はゆっくりに */
 export const easeOut = (x) => 1 - Math.pow(1 - Math.max(0, Math.min(1, x)), 3);
 export const easeInOut = (x) => {

@@ -8,7 +8,7 @@
 // 地図: 標高タイル・地球地図日本（国土地理院）を加工して作成（tools/japan-map/）。
 
 import { h } from '../../core/util.js';
-import { HostedGame, fitCanvas, easeOut, easeInOut } from '../common2d.js';
+import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut } from '../common2d.js';
 import DATA from './japan-prefs.json';
 import MAP_URL from './japan-elev.jpg';
 import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt } from './score.js';
@@ -254,7 +254,8 @@ class PrefBattle extends HostedGame {
         h('span.pb-credit', null, '地図: 国土地理院（標高タイル・地球地図日本）を加工')),
     };
     this.root.classList.add('pb');
-    this.root.append(h('div.pb-head', null, this.el.round, this.el.prompt, this.el.timer), this.el.tools, this.el.canvas, this.el.foot);
+    // 左の列（横長で低い画面のとき）にまとめる部品は .g2d-side に入れる（ふつうの画面では、上下にばらして並ぶ）
+    this.root.append(h('div.g2d-side', null, h('div.g2d-top', null, h('div.pb-head', null, this.el.round, this.el.prompt, this.el.timer), this.el.tools), this.el.foot), this.el.canvas);
     this._setTool('pen');
     const c = this.el.canvas;
     this._ptrs = new Map();
@@ -327,8 +328,9 @@ class PrefBattle extends HostedGame {
   // 表示（拡大・移動）
   _fit() {
     const r = this.el.canvas.getBoundingClientRect();
-    const scale = Math.min(r.width / MAP_W, r.height / MAP_H) * 0.98;
-    this.view = { scale, ox: (r.width - MAP_W * scale) / 2, oy: (r.height - MAP_H * scale) / 2, fit: scale };
+    const top = Math.min(r.height * 0.3, topbarInset(this.el.canvas)); // 右上のボタンの下に収める
+    const scale = Math.min(r.width / MAP_W, (r.height - top) / MAP_H) * 0.98;
+    this.view = { scale, ox: (r.width - MAP_W * scale) / 2, oy: top + (r.height - top - MAP_H * scale) / 2, fit: scale };
   }
 
   _zoomAt(f, sx, sy) {
@@ -565,7 +567,8 @@ class PrefBattle extends HostedGame {
     // 中央の地図に映す範囲: お題の県のまわり（余白つき）。描いた線が外にはみ出していても少し見えるように広め
     const [bx0, by0, bx1, by1] = pref.box;
     const pad = Math.max(18, 0.35 * Math.max(bx1 - bx0, by1 - by0));
-    const C = { x: w * 0.04, y: hh * 0.03, w: w * 0.92, h: hh * 0.94 };
+    const top = Math.max(hh * 0.03, Math.min(hh * 0.3, topbarInset(this.el.canvas))); // 右上のボタンの下から
+    const C = { x: w * 0.04, y: top, w: w * 0.92, h: hh - top - hh * 0.03 };
     let vw = bx1 - bx0 + pad * 2;
     let vh = by1 - by0 + pad * 2;
     if (vw / vh > C.w / C.h) vh = (vw * C.h) / C.w;

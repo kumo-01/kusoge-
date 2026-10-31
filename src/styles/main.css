@@ -2203,3 +2203,163 @@ canvas {
     font-size: 0.56rem;
   }
 }
+
+/* 2D ゲームの配置: ふつうは上から「見出し（・道具）→ 円・地図 → 説明」。横長で低い画面（横向きのスマホなど）では、
+   見出し・道具・説明をまとめた左の列（入りきらなければ、その中だけスクロール）と、右に大きな円・地図にする
+   （縦に積むと、円・地図を描く高さが足りなくなる） */
+.g2d.ad,
+.g2d.pb {
+  display: grid;
+  grid-template-columns: 100%;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.g2d-side {
+  display: contents;
+}
+.g2d-top {
+  grid-row: 1;
+}
+.ad-canvas,
+.pb-canvas {
+  grid-row: 2;
+  height: 100%;
+  min-height: 0;
+}
+.ad-foot,
+.pb-foot {
+  grid-row: 3;
+}
+@media (orientation: landscape) and (max-height: 560px) {
+  .g2d.ad,
+  .g2d.pb {
+    grid-template-columns: minmax(190px, 36%) minmax(0, 1fr);
+    grid-template-rows: 100%;
+  }
+  .g2d.pb {
+    grid-template-columns: minmax(200px, 34%) minmax(0, 1fr);
+  }
+  .g2d-side {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 0;
+    overflow-y: auto;
+    padding-left: env(safe-area-inset-left);
+  }
+  .ad-canvas,
+  .pb-canvas {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .ad-head {
+    padding: max(8px, env(safe-area-inset-top)) 10px 4px;
+  }
+  .ad-foot {
+    font-size: 0.75rem;
+    padding: 4px 8px max(8px, env(safe-area-inset-bottom));
+  }
+  .ad-prompt {
+    font-size: clamp(1.15rem, 7vh, 1.9rem);
+  }
+  .ad-sub {
+    font-size: 0.72rem;
+  }
+  .ad-timer {
+    width: 100%;
+    height: 22px;
+  }
+  .ad-timer-num {
+    line-height: 16px;
+    font-size: 0.82rem;
+  }
+  .ad-results {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .ad-res {
+    font-size: 0.85rem;
+    padding: 3px 10px;
+  }
+  .ad-res.best {
+    font-size: 0.95rem;
+  }
+  .pb-head {
+    padding: max(6px, env(safe-area-inset-top)) 8px 2px;
+  }
+  .pb-tools {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 3px;
+    border-bottom: 0;
+    padding: 4px 6px;
+  }
+  .pb-foot {
+    font-size: 0.7rem;
+    padding: 4px 8px max(6px, env(safe-area-inset-bottom));
+  }
+  .pb-foot > span:first-child {
+    display: none; /* 一行ヒント（操作は準備画面にもある） */
+  }
+  .pb-prompt {
+    font-size: clamp(1rem, 6vh, 1.5rem);
+  }
+  .pb .ad-timer {
+    width: 100%;
+  }
+  .pb-tool {
+    min-width: 40px;
+    font-size: 0.85rem;
+    padding: 2px 2px 1px;
+  }
+  .pb-tool small {
+    font-size: 0.55rem;
+  }
+  .pb .ad-results {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pb-round,
+  .ad-round {
+    font-size: 0.7rem;
+  }
+}
+@media (orientation: landscape) and (max-height: 380px) {
+  .pb-prompt {
+    font-size: clamp(0.9rem, 5.5vh, 1.2rem);
+    margin: 0 0 2px;
+  }
+  .pb .ad-timer,
+  .ad-timer {
+    height: 22px; /* 枠 3px ×2 + 文字の行 16px */
+    margin-top: 2px;
+  }
+  .pb-tool {
+    font-size: 0.78rem;
+  }
+}
+/* 時間のバーの文字は、バーの高さに関係なく上下中央に（低い画面で文字が切れないように） */
+.ad-timer {
+  display: grid;
+  place-items: center;
+  line-height: 1;
+}
+.ad-timer-num {
+  line-height: 1.1;
+}
+/* 幅 1000px までは、右上のボタンが見出しの上に来るので、見出しをその下から始める（横長で低い画面の左列配置は除く） */
+@media (max-width: 1000px) and (min-height: 561px) {
+  .ad-head,
+  .pb-head {
+    padding-top: 58px;
+  }
+}
+/* 幅の狭い縦の画面では、右上のボタンが 2 段に折り返すので、見出しをその下から始める */
+@media (max-width: 420px) and (orientation: portrait) {
+  .ad-head,
+  .pb-head {
+    padding-top: 80px;
+  }
+}
