@@ -10,11 +10,11 @@
 // 地図: 国土地理院の色別標高図。県境: 地球地図日本（国土地理院）を加工して作成（tools/japan-map/）。
 
 import { h } from '../../core/util.js';
-import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut } from '../common2d.js';
+import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut, gauss } from '../common2d.js';
 import DATA from './japan-prefs.json';
 import BASE_URL from './japan-base.jpg';
 import { TileMap } from './tiles.js';
-import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt, lengthKm, unitKm, FULL_RATIO, OVER_LIMIT } from './score.js';
+import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt, lengthKm, unitKm, resample, FULL_RATIO, OVER_LIMIT } from './score.js';
 
 export const PREF = {
   READY: 3, // お題を見せてから描けるまで（秒）
@@ -61,7 +61,7 @@ function pickCode() {
 
 class PrefBattle extends HostedGame {
   initState(o) {
-    const n = this.ctx.players.length;
+    const n = this.n;
     return {
       t: 0,
       code: pickCode(),
@@ -148,6 +148,51 @@ class PrefBattle extends HostedGame {
     }
   }
 
+  /**
+   * CPU: 時間切れの瞬間に、本物の県境を「うろ覚え」でなぞった線を出す。
+   * 強さで、線のうねり（よわい 7km / ふつう 3.5km / つよい 1.4km）と、描き忘れる割合（35% / 15% / 4%）が変わる
+   */
+  cpuStep(i, level) {
+    const s = this.s;
+    if (s.revealed || s.fin[i] || s.t < PREF.READY + s.limit) return;
+    const amp = { 1: 7, 2: 3.5, 3: 1.4 }[level] || 3.5;
+    const skip = { 1: 0.35, 2: 0.15, 3: 0.04 }[level] || 0.15;
+    const view = DATA.view;
+    const out = [];
+    for (const line of prefLines(prefOf(s.code))) {
+      const pts = resample([line], 2, view);
+      if (pts.length < 2) continue;
+      const f1 = 0.08 + Math.random() * 0.1;
+      const f2 = 0.25 + Math.random() * 0.2;
+      const p1 = Math.random() * 6.3;
+      const p2 = Math.random() * 6.3;
+      let cur = [];
+      pts.forEach(([x, y], k) => {
+        if (k % 8 === 0 && Math.random() < skip) {
+          if (cur.length > 1) out.push(cur);
+          cur = [];
+          this._cpuSkip = 8; // この先 8 点（約 16km）は描き忘れ
+        }
+        if (this._cpuSkip > 0) {
+          this._cpuSkip--;
+          return;
+        }
+        const a = pts[Math.max(0, k - 1)];
+        const b = pts[Math.min(pts.length - 1, k + 1)];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        const nx = -(b[1] - a[1]) / len;
+        const ny = (b[0] - a[0]) / len;
+        const km = amp * (0.65 * Math.sin(k * f1 + p1) + 0.35 * Math.sin(k * f2 + p2)) + gauss() * amp * 0.12;
+        const u = km / unitKm(view, y);
+        cur.push([x + nx * u, y + ny * u]);
+      });
+      this._cpuSkip = 0;
+      if (cur.length > 1) out.push(cur);
+    }
+    s.strokes[i] = packStrokes(out);
+    s.fin[i] = true;
+  }
+
   _judge() {
     const s = this.s;
     const pref = prefOf(s.code);
@@ -169,7 +214,7 @@ class PrefBattle extends HostedGame {
   onGameMessage(d, player) {
     const s = this.s;
     if (this.isHost) {
-      if (d.k !== 'st' || s.revealed || !(player > 0 && player < this.n)) return;
+      if (d.k !== 'st' || s.revealed || !(player > 0 && player < this.humans)) return;
       if (s.t > PREF.READY + s.limit + PREF.GRACE) return;
       s.strokes[player] = packStrokes(unpackStrokes(d.v, MAP_W, MAP_H));
       if (d.fin) s.fin[player] = true;
@@ -224,6 +269,7 @@ class PrefBattle extends HostedGame {
         { label: '今回の合計', values: pts.map((p) => `${p} pt`) },
       ],
       points: pts,
+      cpu: this.cpuSlots(),
     };
   }
 

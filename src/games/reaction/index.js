@@ -6,7 +6,7 @@
 // 計算はホスト（common2d.js）。ゲストは自分の結果（ミリ秒 / フライング）をホストへ送る。
 
 import { h } from '../../core/util.js';
-import { HostedGame } from '../common2d.js';
+import { HostedGame, gauss } from '../common2d.js';
 
 export const REACT = {
   READY: 2.2, // 「準備…」を見せる時間（秒）。このあと「まだ…」の待ちに入る
@@ -59,7 +59,7 @@ class Reaction extends HostedGame {
       t: 0,
       go: REACT.READY + REACT.WAIT_MIN + Math.random() * (REACT.WAIT_MAX - REACT.WAIT_MIN), // 色が変わるゲーム内時刻
       pal: Math.floor(Math.random() * PALETTES.length),
-      res: Array.from({ length: this.ctx.players.length }, () => null),
+      res: Array.from({ length: this.n }, () => null),
       revealed: false,
       revealT: 0,
       done: false,
@@ -128,10 +128,22 @@ class Reaction extends HostedGame {
     }
   }
 
+  /** CPU: 反応の速さ（平均 よわい 340ms / ふつう 265ms / つよい 205ms）。たまにフライングする */
+  cpuStep(i, level) {
+    const s = this.s;
+    if (s.revealed || s.res[i] !== null) return;
+    const plan = ((this._cpu ||= {})[i] ||= {
+      ms: Math.max(150, ({ 1: 340, 2: 265, 3: 205 }[level] || 265) + gauss() * ({ 1: 60, 2: 40, 3: 22 }[level] || 40)),
+      foulAt: Math.random() < ({ 1: 0.08, 2: 0.04, 3: 0.02 }[level] || 0.04) ? REACT.READY + Math.random() * (s.go - REACT.READY) : null,
+    });
+    if (plan.foulAt !== null && s.t >= plan.foulAt && s.t < s.go) s.res[i] = FOUL;
+    else if (s.t >= s.go + plan.ms / 1000) s.res[i] = Math.round(plan.ms);
+  }
+
   onGameMessage(d, player) {
     if (!this.isHost) return;
     const s = this.s;
-    if (s.revealed || !(player >= 0 && player < this.n) || s.res[player] !== null) return;
+    if (s.revealed || !(player >= 0 && player < this.humans) || s.res[player] !== null) return;
     const v = this._cleanRes(d.r);
     if (v !== null) s.res[player] = v;
   }
@@ -174,6 +186,7 @@ class Reaction extends HostedGame {
         { label: '今回の合計', values: pts.map((p) => `${p} pt`) },
       ],
       points: pts,
+      cpu: this.cpuSlots(),
     };
   }
 

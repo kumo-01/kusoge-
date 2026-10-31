@@ -1,15 +1,19 @@
-// リズム刻みバトル: 「BPM 120 を刻め！」→ お手本を 4 拍聞いたら、あとは自分だけでそのテンポでクリック（タップ）し続ける。
+// リズム刻みバトル: 「BPM 120 を刻め！」→（お手本ありなら 4 拍聞いて、少し間をあけて）→ 3、2、1 → 0 で 1 拍目。
+// あとは自分だけでそのテンポでクリック（タップ）し続ける。
 // 指定の BPM にいちばん近く、安定して刻めた人の勝ち。ゲームが始まったら BGM は止める（刻むのを邪魔しないように）。
 //
 // 刻んだ時刻は各自の端末で測る（押した間隔だけを使うので、通信の遅れは入らない）。
 // 計算はホスト（common2d.js）。ゲストは押した間隔（ミリ秒）の列をホストへ送る。
 
 import { h } from '../../core/util.js';
-import { HostedGame } from '../common2d.js';
+import { HostedGame, gauss } from '../common2d.js';
 
 export const RHY = {
   READY: 2.5, // お題を見せる時間（秒）
   GUIDE: 4, // お手本の拍の数
+  GAP: 1.6, // お手本が終わってから、カウントダウンまでの間（秒）
+  COUNT: 3, // 3、2、1 のカウントダウン（1 秒ずつ）。0 で 1 拍目
+  EARLY: 0.35, // 0 より少し前に押した 1 拍目も受け付ける（秒）
   GRACE: 1.2, // 通信の遅れで届く最後の結果を待つ（秒）
   REVEAL: 6.5, // 結果発表（秒）
   BPMS: [70, 90, 100, 120, 140, 160],
@@ -46,20 +50,25 @@ class Rhythm extends HostedGame {
     return {
       t: 0,
       bpm,
+      guide: o.guide !== 0, // お手本を流すか
+      first: Array.from({ length: this.n }, () => null), // 1 拍目の、0 からのずれ（ミリ秒。参考）
       taps, // 刻む回数（間隔の数は taps - 1）
-      res: Array.from({ length: this.ctx.players.length }, () => null), // 人ごとの間隔の列（ミリ秒）
+      res: Array.from({ length: this.n }, () => null), // 人ごとの間隔の列（ミリ秒）
       revealed: false,
       revealT: 0,
       done: false,
     };
   }
 
-  /** お手本が終わって刻み始める時刻、刻み終わりの上限（ゲーム内時刻） */
+  /** 1 拍の長さ（秒）、カウントダウンが始まる時刻、0（1 拍目）の時刻、刻み終わりの上限（ゲーム内時刻） */
   get beat() {
     return 60 / this.s.bpm;
   }
+  get countStart() {
+    return RHY.READY + (this.s.guide ? RHY.GUIDE * this.beat + RHY.GAP : 0);
+  }
   get playStart() {
-    return RHY.READY + RHY.GUIDE * this.beat;
+    return this.countStart + RHY.COUNT;
   }
   get playEnd() {
     return this.playStart + this.s.taps * this.beat * 2 + 3;
@@ -72,6 +81,8 @@ class Rhythm extends HostedGame {
       t: num(r.t, 0, -10, 3600),
       bpm: RHY.BPMS.includes(r.bpm) ? r.bpm : 120,
       taps: [8, 16].includes(r.taps) ? r.taps : 8,
+      guide: r.guide !== false,
+      first: Array.from({ length: this.n }, (_, i) => this._cleanFirst(Array.isArray(r.first) ? r.first[i] : null)),
       res: Array.from({ length: this.n }, (_, i) => this._cleanRes(Array.isArray(r.res) ? r.res[i] : null)),
       revealed: !!r.revealed,
       revealT: num(r.revealT, 0, -10, 3600),
@@ -87,15 +98,21 @@ class Rhythm extends HostedGame {
       .map((x) => Math.min(5000, Math.max(1, Math.round(x))));
   }
 
+  _cleanFirst(v) {
+    return typeof v === 'number' && Number.isFinite(v) ? Math.max(-2000, Math.min(5000, Math.round(v))) : null;
+  }
+
   light() {
     const s = this.s;
-    return { t: s.t, bpm: s.bpm, taps: s.taps, got: s.res.map((x) => (x ? 1 : 0)), rv: s.revealed ? s.res : null };
+    return { t: s.t, bpm: s.bpm, taps: s.taps, g: s.guide ? 1 : 0, got: s.res.map((x) => (x ? 1 : 0)), rv: s.revealed ? s.res : null, rf: s.revealed ? s.first : null };
   }
 
   mergeLight(r) {
     const s = this.s;
     if (RHY.BPMS.includes(r.bpm)) s.bpm = r.bpm;
     if ([8, 16].includes(r.taps)) s.taps = r.taps;
+    if (r.g === 0 || r.g === 1) s.guide = r.g === 1;
+    if (Array.isArray(r.rf)) s.first = Array.from({ length: this.n }, (_, i) => this._cleanFirst(r.rf[i]));
     if (Array.isArray(r.got)) this._got = r.got;
     if (Array.isArray(r.rv) && !s.revealed) {
       s.res = Array.from({ length: this.n }, (_, i) => this._cleanRes(r.rv[i]) || []);
@@ -107,7 +124,9 @@ class Rhythm extends HostedGame {
     const t = this.time;
     if (this.s.revealed) return 'reveal';
     if (t < RHY.READY) return 'ready';
-    if (t < this.playStart) return 'listen';
+    if (this.s.guide && t < RHY.READY + RHY.GUIDE * this.beat) return 'listen';
+    if (t < this.countStart) return 'gap';
+    if (t < this.playStart) return 'count';
     return 'play';
   }
 
@@ -127,9 +146,21 @@ class Rhythm extends HostedGame {
   onGameMessage(d, player) {
     if (!this.isHost) return;
     const s = this.s;
-    if (s.revealed || !(player >= 0 && player < this.n) || s.res[player]) return;
+    if (s.revealed || !(player >= 0 && player < this.humans) || s.res[player]) return;
     const v = this._cleanRes(d.iv);
     if (v) s.res[player] = v.slice(0, s.taps - 1);
+    s.first[player] = this._cleanFirst(d.f);
+  }
+
+  /** CPU: 刻み終わるころに、強さに合わせてぶれた間隔を出す（テンポのずれ よわい 8% / ふつう 3.5% / つよい 1.2%、1 回ごとのぶれも） */
+  cpuStep(i, level) {
+    const s = this.s;
+    if (s.revealed || s.res[i] || s.t < this.playStart + (s.taps - 1) * this.beat + 0.2) return;
+    const bias = gauss() * ({ 1: 0.08, 2: 0.035, 3: 0.012 }[level] || 0.035);
+    const jit = { 1: 0.07, 2: 0.035, 3: 0.015 }[level] || 0.035;
+    const target = 60000 / s.bpm;
+    s.res[i] = Array.from({ length: s.taps - 1 }, () => Math.round(target * (1 + bias + gauss() * jit)));
+    s.first[i] = Math.round(gauss() * ({ 1: 120, 2: 50, 3: 20 }[level] || 50));
   }
 
   result() {
@@ -154,10 +185,11 @@ class Rhythm extends HostedGame {
         detail: tapped(i) ? `BPM ${x.bpm.toFixed(1)}（正確さ ${x.acc.toFixed(1)}%）` : '刻めず…',
       })),
       stats: [
-        { label: 'お題', text: `BPM ${s.bpm}（1 拍 ${Math.round(60000 / s.bpm)} ms）を ${s.taps} 回` },
+        { label: 'お題', text: `BPM ${s.bpm}（1 拍 ${Math.round(60000 / s.bpm)} ms）を ${s.taps} 回・お手本${s.guide ? 'あり' : 'なし'}` },
         { label: '刻んだテンポ', values: sc.map((x, i) => (tapped(i) ? `BPM ${x.bpm.toFixed(1)}` : '-')) },
         { label: '間隔の平均のずれ', values: sc.map((x, i) => (tapped(i) ? `${x.dev.toFixed(1)}%` : '-')) },
         { label: 'ばらつき', values: sc.map((x, i) => (tapped(i) ? `±${x.sd} ms` : '-')) },
+        { label: '1拍目（0 からのずれ・参考）', values: s.first.map((f) => (f === null ? '-' : `${f >= 0 ? '+' : ''}${f} ms`)) },
         { label: '刻めた回数', values: s.res.map((iv) => `${(iv || []).length ? iv.length + 1 : 0} / ${s.taps} 回`) },
         { label: '計算式', text: '正確さ = 100 ×（1 − 間隔のずれの平均 ÷ 25%）。押した間隔ごとに、お題の 1 拍とのずれ（%）を測る' },
       ],
@@ -167,6 +199,7 @@ class Rhythm extends HostedGame {
         { label: '今回の合計', values: pts.map((p) => `${p} pt`) },
       ],
       points: pts,
+      cpu: this.cpuSlots(),
     };
   }
 
@@ -175,6 +208,8 @@ class Rhythm extends HostedGame {
     this.taps = []; // 自分が押した時刻（performance.now の時計）
     this.sent = false;
     this._guided = false;
+    this._counted = false;
+    this._first = null;
     this._lastPhase = '';
     this._lastSec = -1;
     this.ctx.music?.setHold(true); // ゲームが始まったら BGM を止める
@@ -217,8 +252,13 @@ class Rhythm extends HostedGame {
   }
 
   _tap(stamp) {
-    if (this.paused || this.sent || this.phase !== 'play') return;
+    if (this.paused || this.sent) return;
+    const ph = this.phase;
+    // 0 の少し前（カウントダウンの最後）に押した 1 拍目も受け付ける
+    if (!(ph === 'play' || (ph === 'count' && this.time > this.playStart - RHY.EARLY))) return;
     const at = stamp > 0 && Math.abs(stamp - performance.now()) < 5000 ? stamp : performance.now();
+    // 1 拍目: 0（カウントダウンの終わり）からのずれ（参考）
+    if (!this.taps.length) this._first = Math.round((this.time - (performance.now() - at) / 1000 - this.playStart) * 1000);
     this.taps.push(at);
     this.sound.play('tick');
     this._flashAt = performance.now();
@@ -229,7 +269,7 @@ class Rhythm extends HostedGame {
     if (this.sent) return;
     this.sent = true;
     const iv = this.taps.slice(1).map((x, i) => Math.round(x - this.taps[i]));
-    this.sendToHost({ iv });
+    this.sendToHost({ iv, f: this._first ?? null });
   }
 
   draw() {
@@ -247,7 +287,11 @@ class Rhythm extends HostedGame {
         this._guided = true;
         for (let i = 0; i < RHY.GUIDE; i++) this.sound.metro(RHY.READY + i * beat - t, i === 0);
       }
-      if (ph === 'play') this.sound.play('go');
+      if (ph === 'count' && !this._counted) {
+        // 3、2、1 の音と、0（1 拍目）の高い音も、音の時計で予約する
+        this._counted = true;
+        for (let k = 0; k <= RHY.COUNT; k++) this.sound.metro(this.countStart + k - t, k === RHY.COUNT);
+      }
       if (ph === 'reveal') this.sound.play(this._iWon() ? 'finish' : 'lose');
       this._lastPhase = ph;
     }
@@ -260,11 +304,11 @@ class Rhythm extends HostedGame {
     let pulse = 0;
     let count = '';
     if (ph === 'ready') {
-      const sec = Math.ceil(RHY.READY - t);
-      if (sec !== this._lastSec) this.sound.play('beep');
-      this._lastSec = sec;
-      sub = `お手本を ${RHY.GUIDE} 拍聞いたら、あとは自分だけで ${s.taps} 回刻む（1 拍 ${Math.round(60000 / s.bpm)} ms）`;
-      label = `よーい… ${sec}`;
+      // ここでは音を鳴らさない（このあとの 3・2・1 と紛らわしいので）
+      sub = s.guide
+        ? `お手本を ${RHY.GUIDE} 拍聞いたら、3・2・1 のあと 0 で 1 拍目。自分だけで ${s.taps} 回刻む`
+        : `お手本なし！ 3・2・1 のあと 0 で 1 拍目。BPM ${s.bpm}（1 拍 ${Math.round(60000 / s.bpm)} ms）を感覚で ${s.taps} 回`;
+      label = 'よーい';
     } else if (ph === 'listen') {
       const k = Math.floor((t - RHY.READY) / beat);
       const f = (t - RHY.READY) / beat - k;
@@ -272,10 +316,20 @@ class Rhythm extends HostedGame {
       sub = '🎧 お手本をよく聞いて…（まだ押さない）';
       label = `${Math.min(RHY.GUIDE, k + 1)}`;
       count = '●'.repeat(Math.min(RHY.GUIDE, k + 1)) + '○'.repeat(Math.max(0, RHY.GUIDE - k - 1));
+    } else if (ph === 'gap') {
+      sub = '🎧 お手本おわり。テンポを覚えて…';
+      label = '…';
+    } else if (ph === 'count') {
+      const left = Math.ceil(this.playStart - t); // 3 → 2 → 1
+      const f = 1 - (this.playStart - t - (left - 1));
+      pulse = Math.max(0, 1 - f * 2.2);
+      sub = '0 で 1 拍目を押す！';
+      label = `${left}`;
+      count = 'カウントダウン';
     } else if (ph === 'play') {
       const n = this.taps.length;
-      sub = this.sent ? 'ほかの人を待っています…' : 'お手本は止まった！同じテンポで押し続けろ';
-      label = this.sent ? '✅' : n === 0 ? '押せ！' : `${n}`;
+      sub = this.sent ? 'ほかの人を待っています…' : n === 0 ? '今！1 拍目' : '同じテンポで押し続けろ';
+      label = this.sent ? '✅' : n === 0 ? (t - this.playStart < 0.6 ? '0' : '押せ！') : `${n}`;
       count = this.sent ? `${n} / ${s.taps} 回 おわり` : `あと ${s.taps - n} 回`;
       pulse = this._flashAt ? Math.max(0, 1 - (performance.now() - this._flashAt) / 180) : 0;
     } else {
@@ -286,7 +340,7 @@ class Rhythm extends HostedGame {
     this.el.sub.textContent = sub;
     this.el.pad.querySelector('.rh-label').textContent = label;
     this.el.pad.style.setProperty('--p', pulse.toFixed(3));
-    this.root.classList.toggle('is-play', ph === 'play' && !this.sent);
+    this.root.classList.toggle('is-play', (ph === 'play' || ph === 'count') && !this.sent);
     this.root.classList.toggle('is-listen', ph === 'listen');
     this.root.classList.toggle('is-reveal', ph === 'reveal');
     this.el.count.textContent = count;

@@ -241,5 +241,6 @@ export function sanitizeResult(r) {
     score: rows(r.score, 10),
     course: s(r.course, 30),
     points: Array.isArray(r.points) ? Array.from({ length: n }, (_, i) => pts(r.points[i])) : null,
+    cpu: Array.isArray(r.cpu) ? r.cpu.filter(int(0, MAX_PLAYERS - 1)).slice(0, MAX_PLAYERS) : [], // CPU の席（ひとりモード）
   };
 }

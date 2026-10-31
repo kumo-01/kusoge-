@@ -361,6 +361,8 @@ export class HostRoom extends Emitter {
     const matchId = randomHex(8);
     const players = this.occupied; // 参加する席（ホストが先頭）。車はこの順
     const opts = { ...resolveMatchOptions(def, s.options, this._used), round: s.series?.round ?? 1 };
+    // ひとりのときだけの設定（CPU）は、2 人以上では使わない（初期値に戻す）
+    if (!this.solo) for (const opt of def.options || []) if (opt.soloOnly) opts[opt.key] = opt.default;
     for (const opt of def.options || []) if (opt.choices.some((c) => c.random)) (this._used[opt.key] ||= []).push(opts[opt.key]);
     s.screen = 'game';
     for (const p of s.players) p.ready = false;

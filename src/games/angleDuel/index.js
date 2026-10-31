@@ -4,7 +4,7 @@
 // 計算はホスト（common2d.js）。ゲストは自分の角度をホストへ送り、ホストは時間切れで締め切って答え合わせを配る。
 
 import { h } from '../../core/util.js';
-import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut } from '../common2d.js';
+import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut, gauss } from '../common2d.js';
 
 export const ANGLE = {
   READY: 2.5, // お題を見せてから操作できるまで（秒）
@@ -57,7 +57,7 @@ class AngleDuel extends HostedGame {
       target: pickTarget(),
       base: o.base === 1 ? Math.floor(Math.random() * 360) : 0, // 基準線の向き（画面の右 = 0）
       limit,
-      ans: Array.from({ length: this.ctx.players.length }, () => 0),
+      ans: Array.from({ length: this.n }, () => 0),
       revealed: false,
       done: false,
     };
@@ -119,12 +119,22 @@ class AngleDuel extends HostedGame {
     }
   }
 
+  /** CPU: 時間内のどこかで、お題に近い角度を置く（強いほどずれが小さい。標準偏差 よわい 14° / ふつう 6° / つよい 2.2°） */
+  cpuStep(i, level) {
+    const s = this.s;
+    const plan = ((this._cpu ||= {})[i] ||= { at: ANGLE.READY + s.limit * (0.25 + Math.random() * 0.6), done: false });
+    if (plan.done || s.revealed || s.t < plan.at) return;
+    plan.done = true;
+    const sd = { 1: 14, 2: 6, 3: 2.2 }[level] || 6;
+    s.ans[i] = norm(s.target + gauss() * sd);
+  }
+
   onGameMessage(d, player) {
     if (!this.isHost) return;
     const s = this.s;
     // 時間切れ（と通信の遅れの猶予）までの操作だけ受け付ける
     if (s.revealed || s.t < ANGLE.READY - 0.3 || s.t > ANGLE.READY + s.limit + ANGLE.GRACE) return;
-    if (typeof d.a === 'number' && Number.isFinite(d.a) && player >= 0 && player < this.n) s.ans[player] = norm(d.a);
+    if (typeof d.a === 'number' && Number.isFinite(d.a) && player >= 0 && player < this.humans) s.ans[player] = norm(d.a);
   }
 
   result() {
@@ -159,6 +169,7 @@ class AngleDuel extends HostedGame {
         { label: '今回の合計', values: pts.map((p) => `${p} pt`) },
       ],
       points: pts,
+      cpu: this.cpuSlots(),
     };
   }
 

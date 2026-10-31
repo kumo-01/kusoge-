@@ -83,9 +83,11 @@ export function mount(el, app) {
   }
 
   function optionsCard(def, s, isHost) {
-    if (!def?.options?.length) return null;
+    // ひとりのときだけの設定（CPU）は、2 人以上では出さない。needs: その設定が 0 のときは出さない
+    const opts = (def?.options || []).filter((opt) => (!opt.soloOnly || s.solo) && (!opt.needs || s.options?.[opt.needs]));
+    if (!opts.length) return null;
     return h('div.card.options-card', null,
-      def.options.map((opt) =>
+      opts.map((opt) =>
         h('div.option-row', null,
           h('div.option-label', null, '⚙ ', opt.label),
           h('div.chips', null,

@@ -12,6 +12,10 @@
 //   step(dt)                  ホストだけ: 1 tick 進める（フェーズの切り替え・結果の確定）
 //   onGameMessage(data, player)  ホスト: ゲストの操作 / ゲスト: ホストからの配布
 //   mount() / draw(dt) / unmount()  画面
+//   cpuStep(i, level)         ホストだけ: CPU（番号 i）の動き（毎 tick）。ひとりモードで CPU を連れてきたときだけ呼ばれる
+//
+// CPU: ひとりモードの設定 cpu（0〜2 人）・cpuLevel（1 よわい / 2 ふつう / 3 つよい）。
+// 人（ctx.players）のあとに、空いている席（コーギー・プードル）の CPU を並べる。CPU の番号は isCpu(i) で分かる。
 
 import { h } from '../core/util.js';
 import { PLAYERS } from '../screens/common.js';
@@ -26,7 +30,12 @@ export class HostedGame {
     this.ctx = ctx;
     this.isHost = ctx.isHost;
     this.me = ctx.playerIndex; // 自分の番号（players の順。ホストは 0）
-    this.slots = ctx.players; // 番号 → 部屋の席
+    // 番号 → 部屋の席。ひとりモードの CPU は、空いている席を使って人のあとに並べる
+    const cpu = Math.max(0, Math.min(2, ctx.options?.cpu | 0));
+    const free = [0, 1, 2].filter((x) => !ctx.players.includes(x));
+    this.slots = [...ctx.players, ...free.slice(0, cpu)];
+    this.humans = ctx.players.length; // 人の数（CPU は番号 humans 以降）
+    this.cpuLevel = [1, 2, 3].includes(ctx.options?.cpuLevel) ? ctx.options.cpuLevel : 2;
     this.n = this.slots.length;
     this.sound = ctx.sound;
     this.paused = false;
@@ -37,21 +46,38 @@ export class HostedGame {
     this.mount();
   }
 
-  /** 番号 i の人の名前・色など */
-  who(i) {
-    const slot = this.slots[i] ?? i;
-    return { slot, ...PLAYERS[slot], col: SLOT_COLORS[slot] || '#888' };
+  /** 番号 i が CPU か */
+  isCpu(i) {
+    return i >= this.humans;
   }
 
-  /** いまのゲーム内時刻（秒）。ゲストは最後に届いた時刻から、届いてからの経過を足して滑らかに進める */
+  /** 番号 i の人の名前・色など（CPU は名前に「（CPU）」） */
+  who(i) {
+    const slot = this.slots[i] ?? i;
+    const p = PLAYERS[slot];
+    return { slot, ...p, name: this.isCpu(i) ? `${p.name}（CPU）` : p.name, cpu: this.isCpu(i), col: SLOT_COLORS[slot] || '#888' };
+  }
+
+  /** 結果に載せる CPU の席（結果画面で「CPU」と出す） */
+  cpuSlots() {
+    return this.slots.filter((_, i) => this.isCpu(i));
+  }
+
+  /**
+   * いまのゲーム内時刻（秒）。ゲストは最後に届いた時刻から、届いてからの経過を足して滑らかに進める。
+   * 届く間隔のゆらぎで少し戻ることがあるが、戻すと「合図の直前」に逆戻りしてしまうので、戻さない（完全な状態を読み込んだときだけ戻す）
+   */
   get time() {
     if (this.isHost || !this._rx) return this.s.t;
-    return this._rx.t + (this.paused ? 0 : Math.min(1, (nowMs() - this._rx.at) / 1000));
+    const t = this._rx.t + (this.paused ? 0 : Math.min(1, (nowMs() - this._rx.at) / 1000));
+    if (this._tMono == null || t > this._tMono) this._tMono = t;
+    return this._tMono;
   }
 
   update(dt) {
     if (!this.isHost || this.paused) return;
     this.s.t += dt;
+    if (this.cpuStep) for (let i = this.humans; i < this.n; i++) this.cpuStep(i, this.cpuLevel);
     this.step(dt);
   }
 
@@ -64,6 +90,7 @@ export class HostedGame {
     if (!s) return;
     this.s = s;
     this._rx = { t: s.t, at: nowMs() };
+    this._tMono = null; // 完全な状態（再開・やり直し）のときは、その時刻に合わせ直す
     this.onState?.();
   }
 
@@ -150,6 +177,16 @@ export function topbarInset(canvas) {
   if (t.width < 1 || t.right <= c.left || t.left >= c.right || t.bottom <= c.top || t.top >= c.bottom) return 0;
   return Math.max(0, t.bottom - c.top + 6);
 }
+
+/** 平均 0・標準偏差 1 の乱数（CPU のぶれ） */
+export function gauss() {
+  let u = 0;
+  while (u === 0) u = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+}
+
+/** CPU の強さの名前 */
+export const CPU_LEVEL = { 1: 'よわい', 2: 'ふつう', 3: 'つよい' };
 
 /** 0〜1 の進み具合を、最初は速く最後はゆっくりに */
 export const easeOut = (x) => 1 - Math.pow(1 - Math.max(0, Math.min(1, x)), 3);
