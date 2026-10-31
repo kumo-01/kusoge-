@@ -232,8 +232,8 @@ export class HostRoom extends Emitter {
   }
 
   /** サーバー計算にするか。中継（Cloudflare）でつながっていて、サーバー計算が無効でなければ使う */
-  _serverPlan() {
-    if (this.net.transport !== 'relay' || !relayBase() || import.meta.env?.VITE_SERVER_SIM === '0') return null;
+  _serverPlan(def) {
+    if (!def?.serverSim || this.net.transport !== 'relay' || !relayBase() || import.meta.env?.VITE_SERVER_SIM === '0') return null;
     return { base: relayBase(), gid: randomHex(12), ak: randomToken(18), tickets: ['', randomToken(18), randomToken(18)] };
   }
 
@@ -361,7 +361,7 @@ export class HostRoom extends Emitter {
     s.screen = 'game';
     for (const p of s.players) p.ready = false;
     s.result = null;
-    let srv = this._serverPlan();
+    let srv = this._serverPlan(def);
     s.match = { matchId, gen: 1, status: 'loading', reason: null, synced: false, started: false, players, server: !!srv, opts };
     this._acks.clear();
     this._hostLoaded = false;

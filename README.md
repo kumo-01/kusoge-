@@ -1,8 +1,11 @@
 # 🐾 わんわんパーティー ― 2〜3人で遊ぶオンラインミニゲーム集
 
 ホスト1人とゲスト1〜2人（最大3人）で遊ぶ、ブラウザだけで動くオンラインミニゲーム集です。
-最初のゲームは **「わんわん爆走カート」**。柴犬（ホスト）・コーギー（ゲスト1）・プードル（ゲスト2）が小さなカートに乗り、
-アイテムと体当たりで邪魔し合いながら3周レースで勝負します。
+遊べるゲーム:
+
+- 🏎️ **わんわん爆走カート**（3D）: 柴犬（ホスト）・コーギー（ゲスト1）・プードル（ゲスト2）が小さなカートに乗り、アイテムと体当たりで邪魔し合いながら3周レースで勝負
+- 📐 **人間感覚角度対決**（2D）: 「〇〇度までもっていけ！」のお題に、分度器なしで角度を作る。近い人の勝ち
+- 🗾 **都道府県県境バトル**（2D）: お題の都道府県の境を、標高で色分けした日本地図に描く。本物との一致率で勝負
 
 - サーバー不要（GitHub Pages などの静的ホスティングで公開できます）
 - 2人の通信は WebRTC（PeerJS）の P2P。接続の仲介だけ PeerJS Cloud を使います
@@ -113,6 +116,23 @@
 - ゲーム中は画面が暗くならないようにしています（対応ブラウザのみ）
 
 ---
+
+
+### 人間感覚角度対決（2D）
+
+- 画面に「〇〇度までもっていけ！」とお題が出たら、円の外周の丸をドラッグ（または円の中をタップ）して、「0°（ここから）」の線から**反時計回り**にその角度を作る
+- 制限時間（5〜20秒）の間は何度でも直せる。ほかの人の角度は答え合わせまで見えない
+- 答え合わせでは、お題の線が 0° から回って出てきて、みんなの線と「ずれ」が並ぶ。ずれがいちばん小さい人の勝ち
+- 連戦はポイント制（ずれ 0° で 100 pt、1° につき 2 pt 減。勝った人は +20 pt）。基準線の向きをランダムにする「むずかしい」設定あり
+
+### 都道府県県境バトル（2D）
+
+- お題の都道府県がランダムに出る。県境の線が無い、**標高で色分けした日本地図**の上に、その県の境を描く（山の尾根・川・海岸線がヒント）
+- 道具: ✏️ペン / 🧽消しゴム / ↩️戻す（Ctrl+Z） / 🗑️全部リセット / ✋移動 / ➕➖拡大縮小 / 🗾全体。スマホは 2 本指でつまむと拡大・移動、PC はホイールで拡大
+- 制限時間（30〜90秒）で終了。**一致率**（本物の境をどれだけなぞれたか × 描いた線がどれだけ本物の近くか。塗りつぶすように描くと割り引き）が 100% に近い人の勝ち
+- 答え合わせの演出: 「そこまで！」→ みんなが描いた地図がカードで登場 → 中央の地図へ飛んで合体（線が重なる）→ 本物の境が光りながら描かれる → 一致率がカウントアップ → 勝者に 👑
+- 遠くの小さな島（伊豆諸島の南の島など）はお題に含みません。沖縄県は地図の左上の枠（拡大）に描きます。連戦では同じ県は続けて出ません
+- 地図: 国土地理院の[標高タイル](https://maps.gsi.go.jp/development/demtile.html)と[地球地図日本](https://www.gsi.go.jp/kankyochiri/gm_jpn.html)を加工して作成（`tools/japan-map/`。下の「ライセンス・素材」参照）
 
 ## 2. 必要な環境
 
@@ -342,6 +362,13 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
     ├── screens/                   接続・ホーム・選択・準備・ゲーム・結果
     └── games/
         ├── registry.js            ゲームの登録簿
+        ├── common2d.js            2D のミニゲームの共通部分（ホストが計算・お題と制限時間・軽い状態の配信）
+        ├── angleDuel/             人間感覚角度対決
+        ├── prefBattle/            都道府県県境バトル
+        │   ├── index.js           本体（描く道具・拡大縮小・答え合わせの演出）
+        │   ├── score.js           一致率の採点・描いた線の詰め方
+        │   ├── japan-prefs.json   都道府県の境界（地図の単位に投影・簡略化済み）
+        │   └── japan-elev.jpg     標高で色分けした日本地図（陰影つき）
         └── dogKart/               わんわん爆走カート
             ├── index.js           モジュール本体（同期・予測・補間）
             ├── netview.js         受け取る側の表示（自分の車の予測・ほかの車を同じ時刻まで先読み・ずれを滑らかに戻す）
@@ -399,3 +426,16 @@ VITE_PEER_HOST=peer.example.com VITE_PEER_PORT=443 VITE_PEER_PATH=/ VITE_PEER_SE
 
 3Dモデル・効果音・画像はすべてコード（Three.js のプリミティブ、Web Audio API、Canvas）で生成しています。外部の素材は使っていません。
 フォントは Google Fonts の「M PLUS Rounded 1c」（SIL Open Font License）を読み込みます（読み込めない場合は端末のフォントで表示）。
+
+都道府県県境バトルの地図は、次の国土地理院のデータを加工して作成しています（非営利。出典を明記）。
+
+- 標高: 国土地理院「標高タイル（dem_png）」 https://maps.gsi.go.jp/development/demtile.html （標高で色分けし、陰影と湖を加えた画像 `src/games/prefBattle/japan-elev.jpg`）
+- 都道府県の境界: 国土地理院「地球地図日本」 https://www.gsi.go.jp/kankyochiri/gm_jpn.html （[dataofjapan/land](https://github.com/dataofjapan/land) の GeoJSON を投影・簡略化した `src/games/prefBattle/japan-prefs.json`）
+
+作り直すとき（開発用。Playwright が必要）:
+
+```bash
+curl -o japan.geojson https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson
+node tools/japan-map/build-prefs.mjs japan.geojson          # 県境 → japan-prefs.json
+node tools/japan-map/render-elevation.mjs ./dem-tiles         # 標高タイルを集めて → japan-elev.jpg
+```

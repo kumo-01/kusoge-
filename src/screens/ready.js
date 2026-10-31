@@ -39,7 +39,7 @@ export function mount(el, app) {
     const myReady = s.players[room.slot]?.ready === true;
     const sum = roomSummary(s);
     const cards = [];
-    for (let i = 0; i < MAX_PLAYERS; i++) cards.push(playerCard(i, { me: i === room.slot, status: linkFor(app, i), ready: s.players[i].ready }));
+    for (let i = 0; i < MAX_PLAYERS; i++) cards.push(playerCard(i, { me: i === room.slot, status: linkFor(app, i), ready: s.players[i].ready, colorWord: def?.colorWord || '' }));
     countdownEl = h('div.start-countdown', { hidden: true }, h('div.cd-label', null, '全員準備OK！まもなく開始'), h('div.cd-num', null, '3'));
     lastShown = null;
 

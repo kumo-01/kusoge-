@@ -280,7 +280,8 @@ export class GameManager extends Emitter {
       } else if (msg.type === 'game_snapshot' && (!this.isHost || this.serverSim)) {
         if (this.running) game.applyNetSnapshot(msg.snap, msg.ev || [], msg.seq);
       } else if (msg.type === 'game_msg') {
-        game.onMessage({ type: 'game_msg', data: msg.data });
+        // player: 送ってきた人の番号（players の順。ホストが受け取るときはゲストの番号、ゲストが受け取るときはホスト = 0）
+        game.onMessage({ type: 'game_msg', data: msg.data, player: slot == null ? 0 : this.players.indexOf(slot) });
       }
     } catch (err) {
       console.warn('[game] メッセージ処理でエラー', err);

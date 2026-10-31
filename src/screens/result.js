@@ -12,6 +12,7 @@ export function mount(el, app) {
     const se = s.series;
     const isHost = room.role === 'host';
     const def = getGame(r?.gameId);
+    const word = def?.roundWord || 'ラウンド'; // 連戦の 1 回の呼び方（カートは「レース」）
     const players = r?.players || []; // 結果に載っている人（席の番号つき）
     const me = room.slot;
     // 連戦の最終結果は合計ポイントで勝敗を決める（途中経過・1 レースだけのときは、そのレースの勝者）
@@ -69,18 +70,18 @@ export function mount(el, app) {
         h('h2.result-title', null, title),
         h('div.result-row', null, players.map(col)),
         se && r?.score?.length ? [h('h3.result-sub', null, `第${se.round}戦のポイント`), table(r.score)] : null,
-        se ? [h('h3.result-sub', null, se.final ? '全レースのポイント' : 'ここまでのポイント'), table(seriesRows)] : null,
+        se ? [h('h3.result-sub', null, se.final ? `全${word}のポイント` : 'ここまでのポイント'), table(seriesRows)] : null,
         r?.stats?.length ? [se ? h('h3.result-sub', null, `第${se.round}戦の成績`) : null, table(r.stats)] : null,
         h('div.card.action-card', null,
           isHost
             ? [
                 next
-                  ? h('button.btn.btn-primary.btn-xl', { disabled: !canNext, onclick: () => { app.sound.play('ready'); room.nextRace(); } }, `▶ 次のレースへ（第${se.round + 1}戦）`)
+                  ? h('button.btn.btn-primary.btn-xl', { disabled: !canNext, onclick: () => { app.sound.play('ready'); room.nextRace(); } }, `▶ 次の${word}へ（第${se.round + 1}戦）`)
                   : h('button.btn.btn-primary.btn-xl', { onclick: () => room.goSelect() }, '🎮 ゲーム選択へ戻る'),
                 next ? h('button.btn.btn-ghost', { onclick: () => room.goSelect() }, 'ここでやめてゲーム選択へ戻る') : null,
                 next && !canNext ? h('p.small.warn-text', null, '参加者の接続を待っています…') : null,
               ]
-            : h('div.waiting', null, h('span.paw-spinner', null, '🐾'), next ? 'ホストが次のレースを始めるのを待っています…' : 'ホストの操作を待っています…'))),
+            : h('div.waiting', null, h('span.paw-spinner', null, '🐾'), next ? `ホストが次の${word}を始めるのを待っています…` : 'ホストの操作を待っています…'))),
     );
   }
   render();

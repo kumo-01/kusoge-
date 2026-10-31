@@ -1974,3 +1974,232 @@ canvas {
   margin: 0;
   text-align: center;
 }
+
+/* ---- 2D のミニゲーム共通 ---- */
+.g2d {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at 50% 30%, #fff6e6 0%, #ffe9cf 60%, #ffd9b8 100%);
+  color: var(--ink);
+  font-family: var(--font);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 人間感覚角度対決 */
+.ad-head {
+  padding: max(14px, env(safe-area-inset-top)) 16px 6px;
+  text-align: center;
+}
+.ad-round {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--ink-soft);
+}
+.ad-prompt {
+  font-size: clamp(1.6rem, 6vw, 2.6rem);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  margin: 2px 0;
+  text-shadow: 0 3px 0 #fff;
+}
+.ad-sub {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.ad-timer {
+  position: relative;
+  width: min(420px, 86vw);
+  height: 26px;
+  margin: 8px auto 0;
+  border-radius: 999px;
+  background: #fff;
+  border: 3px solid #f1e0c8;
+  overflow: hidden;
+}
+.ad-timer-bar {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--green), #6fd39f);
+  transform-origin: left center;
+  transition: transform 0.12s linear;
+}
+.ad-timer.hurry .ad-timer-bar {
+  background: linear-gradient(90deg, var(--red), #ff8a8a);
+}
+.ad-timer-num {
+  position: relative;
+  font-weight: 900;
+  font-size: 0.95rem;
+  line-height: 20px;
+}
+.ad-canvas {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: block;
+  cursor: crosshair;
+}
+.ad-foot {
+  text-align: center;
+  font-weight: 800;
+  font-size: 0.85rem;
+  padding: 4px 12px max(12px, env(safe-area-inset-bottom));
+}
+@media (max-width: 720px) {
+  .ad-head {
+    padding-top: 64px;
+  }
+}
+.ad-results {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.ad-res {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #fff;
+  border: 3px solid var(--c);
+  color: var(--c);
+  font-size: 1rem;
+  animation: ad-pop 0.35s ease-out both;
+}
+.ad-res.best {
+  font-size: 1.15rem;
+  background: var(--c);
+  color: #fff;
+}
+.ad-res small {
+  font-weight: 700;
+  opacity: 0.8;
+}
+@keyframes ad-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+}
+
+/* 都道府県県境バトル */
+.pb {
+  background: #609ed4;
+}
+.pb-head {
+  padding: max(10px, env(safe-area-inset-top)) 16px 4px;
+  text-align: center;
+  background: linear-gradient(180deg, #fff6e6, #ffe9cf);
+}
+.pb-round {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--ink-soft);
+}
+.pb-prompt {
+  font-size: clamp(1.25rem, 5vw, 2rem);
+  font-weight: 900;
+  margin: 2px 0 4px;
+}
+.pb-prompt b {
+  color: var(--red-d);
+  font-size: 1.15em;
+}
+.pb .ad-timer {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+.pb-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #ffe9cf;
+  border-bottom: 3px solid #f1d5b3;
+}
+.pb-tool {
+  font: inherit;
+  font-size: 1.05rem;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 52px;
+  padding: 4px 6px 3px;
+  border-radius: 12px;
+  border: 3px solid #f1d5b3;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  line-height: 1.1;
+}
+.pb-tool small {
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+.pb-tool.on {
+  background: var(--orange);
+  border-color: var(--orange-d);
+  color: #fff;
+}
+.pb-canvas {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: block;
+  cursor: crosshair;
+}
+.pb-canvas[data-tool='move'] {
+  cursor: grab;
+}
+.pb-canvas[data-tool='erase'] {
+  cursor: cell;
+}
+.pb-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  align-items: center;
+  font-weight: 800;
+  font-size: 0.8rem;
+  padding: 4px 12px max(8px, env(safe-area-inset-bottom));
+  background: #fff6e6;
+}
+.pb-credit {
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+.pb.is-reveal .pb-tools {
+  display: none;
+}
+.pb .ad-results {
+  width: 100%;
+}
+@media (max-width: 720px) {
+  .pb-head {
+    padding-top: 56px;
+  }
+  .pb-tool {
+    min-width: 44px;
+    font-size: 0.95rem;
+  }
+}
+@media (max-width: 430px) {
+  .pb-tools {
+    gap: 4px;
+    padding: 5px 4px;
+  }
+  .pb-tool {
+    min-width: 40px;
+    padding: 3px 2px 2px;
+    font-size: 0.9rem;
+  }
+  .pb-tool small {
+    font-size: 0.56rem;
+  }
+}

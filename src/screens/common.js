@@ -80,8 +80,8 @@ export function statusPill(state, extra) {
   return h(`span.pill.pill-${tone}`, null, h('span.dot'), label, extra ? ` ${extra}` : '');
 }
 
-/** プレイヤーカード。slot: 席（0 = ホスト, 1・2 = ゲスト） */
-export function playerCard(slot, { me = false, status = 'connected', ready = null, extra = null } = {}) {
+/** プレイヤーカード。slot: 席（0 = ホスト, 1・2 = ゲスト）。colorWord: 色のあとにつける言葉（カートのゲームなら「のカート」） */
+export function playerCard(slot, { me = false, status = 'connected', ready = null, extra = null, colorWord = '' } = {}) {
   const p = PLAYERS[slot];
   const empty = status === 'none';
   return h(
@@ -90,7 +90,7 @@ export function playerCard(slot, { me = false, status = 'connected', ready = nul
     me ? h('span.me-badge', null, 'あなた') : null,
     h('div.avatar', { html: dogAvatar(p.kind, 88) }),
     h('div.player-name', null, p.name),
-    h('div.player-role', null, `${p.role}・${p.colorName}のカート`),
+    h('div.player-role', null, `${p.role}・${p.colorName}${colorWord}`),
     statusPill(status),
     ready === null || empty ? null : h(`div.ready-badge${ready ? '.on' : ''}`, null, ready ? '✔ 準備OK' : '準備中…'),
     extra,
