@@ -44,7 +44,7 @@ function pickTarget() {
 
 class AngleDuel extends HostedGame {
   initState(o) {
-    const limit = [5, 10, 15, 20].includes(o.limit) ? o.limit : 10;
+    const limit = [3, 5, 10, 15, 20].includes(o.limit) ? o.limit : 10;
     return {
       t: 0,
       target: pickTarget(),

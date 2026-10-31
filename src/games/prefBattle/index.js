@@ -66,7 +66,7 @@ class PrefBattle extends HostedGame {
     return {
       t: 0,
       code: pickCode(),
-      limit: [30, 45, 60, 90].includes(o.limit) ? o.limit : 60,
+      limit: [10, 15, 30, 45, 60, 90].includes(o.limit) ? o.limit : 60,
       strokes: Array.from({ length: n }, () => []), // 人ごとの線（×10 の整数。packStrokes の形）
       fin: Array.from({ length: n }, () => false), // 最後の線が届いたか
       scores: null, // [{ pct, cover, precise, len }]

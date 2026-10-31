@@ -119,6 +119,7 @@ export const GAMES = [
           { value: 1, label: '1回だけ' },
           { value: 3, label: '3回戦' },
           { value: 5, label: '5回戦' },
+          { value: 10, label: '10回戦' },
         ],
         default: 3,
       },
@@ -126,6 +127,7 @@ export const GAMES = [
         key: 'limit',
         label: '制限時間',
         choices: [
+          { value: 3, label: '3秒' },
           { value: 5, label: '5秒' },
           { value: 10, label: '10秒' },
           { value: 15, label: '15秒' },
@@ -174,6 +176,8 @@ export const GAMES = [
           { value: 1, label: '1回だけ' },
           { value: 3, label: '3回戦' },
           { value: 5, label: '5回戦' },
+          { value: 10, label: '10回戦' },
+          { value: 15, label: '15回戦' },
         ],
         default: 1,
       },
@@ -181,6 +185,8 @@ export const GAMES = [
         key: 'limit',
         label: '制限時間',
         choices: [
+          { value: 10, label: '10秒' },
+          { value: 15, label: '15秒' },
           { value: 30, label: '30秒' },
           { value: 45, label: '45秒' },
           { value: 60, label: '60秒' },
