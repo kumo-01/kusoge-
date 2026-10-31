@@ -309,11 +309,13 @@ export class HostNetwork extends Emitter {
     return this.linkOf(slot)?.rtt ?? null;
   }
 
-  async create() {
+  /**
+   * 部屋を作る。mode: 'server'（Cloudflare の中継を先に試し、使えなければ P2P） / 'p2p'（WebRTC で直接つなぐ。ホストの端末が計算する）
+   * どちらで作ったかは部屋 ID の頭（wwr- / wwk-）で分かるので、ゲストは招待 URL だけで同じ方式につながる
+   */
+  async create(mode = 'server') {
     this.inviteKey = randomToken(18);
-    // Cloudflare の中継（VITE_RELAY_URL）を設定していれば、まずそちらで部屋を作る。使えなければ PeerJS Cloud（P2P）にする。
-    // どちらで作ったかは部屋 ID の頭（wwr- / wwk-）で分かるので、ゲストは招待 URL だけで同じ方式につながる
-    const kinds = relayBase() ? ['relay', 'peer'] : ['peer'];
+    const kinds = mode === 'p2p' || !relayBase() ? ['peer'] : ['relay', 'peer'];
     let lastErr;
     for (const kind of kinds) {
       const hostSecret = randomToken(18);

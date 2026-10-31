@@ -7,6 +7,8 @@ import { InputManager } from './core/input.js';
 import { sound } from './core/audio.js';
 import { createMusic } from './core/music.js';
 import { describePeerError } from './core/network.js';
+
+const ROOM_MODE_KEY = 'wanwan.roomMode';
 import { readInviteParams, loadGuestSession, clearInviteParams, clearGuestSession } from './core/reconnect.js';
 
 const CLOSE_TEXT = {
@@ -69,17 +71,37 @@ class App {
     room.on('closed', ({ reason }) => this._onClosed(reason));
   }
 
+  /** 部屋の通信方式（'server' | 'p2p'）。前回選んだものを覚えておく */
+  get roomMode() {
+    try {
+      return localStorage.getItem(ROOM_MODE_KEY) === 'p2p' ? 'p2p' : 'server';
+    } catch {
+      return 'server';
+    }
+  }
+
+  setRoomMode(mode) {
+    try {
+      localStorage.setItem(ROOM_MODE_KEY, mode);
+    } catch {
+      /* noop */
+    }
+    this.render();
+  }
+
   async createRoom() {
     if (this.room || this.connectInfo.busy) return;
     this.connectInfo = { busy: true, error: null, notice: null };
     this.render();
+    const mode = this.roomMode;
     const room = new HostRoom({ sound, music: this.music, input: this.input, layer: this.gameLayer });
     try {
-      await room.create();
+      await room.create(mode);
     } catch (err) {
       console.warn('[app] 部屋を作れませんでした', err?.type || err?.message);
       room.disband('failed');
-      this.connectInfo = { busy: false, error: `部屋を作成できませんでした。${describePeerError(err?.type || 'server-error')}`, notice: null };
+      const hint = mode === 'p2p' ? '（P2P の仲介サーバーにつながりません。「サーバー」モードで作り直してください）' : '';
+      this.connectInfo = { busy: false, error: `部屋を作成できませんでした。${describePeerError(err?.type || 'server-error')}${hint}`, notice: null };
       this.render();
       return;
     }

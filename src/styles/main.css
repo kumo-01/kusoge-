@@ -1960,3 +1960,17 @@ canvas {
   -webkit-user-drag: none;
   -webkit-touch-callout: none;
 }
+
+/* 通信モードの選択（接続画面） */
+.mode-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.mode-picker p {
+  max-width: 34em;
+  margin: 0;
+  text-align: center;
+}

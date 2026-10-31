@@ -36,6 +36,7 @@ export function mount(el, app) {
         null,
         info.notice ? h('div.notice', null, info.notice) : null,
         info.error ? h('div.error-box', null, '⚠ ', info.error) : null,
+        modePicker(info.busy),
         h(
           'button.btn.btn-primary.btn-xl',
           { onclick: () => app.createRoom(), disabled: info.busy },
@@ -58,6 +59,7 @@ export function mount(el, app) {
         'div.card.connect-card',
         null,
         h('h2', null, '🎉 部屋ができました！'),
+        h('p.small.muted', null, room.net?.transport === 'relay' ? '通信モード: ☁ サーバー' : '通信モード: ⚡ P2P（直接）'),
         h('p', null, 'この招待URLを相手に送ってください。最大3人（ホスト + ゲスト2人）で遊べます。'),
         h('div.invite-row', null,
           input,
@@ -106,6 +108,26 @@ export function mount(el, app) {
     );
   }
 
+  /** 通信モードの選択（部屋を作る前） */
+  function modePicker(busy) {
+    const mode = app.roomMode;
+    const choices = [
+      { value: 'server', label: '☁ サーバー', desc: 'Cloudflare のサーバーが計算します。どんな回線でもつながりやすく、全員が同じ条件で遊べます。' },
+      { value: 'p2p', label: '⚡ P2P（直接）', desc: 'ホストとゲストが直接つながり、ホストの端末が計算します。近くの人どうしなら遅れが少なくなります。回線によってはつながりません（そのときは「サーバー」で作り直してください）。' },
+    ];
+    const cur = choices.find((c) => c.value === mode);
+    return h('div.mode-picker', null,
+      h('div.option-label', null, '通信モード'),
+      h('div.chips', null,
+        choices.map((c) =>
+          h(`button.chip${c.value === mode ? '.on' : ''}`, {
+            disabled: busy,
+            'aria-pressed': c.value === mode ? 'true' : 'false',
+            onclick: c.value === mode ? null : () => { app.sound?.play('click'); app.setRoomMode(c.value); },
+          }, c.label))),
+      h('p.small.muted', null, cur.desc));
+  }
+
   function signalingNote(room) {
     if (room.signaling === 'online') return null;
     return h('p.small.warn-text', null, '⚠ 接続仲介サーバーに再接続しています。しばらくお待ちください…');
@@ -116,7 +138,7 @@ export function mount(el, app) {
       h('summary', null, 'つながらないときは'),
       h('ul', null,
         h('li', null, 'ホストのページが開いたままか確認してください（ホストが更新すると以前の部屋は終了します）。'),
-        h('li', null, '会社・学校のネットワークや一部のモバイル回線では WebRTC が通らないことがあります。'),
+        h('li', null, '会社・学校のネットワークや一部のモバイル回線では WebRTC が通らないことがあります。P2P（直接）の部屋につながらないときは、ホストに「サーバー」モードで部屋を作り直してもらってください。'),
         h('li', null, '広告ブロッカーやVPNを一時的に切ると改善することがあります。'),
         h('li', null, 'ホストに新しい招待URLを作ってもらってください。')));
   }

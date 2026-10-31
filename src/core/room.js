@@ -97,8 +97,9 @@ export class HostRoom extends Emitter {
     return this.occupied.length >= 2;
   }
 
-  async create() {
-    await this.net.create();
+  /** mode: 'server' | 'p2p'（network.js の create を参照） */
+  async create(mode = 'server') {
+    await this.net.create(mode);
     const net = this.net;
     net.on('guest-connected', (info) => this._guestConnected(info));
     net.on('guest-disconnected', ({ slot }) => this._guestLost(slot, 'waiting'));
