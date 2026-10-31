@@ -1,4 +1,4 @@
-// スマホ・タブレット用のタッチ操作（ハンドル・アクセル・ブレーキ・アイテム・復帰）
+// スマホ・タブレット用のタッチ操作（ハンドル・アクセル・ブレーキ・アイテム）
 // 複数の指を同時に使えるよう、ボタンごとに Pointer Events で押している間だけ有効にする。
 
 import { h } from '../../core/util.js';
@@ -15,7 +15,6 @@ export class TouchControls {
     this.accel = false;
     this.visible = false;
     this.item = false; // 押した瞬間だけ
-    this.respawn = false;
     try {
       this.auto = localStorage.getItem(AUTO_KEY) !== '0'; // 既定はオートアクセル
     } catch {
@@ -29,16 +28,14 @@ export class TouchControls {
     this.brakeBtn = h('div.touch-pedal.tp-brake', { 'data-ctl': '' }, 'ブレーキ');
     this.accelBtn = h('div.touch-pedal.tp-accel', { 'data-ctl': '' }, 'アクセル');
     this.pedals = h('div.touch-pedals', null, this.brakeBtn, this.accelBtn);
-    this.respawnBtn = h('div.touch-small', { 'data-ctl': '', title: 'コースに戻る' }, '↺', h('small', null, '復帰'));
     this.autoLabel = h('small', null, 'オート');
     this.autoBtn = h('div.touch-small', { 'data-ctl': '', title: 'オートアクセル' }, '🚗', this.autoLabel);
-    this.tools = h('div.touch-tools', null, this.respawnBtn, this.autoBtn);
+    this.tools = h('div.touch-tools', null, this.autoBtn);
     this.root.append(this.steer, this.pedals, this.tools);
 
     this._bindSteer();
     this._hold(this.brakeBtn, (on) => (this.brake = on));
     this._hold(this.accelBtn, (on) => (this.accel = on));
-    this._tap(this.respawnBtn, () => (this.respawn = true));
     this._tap(this.autoBtn, () => this.setAuto(!this.auto));
     this.setAuto(this.auto, false);
 
@@ -132,9 +129,7 @@ export class TouchControls {
     if (this.brake) b |= IN.DOWN;
     else if (this.auto || this.accel) b |= IN.UP;
     if (this.item) b |= IN.ITEM;
-    if (this.respawn) b |= IN.RESPAWN;
     this.item = false;
-    this.respawn = false;
     return b;
   }
 

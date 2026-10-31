@@ -49,6 +49,7 @@ export class EngineClient extends Emitter {
       if (msg.type === 'e_pong') {
         const rtt = now() - msg.t;
         if (rtt >= 0 && rtt < 60000) this.rtt = this.rtt == null ? rtt : this.rtt * 0.7 + rtt * 0.3;
+        if (msg.colo) this.route = `${msg.colo}→${msg.dc || '?'}`; // 診断用の経路（自分がつながった拠点 → 計算役の拠点）
         return;
       }
       this.emit('message', msg);

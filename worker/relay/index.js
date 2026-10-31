@@ -19,7 +19,7 @@
 
 // サーバーの版。ゲームの計算（src/games/dogKart/ の engine・race・physics など）を変えたら、ここも上げる。
 // Cloudflare の自動ビルドは worker/relay/ の変更でしか動かないことがあるため（/health で今の版を確認できる）
-const SERVER_VERSION = '2026-10-30.3';
+const SERVER_VERSION = '2026-10-31.1';
 
 const ROOM_RE = /^[A-Za-z0-9-]{8,64}$/;
 const MAX_MESSAGE = 70000; // アプリ側の上限（60000 文字）より少し大きく
@@ -45,7 +45,10 @@ export default {
       // サーバー計算（試合ごと）。試合 ID（gid）は推測できない値で、参加者にだけ渡される
       const gid = url.searchParams.get('gid') || '';
       if (!/^[A-Za-z0-9]{24,64}$/.test(gid)) return new Response('bad request', { status: 400 });
-      return env.GAMES.get(env.GAMES.idFromName(gid)).fetch(request);
+      // 診断用: その人がつながった Cloudflare の拠点（空港コード）を試合の計算役へ渡す
+      const fwd = new Request(request);
+      fwd.headers.set('x-edge-colo', String(request.cf?.colo || '').slice(0, 8));
+      return env.GAMES.get(env.GAMES.idFromName(gid)).fetch(fwd);
     }
     const room = url.searchParams.get('room') || '';
     const role = url.searchParams.get('role');

@@ -155,7 +155,6 @@ class DogKartGame {
     if (i.isDown('KeyA', 'ArrowLeft')) b |= IN.LEFT;
     if (i.isDown('KeyD', 'ArrowRight')) b |= IN.RIGHT;
     if (i.consume('Space')) b |= IN.ITEM;
-    if (i.consume('KeyR')) b |= IN.RESPAWN;
     if (i.consume('Enter', 'NumpadEnter', 'KeyE') || this.tapPressed) b |= IN.TAP;
     this.tapPressed = false;
     if (i.consume('KeyC')) this.toggleCamera();
@@ -811,7 +810,7 @@ class DogKartGame {
       dg.corrShown = dg.corr;
       dg.corr = 0;
     }
-    const diag = this.diagOn && !this.auth ? ` | ${dg.fps}fps 長${dg.long} 先行${dg.lead}t 補正${(dg.corrShown ?? dg.corr).toFixed(1)}m 飛${dg.snaps}${dg.lastSnap ? `(${dg.lastSnap})` : ''} 復${dg.respawns} 追${dg.catchup} 待${dg.slowed} 履${dg.nohist} 再${dg.resync}` : '';
+    const diag = this.diagOn && !this.auth ? ` | ${info.route ? `経路${info.route} ` : ''}${dg.fps}fps 長${dg.long} 先行${dg.lead}t 補正${(dg.corrShown ?? dg.corr).toFixed(1)}m 飛${dg.snaps}${dg.lastSnap ? `(${dg.lastSnap})` : ''} 復${dg.respawns} 追${dg.catchup} 待${dg.slowed} 履${dg.nohist} 再${dg.resync}` : '';
     const sk = s.karts[this.me]; // 周回・アイテムは確定状態を表示
     // タイミングブーストと豪雨は、ゲストは自分の予測（押したタイミングがそのまま判定に使われる）で表示する
     const pk = !this.auth && NET.PREDICTION && this.pred.k ? this.pred.k : sk;

@@ -98,7 +98,7 @@ export class RaceSim {
         stepTiming(k, this.prog[k.i], s.tc, !!(inp & IN.TAP), dt, ev);
       }
       if (active && inp & IN.ITEM) useItem(s, k, ev, this.prog, (u) => this.callRain(u));
-      if (active && inp & IN.RESPAWN) this.respawn(k);
+      if (active && inp & IN.RESPAWN && k.npc) this.respawn(k); // 人は復帰できない（NPC が引っかかったときだけ）
       const wall = stepKart(k, inp, dt, track, active);
       if (wall > 8) {
         k.stats.walls++;

@@ -195,15 +195,20 @@ test('アイテムボックスを取るとルーレット後にアイテムが�
   assert.equal(sim.s.boxes[0], 0);
 });
 
-test('R で最後のチェックポイントへ復帰できる', () => {
+test('人は復帰できない（復帰の入力は NPC が引っかかったときだけ）。コース外へ飛び出したときは安全装置で戻る', () => {
   const sim = newRace();
   const a = sim.s.karts[0];
   place(a, track.cpS(2) + 30, 0);
   for (let i = 0; i < 5; i++) sim.step(DT, [0, 0]);
   a.cp = 2;
+  const before = track.project(a.x, a.z).s;
   sim.step(DT, [IN.RESPAWN, 0]);
-  const p = track.project(a.x, a.z);
-  assert.ok(Math.abs(track.wrapDS(p.s - track.cpS(2))) < 6);
+  assert.ok(Math.abs(track.wrapDS(track.project(a.x, a.z).s - before)) < 3, '人の復帰の入力は効かない');
+  // 安全装置: 壁の外へ大きく出たら戻る
+  const q = track.pointAt(track.cpS(2) + 30, track.wallDist + 20);
+  Object.assign(a, { x: q.x, z: q.z, rc: 0 });
+  sim.step(DT, [0, 0]);
+  assert.ok(Math.abs(track.project(a.x, a.z).lat) < track.wallDist, '安全装置で戻る');
 });
 
 test('スナップショットの保存と復元で同じ状態に戻る', () => {
@@ -469,7 +474,7 @@ test('飼い主登場: 無敵で自動で走り、触れた車をはね飛ばし
     const p = t.pointAt(40, 0);
     Object.assign(a, { x: p.x, z: p.z, h: p.h, sp: 0, kx: 0, kz: 0 });
     const q = t.pointAt(-200, 0);
-    Object.assign(b, { x: q.x, z: q.z, h: q.h });
+    Object.assign(b, { x: q.x, z: q.z, h: q.h, lap: 1 }); // b は 1 周先（a は最下位なので、飼い主の時間が最長）
     a.item = ITEMS.OWNER;
     sim.step(DT, [IN.ITEM, 0]);
     assert.ok(a.ow > 0 && a.item === 0);
@@ -1100,4 +1105,15 @@ test('3 人対戦: 3 人のポイント・ファステストラップ・定期�
   assert.deepEqual(back.karts.map((k) => k.npc), [0, 0, 0, 1]);
   assert.deepEqual(back.karts.map((k) => k.style), [0, 1, 2, 3]);
   assert.equal(back.winner, -1);
+});
+
+test('飼い主の時間は順位が低いほど長い（1 位は約 1 秒、最下位は最長）', async () => {
+  const { ownerTime } = await import('../src/games/dogKart/items.js');
+  const karts = [0, 1, 2, 3, 4].map((i) => ({ i, fin: 0 }));
+  const progs = [500, 400, 300, 200, 100]; // 0 が 1 位、4 が最下位
+  const t = karts.map((k) => ownerTime(karts, k, progs));
+  assert.ok(Math.abs(t[0] - ITEMS.OWNER_MIN) < 1e-9, `1 位 ${t[0]}`);
+  assert.ok(Math.abs(t[4] - ITEMS.OWNER_TIME) < 1e-9, `最下位 ${t[4]}`);
+  for (let i = 1; i < 5; i++) assert.ok(t[i] > t[i - 1], '順位が下がるほど長い');
+  assert.equal(ownerTime(karts, karts[2], null), ITEMS.OWNER_TIME);
 });

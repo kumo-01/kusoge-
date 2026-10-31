@@ -63,7 +63,7 @@ export class Hud {
       this.trBox,
       h('div.hud-bl', null, h('div.hud-speed', null, this.speed, h('span', null, 'わんkm/h')), h('div.hud-speed-bar', null, this.speedBar), this.food),
       h('div.hud-br', null, this.itemSlot),
-      h('div.hud-bc', null, 'W/↑ アクセル　S/↓ ブレーキ　A D/← → ハンドル　Space アイテム　R 復帰　C カメラ　Enter/タップ タイミング'),
+      h('div.hud-bc', null, 'W/↑ アクセル　S/↓ ブレーキ　A D/← → ハンドル　Space アイテム　C カメラ　Enter/タップ タイミング'),
       this.rotateHint,
       this.thunderEl,
       this.wetBadge,

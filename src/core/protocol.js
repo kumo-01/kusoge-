@@ -97,7 +97,7 @@ const SCHEMAS = {
   e_full: { matchId: id, gen: int(0, 1e9), snapshot: obj },
   e_result: { matchId: id, result: obj },
   e_error: { reason: str(40) },
-  e_pong: { t: num(0, 1e15) },
+  e_pong: { t: num(0, 1e15), colo: opt(str(8)), dc: opt(str(8)) }, // colo: 自分がつながった Cloudflare の拠点、dc: 計算役の拠点（診断用）
 };
 
 export const FROM_GUEST = new Set([

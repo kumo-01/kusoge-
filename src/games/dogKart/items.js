@@ -73,6 +73,18 @@ export function spinKart(k, dur, force = false) {
   return true;
 }
 
+/**
+ * 飼い主に引っ張ってもらえる時間。順位が低いほど長い（1 位は OWNER_MIN 秒、最下位は OWNER_TIME 秒、その間は順位に比例）。
+ * progs: 全車の走行距離（なければ最長）
+ */
+export function ownerTime(karts, k, progs) {
+  const n = karts.length;
+  if (!progs || n < 2) return ITEMS.OWNER_TIME;
+  let rank = 1;
+  for (const o of karts) if (o !== k && (progs[o.i] > progs[k.i] || (o.fin && !k.fin))) rank++;
+  return ITEMS.OWNER_MIN + ((ITEMS.OWNER_TIME - ITEMS.OWNER_MIN) * (rank - 1)) / (n - 1);
+}
+
 /** progs: 全車の走行距離（フリスビー・犬小屋の狙いを決める）。callRain: 豪雨を降らせる処理 */
 export function useItem(s, k, events, progs = null, callRain = null) {
   if (!k.item || k.roll > 0) return;
@@ -129,7 +141,7 @@ export function useItem(s, k, events, progs = null, callRain = null) {
       d: 0,
     });
   } else if (item === ITEMS.OWNER) {
-    k.ow = ITEMS.OWNER_TIME;
+    k.ow = ownerTime(s.karts, k, progs);
     k.spin = 0;
     k.slow = 0;
     k.wet = 0;

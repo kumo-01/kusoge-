@@ -77,7 +77,16 @@ export class Game {
         }
       }
     }
-    const conn = { ws: server, slot };
+    // 診断用: その人がつながった拠点と、この計算役が動いている拠点（往復の遅れの原因を見分ける）
+    const colo = (request.headers.get('x-edge-colo') || String(request.cf?.colo || '')).replace(/[^A-Z]/g, '').slice(0, 8);
+    if (this.dcColo === undefined) {
+      this.dcColo = '';
+      fetch('https://www.cloudflare.com/cdn-cgi/trace')
+        .then((r) => r.text())
+        .then((t) => (this.dcColo = (/colo=([A-Z]+)/.exec(t) || [])[1] || ''))
+        .catch(() => {});
+    }
+    const conn = { ws: server, slot, colo };
     this.socks.add(conn);
     clearTimeout(this._idleTimer);
     this._idleTimer = null;
@@ -115,7 +124,7 @@ export class Game {
     if (!msg) return;
     switch (msg.type) {
       case 'e_ping':
-        this.send(conn, { type: 'e_pong', t: msg.t });
+        this.send(conn, { type: 'e_pong', t: msg.t, colo: conn.colo, dc: this.dcColo || '' });
         break;
       case 'e_start':
         if (host) this.start(conn, msg);

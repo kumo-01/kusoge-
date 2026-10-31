@@ -111,7 +111,7 @@ export class GameManager extends Emitter {
         this.running = false;
         setTimeout(() => this.emit('finish', result), 0);
       },
-      getNetInfo: () => ({ rtt: this.serverSim ? this.engine?.rtt ?? null : this.net.rtt, running: this.running }),
+      getNetInfo: () => ({ rtt: this.serverSim ? this.engine?.rtt ?? null : this.net.rtt, running: this.running, route: this.serverSim ? this.engine?.route || '' : '' }),
     };
     if (server) {
       this.engine = new EngineClient(server);
