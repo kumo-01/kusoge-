@@ -111,6 +111,11 @@ export class HostRoom extends Emitter {
       this.lastMsgAt[slot] = now();
       this._onGuestMessage(msg, slot);
     });
+    // ゲストの操作（P2P はバイナリの枠）
+    net.on('binary', (buf, slot) => {
+      this.lastMsgAt[slot] = now();
+      this.gm.handleBinary(buf, slot);
+    });
     net.on('signaling', (s) => {
       this.signaling = s;
       this.emit('change');
@@ -643,6 +648,7 @@ export class GuestRoom extends Emitter {
       this._enqueue({ type: 'room_state', room: msg.room });
     });
     this.net.on('message', (msg) => this._enqueue(msg));
+    this.net.on('binary', (buf) => this.gm.handleBinary(buf)); // ホストからの位置の定期配信（P2P はバイナリの枠）
     this.net.on('failed', ({ kind, reason }) => {
       let text;
       if (kind === 'rejected') {

@@ -12,6 +12,7 @@ import { Emitter, randomHex, randomToken, safeEqual, now } from './util.js';
 import { PROTOCOL_VERSION, FROM_GUEST, FROM_HOST, FAST_FROM_GUEST, FAST_FROM_HOST, MAX_PLAYERS, encode, decode } from './protocol.js';
 import { buildInviteUrl, saveGuestSession, backoffDelay } from './reconnect.js';
 import { RelayPeer, relayBase, isRelayRoom, RELAY_ROOM_PREFIX } from './relay.js';
+import { isFrame } from './binframe.js';
 
 export const NET_CONFIG = {
   HEARTBEAT_MS: 1000, // ping 送信間隔
@@ -110,6 +111,12 @@ export class Link extends Emitter {
 
   _handle(raw) {
     if (this.closed) return;
+    // ゲーム中の位置・操作はバイナリの枠（binframe.js）。中身の検証は受け取ったゲームが行う
+    if (isFrame(raw)) {
+      this.lastRecv = now();
+      this.emit('binary', raw);
+      return;
+    }
     const msg = decode(raw, this.allowed);
     if (!msg) {
       // 不正データは無視。大量に来る場合は接続を切る
@@ -163,7 +170,7 @@ export class Link extends Emitter {
   send(msg) {
     if (!this.open || this.closed) return false;
     try {
-      this.conn.send(encode(msg));
+      this.conn.send(msg instanceof ArrayBuffer ? msg : encode(msg));
       return true;
     } catch (err) {
       console.warn('[net] 送信に失敗しました', err?.message);
@@ -181,6 +188,11 @@ export class Link extends Emitter {
     const f = { conn, open: !!conn.open };
     const onData = (raw) => {
       if (this.closed) return;
+      if (isFrame(raw)) {
+        this.lastRecv = now();
+        this.emit('binary', raw);
+        return;
+      }
       const msg = decode(raw, allowedTypes);
       if (!msg) return;
       this.lastRecv = now();
@@ -221,7 +233,7 @@ export class Link extends Emitter {
       const dc = f.conn.dataChannel;
       if (!dc || dc.bufferedAmount < NET_CONFIG.CONGESTED_BYTES) {
         try {
-          f.conn.send(encode(msg));
+          f.conn.send(msg instanceof ArrayBuffer ? msg : encode(msg));
           return true;
         } catch {
           f.close();
@@ -304,6 +316,10 @@ export class HostNetwork extends Emitter {
     let m = null;
     for (const x of this.slots) if (x.link?.rtt != null) m = Math.max(m ?? 0, x.link.rtt);
     return m;
+  }
+  /** バイナリの枠を送れるか（P2P は送れる。部屋の中継は文字だけ） */
+  get binary() {
+    return this.transport !== 'relay';
   }
   rttOf(slot) {
     return this.linkOf(slot)?.rtt ?? null;
@@ -458,6 +474,7 @@ export class HostNetwork extends Emitter {
     if (this._gameMode) link.setGameMode(true);
 
     link.on('message', (m) => this._onGuestMessage(slot, link, m));
+    link.on('binary', (b) => seat.link === link && this.emit('binary', b, slot));
     link.on('close', (reason) => {
       if (seat.link !== link) return;
       seat.link = null;
@@ -576,6 +593,10 @@ export class GuestNetwork extends Emitter {
   }
   get reliable() {
     return isRelayRoom(this.roomId);
+  }
+  /** バイナリの枠を送れるか（P2P は送れる。部屋の中継は文字だけ） */
+  get binary() {
+    return !isRelayRoom(this.roomId);
   }
 
   start() {
@@ -707,6 +728,7 @@ export class GuestNetwork extends Emitter {
     saveGuestSession({ room: this.roomId, key: this.inviteKey, token: msg.token });
     if (this._gameMode) link.setGameMode(true);
     link.on('message', (m) => this.emit('message', m));
+    link.on('binary', (b) => this.link === link && this.emit('binary', b));
     if (msg.fast) this._openFast(link, msg.fast);
     link.on('close', (reason) => {
       if (this.link !== link) return;

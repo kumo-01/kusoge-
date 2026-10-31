@@ -5,7 +5,7 @@
 //         ほかの車・飛んでいるアイテムは、自分の車と同じ時刻まで先へ計算して描く（netview.js）。
 
 import { Track } from './track.js';
-import { RaceSim, sanitizeSnapshot, unpackNet, kartName } from './race.js';
+import { RaceSim, sanitizeSnapshot, unpackNet, kartName, packNetBin, unpackNetBin, NET_EVENT_TYPES } from './race.js';
 import { DogKartEngine } from './engine.js';
 import { Predictor, RemoteKarts } from './netview.js';
 import { stepKart } from './physics.js';
@@ -24,7 +24,7 @@ export function createGame() {
   return new DogKartGame();
 }
 
-const EVENT_TYPES = new Set(['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house']);
+const EVENT_TYPES = new Set(NET_EVENT_TYPES);
 
 function cleanEvent(e) {
   if (!e || typeof e !== 'object' || !EVENT_TYPES.has(e.t)) return null;
@@ -304,6 +304,16 @@ class DogKartGame {
   /** 定期配信用に小さく詰める */
   encodeNetSnapshot() {
     return this.engine.encode();
+  }
+
+  /** 定期配信用にバイナリで詰める（P2P のホスト。ev: この配信に載せる演出イベント） */
+  encodeNetBinary(ev) {
+    return packNetBin(this.sim.s, ev);
+  }
+
+  /** バイナリの定期配信を読む。{ snap, ev } または null */
+  decodeNetBinary(u8) {
+    return unpackNetBin(u8);
   }
 
   loadSnapshot(snap) {

@@ -32,6 +32,7 @@ export class EngineClient extends Emitter {
       return;
     }
     this.ws = ws;
+    ws.binaryType = 'arraybuffer'; // 位置の定期配信はバイナリ（binframe.js）
     ws.onopen = () => {
       if (this.ws !== ws) return;
       const reopened = this.everOpened;
@@ -43,7 +44,11 @@ export class EngineClient extends Emitter {
       this.emit('open', { reopened });
     };
     ws.onmessage = (ev) => {
-      if (this.ws !== ws || typeof ev.data !== 'string') return;
+      if (this.ws !== ws) return;
+      if (typeof ev.data !== 'string') {
+        this.emit('binary', ev.data);
+        return;
+      }
       const msg = decode(ev.data, ENGINE_TO_CLIENT);
       if (!msg) return;
       if (msg.type === 'e_pong') {
@@ -101,7 +106,7 @@ export class EngineClient extends Emitter {
   send(msg) {
     if (!this.open || this.ws?.readyState !== 1) return false;
     try {
-      this.ws.send(encode(msg));
+      this.ws.send(msg instanceof ArrayBuffer ? msg : encode(msg));
       return true;
     } catch {
       return false;

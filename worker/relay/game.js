@@ -6,10 +6,11 @@
 //
 // つなぎ方: wss://<Worker>/game?gid=<試合ID>&slot=<席 0〜2>&key=<鍵>
 //   席 0（ホスト）の鍵 = 管理用の鍵（最初につないだホストが決める）。席 1・2 の鍵 = ホストが開始のときに渡したチケット。
-// メッセージは src/core/protocol.js の e_* と player_input / game_snapshot（JSON の文字列）。
+// メッセージは src/core/protocol.js の e_*（JSON の文字列）と、位置の定期配信・操作（バイナリの枠。src/core/binframe.js）。
 
 import { DogKartEngine } from '../../src/games/dogKart/engine.js';
 import { decode, encode, ENGINE_FROM_HOST, ENGINE_FROM_PLAYER } from '../../src/core/protocol.js';
+import { encodeSnapshotFrame, decodeFrame, matchHash, FRAME_INPUT } from '../../src/core/binframe.js';
 
 const FIXED_DT = 1 / 60;
 const NET_EVERY = 2; // 60Hz ÷ 2 = 毎秒 30 回配信
@@ -99,7 +100,7 @@ export class Game {
 
   send(conn, msg) {
     try {
-      conn.ws.send(typeof msg === 'string' ? msg : encode(msg));
+      conn.ws.send(typeof msg === 'string' || msg instanceof ArrayBuffer ? msg : encode(msg));
     } catch {
       /* 切れかけ。close のイベントで片付く */
     }
@@ -108,6 +109,12 @@ export class Game {
   broadcast(msg) {
     const text = encode(msg);
     for (const c of this.socks) this.send(c, text);
+  }
+
+  /** 位置の定期配信（バイナリの枠。JSON の約 1/3.5） */
+  broadcastSnapshot() {
+    const buf = encodeSnapshotFrame(this.matchId, this.gen, ++this.seq, this.engine.encodeBinary(this.engine.drainNetEvents()));
+    for (const c of this.socks) this.send(c, buf);
   }
 
   onGone(conn) {
@@ -119,6 +126,15 @@ export class Game {
   }
 
   onMessage(conn, raw) {
+    if (typeof raw !== 'string') {
+      // 操作（バイナリの枠）
+      const f = decodeFrame(raw);
+      if (!f || f.kind !== FRAME_INPUT || !this.running || !this.engine) return;
+      if (f.hash !== matchHash(this.matchId) || f.gen !== (this.gen & 0xffff)) return;
+      const player = this.players.indexOf(conn.slot);
+      if (player >= 0) this.engine.receiveInput(player, f.seq, f.inputs);
+      return;
+    }
     const host = conn.slot === 0;
     const msg = decode(raw, host ? ENGINE_FROM_HOST : ENGINE_FROM_PLAYER);
     if (!msg) return;
@@ -250,15 +266,13 @@ export class Game {
       const result = this.engine.takeResult();
       if (result) {
         this.pause();
-        this.broadcast({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this.seq, snap: this.engine.encode(), ev: this.engine.drainNetEvents() });
+        this.broadcastSnapshot();
         this.broadcast({ type: 'e_result', matchId: this.matchId, result });
         return;
       }
     }
     // 配信は 1 回の呼び出しで 1 回だけ（遅れを取り戻すために続けて計算したときも、同じ時刻の状態を何通も送らない。届く間隔が揃う）
-    if (due && this.running) {
-      this.broadcast({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this.seq, snap: this.engine.encode(), ev: this.engine.drainNetEvents() });
-    }
+    if (due && this.running) this.broadcastSnapshot();
     if (steps >= MAX_STEPS) this._acc = 0;
     if (Date.now() - this._startedAt > MAX_MATCH_MS) this.stop();
   }

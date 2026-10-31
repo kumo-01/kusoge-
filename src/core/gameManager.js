@@ -16,6 +16,7 @@
 // 画面遷移や勝敗の確定はホストの部屋管理（room.js）が行い、ゲームは context.finish(result) で結果を返す。
 
 import { Emitter, h, now } from './util.js';
+import { encodeInputFrame, encodeSnapshotFrame, decodeFrame, matchHash, FRAME_INPUT, FRAME_SNAPSHOT } from './binframe.js';
 import { EngineClient } from './engineClient.js';
 
 export const LOOP_CONFIG = {
@@ -92,13 +93,14 @@ export class GameManager extends Emitter {
       // ゲスト → ホストへの操作入力
       sendInput: (seq, inputs) => {
         if (this.game !== game || !this.running) return;
+        // 操作はバイナリの枠で送る（約 14 バイト。JSON の約 1/6）。部屋の中継は文字だけなので JSON
         if (this.serverSim) {
-          this.engine?.send({ type: 'player_input', matchId, gen: this.gen, seq, inputs });
+          this.engine?.send(encodeInputFrame(matchId, this.gen, seq, inputs));
           return;
         }
         if (this.isHost) return;
         // 連続入力は順不同の高速チャンネルで送る（重複・欠落は seq と重ね送りで吸収）
-        this.net.sendFast({ type: 'player_input', matchId, gen: this.gen, seq, inputs });
+        this.net.sendFast(this.net.binary ? encodeInputFrame(matchId, this.gen, seq, inputs) : { type: 'player_input', matchId, gen: this.gen, seq, inputs });
       },
       // ゲーム固有メッセージ（双方向）
       sendGameMessage: (data) => {
@@ -116,6 +118,7 @@ export class GameManager extends Emitter {
     if (server) {
       this.engine = new EngineClient(server);
       this.engine.on('message', (msg) => this._onEngineMessage(msg, matchId));
+      this.engine.on('binary', (buf) => this.handleBinary(buf));
       this.engine.on('open', ({ reopened }) => {
         // 途中で切れてつなぎ直したら、完全な状態を取り直して追いつく
         if (reopened && this.game === game && this.running) {
@@ -284,6 +287,25 @@ export class GameManager extends Emitter {
     }
   }
 
+  /** バイナリの枠（binframe.js）を受け取る。slot: 送ってきたゲストの席（ホストのとき） */
+  handleBinary(buf, slot = null) {
+    const game = this.game;
+    if (!game) return;
+    const f = decodeFrame(buf);
+    if (!f || f.hash !== matchHash(this.matchId) || f.gen !== (this.gen & 0xffff)) return; // 別の試合・古い世代
+    try {
+      if (f.kind === FRAME_INPUT && this.isHost && !this.serverSim) {
+        const player = this.players.indexOf(slot);
+        if (this.running && player > 0) game.onMessage({ type: 'player_input', player, seq: f.seq, inputs: f.inputs });
+      } else if (f.kind === FRAME_SNAPSHOT && (!this.isHost || this.serverSim) && this.running && game.decodeNetBinary) {
+        const d = game.decodeNetBinary(f.payload);
+        if (d) game.applyNetSnapshot(d.snap, d.ev, f.seq);
+      }
+    } catch (err) {
+      console.warn('[game] バイナリの処理でエラー', err);
+    }
+  }
+
   _frame(t) {
     const game = this.game;
     if (!game) return;
@@ -340,6 +362,11 @@ export class GameManager extends Emitter {
       while (this._history.length && this._history[0].t < keepAfter) this._history.shift();
     }
     if (this.net.congested && ev.length === 0) return; // 送信が詰まっているときは位置更新を間引く
+    // P2P はバイナリの枠で送る（JSON の約 1/3.5）。部屋の中継は文字だけなので JSON
+    if (this.net.binary && this.game.encodeNetBinary) {
+      this.net.sendFast(encodeSnapshotFrame(this.matchId, this.gen, ++this._netSeq, this.game.encodeNetBinary(ev)));
+      return;
+    }
     const payload = this.game.encodeNetSnapshot ? this.game.encodeNetSnapshot(snap) : snap;
     this.net.sendFast({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this._netSeq, snap: payload, ev });
   }

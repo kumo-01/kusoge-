@@ -19,7 +19,7 @@
 
 // サーバーの版。ゲームの計算（src/games/dogKart/ の engine・race・physics など）を変えたら、ここも上げる。
 // Cloudflare の自動ビルドは worker/relay/ の変更でしか動かないことがあるため（/health で今の版を確認できる）
-const SERVER_VERSION = '2026-10-31.1';
+const SERVER_VERSION = '2026-10-31.2';
 
 const ROOM_RE = /^[A-Za-z0-9-]{8,64}$/;
 const MAX_MESSAGE = 70000; // アプリ側の上限（60000 文字）より少し大きく

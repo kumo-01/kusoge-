@@ -566,3 +566,325 @@ export function unpackNet(p) {
     bananas: Array.isArray(p.bn) ? p.bn.slice(0, 16).map((a) => row(a, ['id', 'o', 'x', 'z', 'life', 'age'])) : [],
   };
 }
+
+// ---- 定期配信のバイナリ形式（JSON の約 1/4 の大きさ。変換も速い） ----
+// 中身は packNet / unpackNet と同じ（unpackNetBin は unpackNet と同じ形を返すので、そのまま sanitizeSnapshot に渡せる）。
+// 位置は 1cm（24bit）、向きは 1/65536 周、速さは 1cm/s。めったに変わらない項目は、既定値でないものだけ印つきで載せる。
+
+/** 演出イベントの種類（バイナリでは番号で送る） */
+export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house'];
+const BIN_VERSION = 2;
+// めったに変わらない項目。よく既定値以外になるものを先に並べる（印を可変長で送るので、先頭 7 項目までなら印は 1 バイト）
+const BIN_COLD = ['in', 'kx', 'kz', 'cp', 'grass', 'ms', 'fd', 'lap', 'item', 'boost', 'roll', 'y', 'vy', 'spin', 'spinDur', 'slow', 'inv', 'bump', 'rc', 'wrong', 'bc', 'tw', 'tb', 'wet', 'gd', 'ow', 'fin', 'ft', 'lapStart', 'best'];
+const BIN_COLD_DEFAULT = BIN_COLD.map((f) => (f === 'spinDur' || f === 'ms' ? 1 : 0));
+// 項目ごとの詰め方: 'f' = 32bit 小数（時刻）、'b' = 0〜255 の整数、'p' = 1/100 単位の 0〜2.55、それ以外は 1/100 単位の 16bit 整数
+const BIN_COLD_KIND = BIN_COLD.map((f) => (['ft', 'lapStart', 'best'].includes(f) ? 'f' : ['grass', 'fin', 'lap', 'cp', 'item', 'tb', 'fd', 'in'].includes(f) ? 'b' : f === 'ms' ? 'p' : 'h'));
+const TAU = Math.PI * 2;
+
+class BinWriter {
+  constructor(size = 1024) {
+    this.buf = new ArrayBuffer(size);
+    this.dv = new DataView(this.buf);
+    this.n = 0;
+  }
+  _need(k) {
+    if (this.n + k <= this.buf.byteLength) return;
+    const nb = new ArrayBuffer(Math.max(this.buf.byteLength * 2, this.n + k));
+    new Uint8Array(nb).set(new Uint8Array(this.buf, 0, this.n));
+    this.buf = nb;
+    this.dv = new DataView(nb);
+  }
+  u8(v) {
+    this._need(1);
+    this.dv.setUint8(this.n++, Math.max(0, Math.min(255, Math.round(v) || 0)));
+  }
+  i8(v) {
+    this._need(1);
+    this.dv.setInt8(this.n++, Math.max(-128, Math.min(127, Math.round(v) || 0)));
+  }
+  u16(v) {
+    this._need(2);
+    this.dv.setUint16(this.n, Math.max(0, Math.min(65535, Math.round(v) || 0)), true);
+    this.n += 2;
+  }
+  i16(v) {
+    this._need(2);
+    this.dv.setInt16(this.n, Math.max(-32768, Math.min(32767, Math.round(v) || 0)), true);
+    this.n += 2;
+  }
+  i24(v) {
+    this._need(3);
+    const x = Math.max(-8388608, Math.min(8388607, Math.round(v) || 0)) & 0xffffff;
+    this.dv.setUint16(this.n, x & 0xffff, true);
+    this.dv.setUint8(this.n + 2, x >>> 16);
+    this.n += 3;
+  }
+  u32(v) {
+    this._need(4);
+    this.dv.setUint32(this.n, Math.max(0, Math.min(4294967295, Math.round(v) || 0)), true);
+    this.n += 4;
+  }
+  f32(v) {
+    this._need(4);
+    this.dv.setFloat32(this.n, +v || 0, true);
+    this.n += 4;
+  }
+  /** 0 以上の整数を可変長で（7bit ずつ。小さい値ほど短い） */
+  uv(v) {
+    let x = Math.max(0, Math.floor(+v || 0));
+    do {
+      let b = x % 128;
+      x = Math.floor(x / 128);
+      if (x > 0) b |= 128;
+      this._need(1);
+      this.dv.setUint8(this.n++, b);
+    } while (x > 0);
+  }
+  /** 番号の一覧（count 個のうち、印のある番号）。一覧とビット列の短いほうで */
+  set(idx, count) {
+    const bits = Math.ceil(count / 8);
+    if (idx.length < bits) {
+      this.u8(0);
+      this.uv(idx.length);
+      for (const i of idx) this.uv(i);
+    } else {
+      this.u8(1);
+      this.uv(count);
+      const a = new Uint8Array(bits);
+      for (const i of idx) a[i >> 3] |= 1 << (i & 7);
+      for (const b of a) this.u8(b);
+    }
+  }
+  bytes() {
+    return new Uint8Array(this.buf, 0, this.n);
+  }
+}
+
+class BinReader {
+  constructor(u8) {
+    this.dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    this.n = 0;
+  }
+  u8() {
+    return this.dv.getUint8(this.n++);
+  }
+  i8() {
+    return this.dv.getInt8(this.n++);
+  }
+  u16() {
+    const v = this.dv.getUint16(this.n, true);
+    this.n += 2;
+    return v;
+  }
+  i16() {
+    const v = this.dv.getInt16(this.n, true);
+    this.n += 2;
+    return v;
+  }
+  i24() {
+    const x = this.dv.getUint16(this.n, true) | (this.dv.getUint8(this.n + 2) << 16);
+    this.n += 3;
+    return x & 0x800000 ? x - 0x1000000 : x;
+  }
+  u32() {
+    const v = this.dv.getUint32(this.n, true);
+    this.n += 4;
+    return v;
+  }
+  f32() {
+    const v = this.dv.getFloat32(this.n, true);
+    this.n += 4;
+    return v;
+  }
+  uv() {
+    let x = 0;
+    let m = 1;
+    for (let i = 0; i < 8; i++) {
+      const b = this.u8();
+      x += (b & 127) * m;
+      if (!(b & 128)) return x;
+      m *= 128;
+    }
+    throw new Error('bad varint');
+  }
+  set(max) {
+    const out = [];
+    if (this.u8() === 0) {
+      const n = this.uv();
+      for (let i = 0; i < n && i < max; i++) out.push(this.uv());
+      return out;
+    }
+    const count = Math.min(this.uv(), max);
+    const bits = Math.ceil(count / 8);
+    for (let b = 0; b < bits; b++) {
+      const v = this.u8();
+      for (let j = 0; j < 8; j++) if (v & (1 << j)) out.push(b * 8 + j);
+    }
+    return out;
+  }
+}
+
+/** 定期配信用にバイナリで詰める（状態 s と、この配信に載せる演出イベント ev） */
+export function packNetBin(s, ev = []) {
+  const w = new BinWriter(512);
+  w.u8(BIN_VERSION);
+  w.uv(s.tick);
+  w.u8(PHASES.indexOf(s.phase));
+  w.f32(s.t);
+  w.i16(s.endT * 100);
+  w.i8(s.winner);
+  w.u8(s.acks.length);
+  for (const a of s.acks) w.uv(a);
+  w.u16(s.rain * 100);
+  w.i8(s.rk);
+  w.u8(s.karts.length);
+  for (const k of s.karts) {
+    w.i24(k.x * 100);
+    w.i24(k.z * 100);
+    w.u16((((k.h % TAU) + TAU) % TAU) * (65536 / TAU));
+    w.i16(k.sp * 100);
+    w.i8(k.st * 100);
+    w.i8(k.th);
+    let mask = 0;
+    BIN_COLD.forEach((f, i) => {
+      if (Math.round((k[f] || 0) * 100) !== Math.round(BIN_COLD_DEFAULT[i] * 100)) mask |= 1 << i;
+    });
+    w.uv(mask >>> 0);
+    BIN_COLD.forEach((f, i) => {
+      if (!(mask & (1 << i))) return;
+      const kind = BIN_COLD_KIND[i];
+      if (kind === 'f') w.f32(k[f]);
+      else if (kind === 'b') w.u8(k[f]);
+      else if (kind === 'p') w.u8((k[f] || 0) * 100);
+      else w.i16((k[f] || 0) * 100);
+    });
+  }
+  const taken = (a) => a.reduce((o, t, i) => (t > 0 && o.push(i), o), []);
+  w.set(taken(s.boxes), s.boxes.length);
+  w.set(taken(s.foods), s.foods.length);
+  w.u8(s.proj.length);
+  for (const p of s.proj) {
+    w.uv(p.id);
+    w.u8(p.o);
+    w.i24(p.x * 100);
+    w.i24(p.z * 100);
+    w.i16(p.vx * 10);
+    w.i16(p.vz * 10);
+    w.u16(p.life * 100);
+    w.u16(p.age * 100);
+    w.u8(p.b);
+    w.u8(p.f ? 1 : 0);
+    w.i8(p.t ?? -1);
+    w.u16((p.d || 0) * 10);
+  }
+  w.u8(s.bananas.length);
+  for (const b of s.bananas) {
+    w.uv(b.id);
+    w.u8(b.o);
+    w.i24(b.x * 100);
+    w.i24(b.z * 100);
+    w.u16(b.life * 10);
+    w.u16(b.age * 10);
+  }
+  w.u8(s.houses.length);
+  for (const h of s.houses) {
+    w.uv(h.id);
+    w.u8(h.o);
+    w.u8(h.t);
+    w.i24(h.x * 100);
+    w.i24(h.z * 100);
+    w.u16(h.age * 100);
+  }
+  const evs = ev.filter((e) => NET_EVENT_TYPES.includes(e.t)).slice(0, 255);
+  w.u8(evs.length);
+  for (const e of evs) {
+    w.uv(e.id);
+    w.u8(NET_EVENT_TYPES.indexOf(e.t));
+    for (const f of ['k', 'by', 'r', 'v']) w.u8(Number.isInteger(e[f]) && e[f] >= 0 ? e[f] : 255);
+    w.i24((e.x || 0) * 100);
+    w.i24((e.z || 0) * 100);
+    w.i16((e.s || 0) * 10);
+    w.u8(e.b || 0);
+    w.u8(e.item || 0);
+    w.u8(e.lap || 0);
+    w.i8(e.q || 0);
+    w.u8((e.grant ? 1 : 0) | (e.big ? 2 : 0));
+    w.u8(e.n || 0);
+  }
+  return w.bytes();
+}
+
+/** packNetBin の逆。{ snap: unpackNet と同じ形, ev: 演出イベント } を返す。壊れていれば null */
+export function unpackNetBin(u8) {
+  try {
+    const r = new BinReader(u8);
+    if (r.u8() !== BIN_VERSION) return null;
+    const snap = { tick: r.uv(), phase: PHASES[r.u8()], t: r.f32(), endT: r.i16() / 100, winner: r.i8() };
+    const na = r.u8();
+    snap.acks = Array.from({ length: na }, () => r.uv());
+    snap.rain = r.u16() / 100;
+    snap.rk = r.i8();
+    const nk = Math.min(r.u8(), RACE.MAX_KARTS + 1);
+    snap.karts = [];
+    for (let i = 0; i < nk; i++) {
+      const k = { x: r.i24() / 100, z: r.i24() / 100 };
+      let h = (r.u16() * TAU) / 65536;
+      if (h > Math.PI) h -= TAU;
+      k.h = h;
+      k.sp = r.i16() / 100;
+      k.st = r.i8() / 100;
+      k.th = r.i8();
+      const mask = r.uv();
+      BIN_COLD.forEach((f, j) => {
+        if (!(mask & (1 << j))) {
+          k[f] = BIN_COLD_DEFAULT[j];
+          return;
+        }
+        const kind = BIN_COLD_KIND[j];
+        k[f] = kind === 'f' ? r.f32() : kind === 'b' ? r.u8() : kind === 'p' ? r.u8() / 100 : r.i16() / 100;
+      });
+      snap.karts.push(k);
+    }
+    snap.karts = snap.karts.slice(0, RACE.MAX_KARTS);
+    snap.boxTaken = r.set(200);
+    snap.foodTaken = r.set(400);
+    const np = r.u8();
+    snap.proj = [];
+    for (let i = 0; i < np; i++) {
+      snap.proj.push({ id: r.uv(), o: r.u8(), x: r.i24() / 100, z: r.i24() / 100, vx: r.i16() / 10, vz: r.i16() / 10, life: r.u16() / 100, age: r.u16() / 100, b: r.u8(), f: r.u8(), t: r.i8(), d: r.u16() / 10 });
+    }
+    const nbn = r.u8();
+    snap.bananas = [];
+    for (let i = 0; i < nbn; i++) snap.bananas.push({ id: r.uv(), o: r.u8(), x: r.i24() / 100, z: r.i24() / 100, life: r.u16() / 10, age: r.u16() / 10 });
+    const nh = r.u8();
+    snap.houses = [];
+    for (let i = 0; i < nh; i++) snap.houses.push({ id: r.uv(), o: r.u8(), t: r.u8(), x: r.i24() / 100, z: r.i24() / 100, age: r.u16() / 100 });
+    const ne = r.u8();
+    const ev = [];
+    for (let i = 0; i < ne; i++) {
+      const e = { id: r.uv(), t: NET_EVENT_TYPES[r.u8()] };
+      for (const f of ['k', 'by', 'r', 'v']) {
+        const v = r.u8();
+        e[f] = v === 255 ? -1 : v;
+      }
+      e.x = r.i24() / 100;
+      e.z = r.i24() / 100;
+      e.s = r.i16() / 10;
+      e.b = r.u8();
+      e.item = r.u8();
+      e.lap = r.u8();
+      e.q = r.i8();
+      const fl = r.u8();
+      e.grant = !!(fl & 1);
+      e.big = !!(fl & 2);
+      e.n = r.u8();
+      if (e.t) ev.push(e);
+    }
+    snap.proj = snap.proj.slice(0, 32);
+    snap.bananas = snap.bananas.slice(0, 16);
+    snap.houses = snap.houses.slice(0, 8);
+    return { snap, ev };
+  } catch {
+    return null; // 途中で切れている・壊れている
+  }
+}

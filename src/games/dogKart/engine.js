@@ -4,7 +4,7 @@
 
 import { NET, IN } from './constants.js';
 import { Track } from './track.js';
-import { RaceSim, packNet } from './race.js';
+import { RaceSim, packNet, packNetBin } from './race.js';
 
 export class DogKartEngine {
   /** @param {{ course?: number, npcs?: number, boss?: number, players?: number[], track?: Track }} options */
@@ -166,6 +166,11 @@ export class DogKartEngine {
   /** 定期配信用に小さく詰めた状態 */
   encode() {
     return packNet(this.sim.s);
+  }
+
+  /** 定期配信用のバイナリ（状態と、この配信に載せる演出イベント） */
+  encodeBinary(ev) {
+    return packNetBin(this.sim.s, ev);
   }
 
   getSnapshot() {
