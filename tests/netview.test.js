@@ -133,6 +133,38 @@ test('自分の車: 復帰（rc の増加）は瞬時に合わせ、それ以外
   assert.ok(Math.abs(p.off.x + 10) < 1e-6, 'ずれは見た目のずれに入る');
   // 復帰（クールダウンが増えた）は瞬時
   res = p.reconcile(fields({ ...p.hist[1], x: p.hist[1].x + 3, rc: 3 }), 3);
-  assert.equal(res.kind, 'snap');
+  assert.equal(res.kind, 'respawn');
   assert.equal(p.off.x, 0);
+});
+
+test('自分の車: 確定状態から、まだ確定していない操作をすべて計算し直す（当たってスピンしたら、すぐ正しい位置になる）', () => {
+  const e = racing();
+  const p = new Predictor();
+  const k0 = e.sim.s.karts[1];
+  p.reset(k0);
+  const step = (k, bits) => stepKart(k, bits, DT, e.track, true);
+  const inputs = [];
+  for (let s = 1; s <= 12; s++) {
+    const b = IN.UP | (s % 4 === 0 ? IN.LEFT : 0);
+    inputs.push(b);
+    step(p.k, b);
+    p.record(s, b);
+  }
+  // サーバーでは seq 4 の時点でホネが当たってスピンしていた
+  const server = { ...p.hist[3], tw: 0, tb: 0, st: p.k.st, grass: 0, stats: {} };
+  for (const f of ['lap', 'cp', 'item', 'roll', 'fin', 'ft', 'lapStart', 'best', 'spinDur', 'wrong', 'bump', 'fd', 'ow']) server[f] = k0[f];
+  server.spin = 1.3;
+  server.sp *= 0.35;
+  const shownBefore = { x: p.k.x + p.off.x, z: p.k.z + p.off.z };
+  p.reconcile(server, 4, step);
+  // 正解: サーバーの状態から seq 5〜12 の操作で進めたもの
+  const truth = { ...k0, ...server };
+  truth.st = server.st;
+  for (let s = 5; s <= 12; s++) step(truth, inputs[s - 1]);
+  assert.ok(Math.hypot(p.k.x - truth.x, p.k.z - truth.z) < 1e-6, '計算し直した位置が正解と一致');
+  assert.ok(p.k.spin > 1, 'スピン中');
+  const shownAfter = { x: p.k.x + p.off.x, z: p.k.z + p.off.z };
+  assert.ok(Math.hypot(shownAfter.x - shownBefore.x, shownAfter.z - shownBefore.z) < 1e-6, '見た目は飛ばない');
+  // 履歴も計算し直した値になっている（次の照合で同じ差を二重に直さない）
+  assert.ok(Math.abs(p.hist[p.hist.length - 1].x - truth.x) < 1e-6);
 });

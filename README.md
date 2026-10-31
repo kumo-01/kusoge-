@@ -211,7 +211,7 @@ npm test         # レースシミュレーション・通信プロトコルの�
    （`version` に、いま動いているサーバーの版が出ます。ゲームの計算 `src/games/dogKart/` を変えたときは `worker/relay/index.js` の `SERVER_VERSION` も上げてください。Cloudflare の自動ビルドは `worker/relay/` の変更でしか動かないことがあります）
 4. このリポジトリの Settings → Secrets and variables → Actions → **Variables** に `RELAY_URL` としてその URL を登録し、Pages のデプロイをやり直す
 
-- 動きがカクつくときは、ゲームの URL の末尾に `?diag=1` をつけて開くと、画面の通信表示に診断（fps・長いフレームの回数・操作の先行 tick 数・自分の車の補正の大きさ・瞬間移動や追いつきの回数）が出ます。`?diag=0` で消えます。
+- 動きがカクつくときは、ゲームの URL の末尾に `?diag=1` をつけて開くと、画面の通信表示に診断が出ます（`?diag=0` で消えます）。fps / 長: 100ms を超えたフレームの数 / 先行: 自分の操作がサーバーより何 tick 先か / 補正: 直近 3 秒の自分の車の補正の最大 / 飛: 予測が大きく外れて瞬間移動で合わせた回数（かっこ内は最後の理由と距離） / 復: 復帰 / 追: 端末が止まったあと追いついた tick 数 / 待: 進みすぎて待った回数 / 履: 照らし合わせる履歴がなかった回数 / 再: 遅れすぎて合わせ直した回数。飼い主モード中と復帰は、飛・履に数えません。
 
 手元でビルドするときは `VITE_RELAY_URL=https://…workers.dev npm run build` です。ローカルで試すだけなら、`worker/relay` で `npx wrangler dev` を動かし、`VITE_RELAY_URL=http://127.0.0.1:8787` でビルドします。
 

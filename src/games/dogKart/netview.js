@@ -39,16 +39,21 @@ export class Predictor {
     this.off = { x: 0, z: 0, y: 0, h: 0, vx: 0, vz: 0, vh: 0 };
   }
 
-  record(seq) {
-    const e = { seq };
+  /** seq の操作 bits で 1 tick 進めたあとの状態を記録する（bits は、確定状態から計算し直すときに使う） */
+  record(seq, bits = 0) {
+    const e = { seq, bits };
     for (const key of PHYS_KEYS) e[key] = this.k[key];
     this.hist.push(e);
     if (this.hist.length > 240) this.hist.shift();
   }
 
-  /** server: ホストが確定したゲストの車, ack: そのとき適用済みだった入力 seq */
-  /** @returns {{ d: number, kind: 'ok'|'snap'|'nohist'|'init' }} 補正の大きさと種類（診断表示用） */
-  reconcile(server, ack) {
+  /**
+   * server: サーバー（ホスト）が確定した自分の車, ack: そのとき使い終えていた操作の seq。
+   * stepFn(k, bits) があれば、確定状態から、まだ確定していない操作をすべて計算し直す（スピン・衝突・ブーストのあとも一度で正しく直る）。
+   * なければ、差を足すだけの簡易な補正。
+   * @returns {{ d: number, kind: 'ok'|'snap'|'respawn'|'nohist'|'init', why?: string }} 補正の大きさと種類（診断表示用）
+   */
+  reconcile(server, ack, stepFn = null) {
     if (!this.k) {
       this.reset(server);
       return { d: 0, kind: 'init' };
@@ -65,18 +70,25 @@ export class Predictor {
       // 対応する履歴がない（再開直後など）: 大きくずれていれば合わせる
       const far = Math.hypot(server.x - this.k.x, server.z - this.k.z);
       if (far > NET.SNAP_FAR) this.reset(server);
-      return { d: far, kind: far > NET.SNAP_FAR ? 'snap' : 'nohist' };
+      return { d: far, kind: far > NET.SNAP_FAR ? 'snap' : 'nohist', why: 'nohist' };
     }
     const dx = server.x - e.x;
     const dz = server.z - e.z;
     const dh = angleDiff(e.h, server.h);
     const respawned = server.rc > e.rc + 0.5; // 復帰のクールダウンが増えた = 復帰した
     if (respawned || Math.hypot(dx, dz) > NET.SNAP_FAR || Math.abs(dh) > 1.5) {
-      // 復帰などの瞬間移動はそのまま合わせる
-      for (const key of PHYS_KEYS) this.k[key] = server[key];
-      this.hist = [];
+      // 復帰などの瞬間移動はそのまま合わせる（計算し直せるときは、確定していない操作の分も進めて今の時刻に合わせる）
+      if (stepFn) this._replay(server, stepFn);
+      else {
+        for (const key of PHYS_KEYS) this.k[key] = server[key];
+        this.hist = [];
+      }
       this.off = { x: 0, z: 0, y: 0, h: 0, vx: 0, vz: 0, vh: 0 };
-      return { d: Math.hypot(dx, dz), kind: 'snap' };
+      return { d: Math.hypot(dx, dz), kind: respawned ? 'respawn' : 'snap', why: respawned ? 'respawn' : Math.abs(dh) > 1.5 ? 'heading' : 'far' };
+    }
+    if (stepFn) {
+      this._replay(server, stepFn);
+      return { d: Math.hypot(dx, dz), kind: 'ok' };
     }
     // 補正の前後で速度が変わる分も見た目のずれに入れて、動きの速さ・向きの変わり方がつながるようにする
     const k = this.k;
@@ -97,6 +109,35 @@ export class Predictor {
     this.off.vx += vx0 - velX(k);
     this.off.vz += vz0 - velZ(k);
     return { d: Math.hypot(dx, dz), kind: 'ok' };
+  }
+
+  /** 確定状態（hist[0] の時点）から、それより後の操作で計算し直す。見た目は急に動かさず、差を見た目のずれに入れる */
+  _replay(server, stepFn) {
+    const k = this.k;
+    const x0 = k.x;
+    const z0 = k.z;
+    const h0 = k.h;
+    const vx0 = velX(k);
+    const vz0 = velZ(k);
+    for (const key of PHYS_KEYS) k[key] = server[key];
+    // タイミングブーストの状態もサーバーの値から（押したタイミングは記録した操作で計算し直す）
+    k.tw = server.tw;
+    k.tb = server.tb;
+    k.st = server.st;
+    k.grass = server.grass;
+    k.stats = { ...server.stats }; // 計算し直しで、サーバーの記録を書き換えない
+    const first = this.hist[0];
+    for (const key of PHYS_KEYS) first[key] = k[key];
+    for (let i = 1; i < this.hist.length; i++) {
+      const e = this.hist[i];
+      stepFn(k, e.bits);
+      for (const key of PHYS_KEYS) e[key] = k[key];
+    }
+    this.off.x += x0 - k.x;
+    this.off.z += z0 - k.z;
+    this.off.h += angleDiff(k.h, h0);
+    this.off.vx += vx0 - velX(k);
+    this.off.vz += vz0 - velZ(k);
   }
 
   decay(dt) {
