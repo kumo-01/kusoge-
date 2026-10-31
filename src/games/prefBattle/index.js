@@ -242,7 +242,7 @@ class PrefBattle extends HostedGame {
       round: h('div.pb-round', null, `${races}🗾 都道府県県境バトル`),
       prompt: h('div.pb-prompt', null, ''),
       sub: h('div.pb-sub', null, 'となりの都道府県と接している陸の境だけ（海岸線・島は描かない）'),
-      timer: h('div.ad-timer', null, h('div.ad-timer-bar'), h('span.ad-timer-num', null, '')),
+      timer: h('div.g2d-timer', null, h('div.g2d-timer-bar'), h('span.g2d-timer-num', null, '')),
       tools: h('div.pb-tools', null,
         tool('pen', '✏️', 'ペン'),
         tool('erase', '🧽', '消しゴム'),
@@ -483,8 +483,8 @@ class PrefBattle extends HostedGame {
     const sec = Math.ceil(Math.max(0, remain));
     if (sec !== this._lastSec && (ph === 'ready' || (ph === 'play' && sec <= 5))) this.sound.play('beep');
     this._lastSec = sec;
-    this.el.timer.querySelector('.ad-timer-num').textContent = ph === 'ready' ? `よーい… ${sec}` : ph === 'play' ? `のこり ${sec} 秒` : ph === 'judge' ? 'そこまで！ 採点中…' : '答え合わせ';
-    this.el.timer.querySelector('.ad-timer-bar').style.transform = `scaleX(${ph === 'play' ? Math.max(0, remain / s.limit) : ph === 'ready' ? 1 : 0})`;
+    this.el.timer.querySelector('.g2d-timer-num').textContent = ph === 'ready' ? `よーい… ${sec}` : ph === 'play' ? `のこり ${sec} 秒` : ph === 'judge' ? 'そこまで！ 採点中…' : '答え合わせ';
+    this.el.timer.querySelector('.g2d-timer-bar').style.transform = `scaleX(${ph === 'play' ? Math.max(0, remain / s.limit) : ph === 'ready' ? 1 : 0})`;
     this.el.timer.classList.toggle('hurry', ph === 'play' && remain < 5);
     this.root.classList.toggle('is-reveal', ph === 'reveal');
 
@@ -707,10 +707,10 @@ class PrefBattle extends HostedGame {
         this._chips = s.scores.map((x, i) => {
           const p = this.who(i);
           const num = h('b', null, '0.0%');
-          const el = h('div.ad-res', { style: { '--c': p.col } }, h('span.pb-crown', null, ''), `${p.icon} ${p.name}　`, num);
+          const el = h('div.g2d-res', { style: { '--c': p.col } }, h('span.pb-crown', null, ''), `${p.icon} ${p.name}　`, num);
           return { el, num, i };
         });
-        this.el.foot.replaceChildren(h('div.ad-results', null, this._chips.map((x) => x.el)));
+        this.el.foot.replaceChildren(h('div.g2d-results', null, this._chips.map((x) => x.el)));
       }
       for (const ch2 of this._chips) {
         const v = s.scores[ch2.i].pct * countT;

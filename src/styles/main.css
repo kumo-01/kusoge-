@@ -1990,27 +1990,27 @@ canvas {
 }
 
 /* 人間感覚角度対決 */
-.ad-head {
+.ang-head {
   padding: max(14px, env(safe-area-inset-top)) 16px 6px;
   text-align: center;
 }
-.ad-round {
+.ang-round {
   font-size: 0.85rem;
   font-weight: 800;
   color: var(--ink-soft);
 }
-.ad-prompt {
+.ang-prompt {
   font-size: clamp(1.6rem, 6vw, 2.6rem);
   font-weight: 900;
   letter-spacing: 0.02em;
   margin: 2px 0;
   text-shadow: 0 3px 0 #fff;
 }
-.ad-sub {
+.ang-sub {
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
-.ad-timer {
+.g2d-timer {
   position: relative;
   width: min(420px, 86vw);
   height: 26px;
@@ -2020,60 +2020,60 @@ canvas {
   border: 3px solid #f1e0c8;
   overflow: hidden;
 }
-.ad-timer-bar {
+.g2d-timer-bar {
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, var(--green), #6fd39f);
   transform-origin: left center;
   transition: transform 0.12s linear;
 }
-.ad-timer.hurry .ad-timer-bar {
+.g2d-timer.hurry .g2d-timer-bar {
   background: linear-gradient(90deg, var(--red), #ff8a8a);
 }
-.ad-timer-num {
+.g2d-timer-num {
   position: relative;
   font-weight: 900;
   font-size: 0.95rem;
   line-height: 20px;
 }
-.ad-canvas {
+.ang-canvas {
   flex: 1;
   min-height: 0;
   width: 100%;
   display: block;
   cursor: crosshair;
 }
-.ad-foot {
+.ang-foot {
   text-align: center;
   font-weight: 800;
   font-size: 0.85rem;
   padding: 4px 12px max(12px, env(safe-area-inset-bottom));
 }
-.ad-results {
+.g2d-results {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
 }
-.ad-res {
+.g2d-res {
   padding: 6px 14px;
   border-radius: 999px;
   background: #fff;
   border: 3px solid var(--c);
   color: var(--c);
   font-size: 1rem;
-  animation: ad-pop 0.35s ease-out both;
+  animation: g2d-pop 0.35s ease-out both;
 }
-.ad-res.best {
+.g2d-res.best {
   font-size: 1.15rem;
   background: var(--c);
   color: #fff;
 }
-.ad-res small {
+.g2d-res small {
   font-weight: 700;
   opacity: 0.8;
 }
-@keyframes ad-pop {
+@keyframes g2d-pop {
   from {
     transform: scale(0.6);
     opacity: 0;
@@ -2103,7 +2103,7 @@ canvas {
   color: var(--red-d);
   font-size: 1.15em;
 }
-.pb .ad-timer {
+.pb .g2d-timer {
   margin-top: 4px;
   margin-bottom: 4px;
 }
@@ -2172,7 +2172,7 @@ canvas {
 .pb.is-reveal .pb-tools {
   display: none;
 }
-.pb .ad-results {
+.pb .g2d-results {
   width: 100%;
 }
 @media (max-width: 720px) {
@@ -2199,7 +2199,7 @@ canvas {
 /* 2D ゲームの配置: ふつうは上から「見出し（・道具）→ 円・地図 → 説明」。横長で低い画面（横向きのスマホなど）では、
    見出し・道具・説明をまとめた左の列（入りきらなければ、その中だけスクロール）と、右に大きな円・地図にする
    （縦に積むと、円・地図を描く高さが足りなくなる） */
-.g2d.ad,
+.g2d.ang,
 .g2d.pb {
   display: grid;
   grid-template-columns: 100%;
@@ -2211,18 +2211,18 @@ canvas {
 .g2d-top {
   grid-row: 1;
 }
-.ad-canvas,
+.ang-canvas,
 .pb-canvas {
   grid-row: 2;
   height: 100%;
   min-height: 0;
 }
-.ad-foot,
+.ang-foot,
 .pb-foot {
   grid-row: 3;
 }
 @media (orientation: landscape) and (max-height: 560px) {
-  .g2d.ad,
+  .g2d.ang,
   .g2d.pb {
     grid-template-columns: minmax(190px, 36%) minmax(0, 1fr);
     grid-template-rows: 100%;
@@ -2240,42 +2240,42 @@ canvas {
     overflow-y: auto;
     padding-left: env(safe-area-inset-left);
   }
-  .ad-canvas,
+  .ang-canvas,
   .pb-canvas {
     grid-column: 2;
     grid-row: 1;
   }
-  .ad-head {
+  .ang-head {
     padding: max(8px, env(safe-area-inset-top)) 10px 4px;
   }
-  .ad-foot {
+  .ang-foot {
     font-size: 0.75rem;
     padding: 4px 8px max(8px, env(safe-area-inset-bottom));
   }
-  .ad-prompt {
+  .ang-prompt {
     font-size: clamp(1.15rem, 7vh, 1.9rem);
   }
-  .ad-sub {
+  .ang-sub {
     font-size: 0.72rem;
   }
-  .ad-timer {
+  .g2d-timer {
     width: 100%;
     height: 22px;
   }
-  .ad-timer-num {
+  .g2d-timer-num {
     line-height: 16px;
     font-size: 0.82rem;
   }
-  .ad-results {
+  .g2d-results {
     flex-direction: column;
     align-items: stretch;
     gap: 4px;
   }
-  .ad-res {
+  .g2d-res {
     font-size: 0.85rem;
     padding: 3px 10px;
   }
-  .ad-res.best {
+  .g2d-res.best {
     font-size: 0.95rem;
   }
   .pb-head {
@@ -2298,7 +2298,7 @@ canvas {
   .pb-prompt {
     font-size: clamp(1rem, 6vh, 1.5rem);
   }
-  .pb .ad-timer {
+  .pb .g2d-timer {
     width: 100%;
   }
   .pb-tool {
@@ -2309,12 +2309,12 @@ canvas {
   .pb-tool small {
     font-size: 0.55rem;
   }
-  .pb .ad-results {
+  .pb .g2d-results {
     flex-direction: column;
     align-items: stretch;
   }
   .pb-round,
-  .ad-round {
+  .ang-round {
     font-size: 0.7rem;
   }
 }
@@ -2323,8 +2323,8 @@ canvas {
     font-size: clamp(0.9rem, 5.5vh, 1.2rem);
     margin: 0 0 2px;
   }
-  .pb .ad-timer,
-  .ad-timer {
+  .pb .g2d-timer,
+  .g2d-timer {
     height: 22px; /* 枠 3px ×2 + 文字の行 16px */
     margin-top: 2px;
   }
@@ -2333,17 +2333,17 @@ canvas {
   }
 }
 /* 時間のバーの文字は、バーの高さに関係なく上下中央に（低い画面で文字が切れないように） */
-.ad-timer {
+.g2d-timer {
   display: grid;
   place-items: center;
   line-height: 1;
 }
-.ad-timer-num {
+.g2d-timer-num {
   line-height: 1.1;
 }
 /* 幅 1000px までは、右上のボタンが見出しの上に来るので、見出しをその下から始める（横長で低い画面の左列配置は除く） */
 @media (max-width: 1000px) and (min-height: 561px) {
-  .ad-head,
+  .ang-head,
   .pb-head {
     padding-top: max(14px, var(--tb, 58px));
   }

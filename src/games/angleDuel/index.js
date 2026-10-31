@@ -166,16 +166,16 @@ class AngleDuel extends HostedGame {
     const o = this.ctx.options || {};
     const races = o.races > 1 ? `第${o.round || 1}戦 / 全${o.races}戦　` : '';
     this.el = {
-      round: h('div.ad-round', null, `${races}🎯 人間感覚角度対決`),
-      prompt: h('div.ad-prompt', null, ''),
-      sub: h('div.ad-sub', null, '基準線から 反時計回り（左回り）に測ります'),
-      timer: h('div.ad-timer', null, h('div.ad-timer-bar'), h('span.ad-timer-num', null, '')),
-      canvas: h('canvas.ad-canvas'),
-      foot: h('div.ad-foot', { style: { color: me.col } }, `${me.icon} あなた（${me.name}）: 外周の丸をドラッグ、または円の中をタップして動かそう`),
+      round: h('div.ang-round', null, `${races}🎯 人間感覚角度対決`),
+      prompt: h('div.ang-prompt', null, ''),
+      sub: h('div.ang-sub', null, '基準線から 反時計回り（左回り）に測ります'),
+      timer: h('div.g2d-timer', null, h('div.g2d-timer-bar'), h('span.g2d-timer-num', null, '')),
+      canvas: h('canvas.ang-canvas'),
+      foot: h('div.ang-foot', { style: { color: me.col } }, `${me.icon} あなた（${me.name}）: 外周の丸をドラッグ、または円の中をタップして動かそう`),
     };
-    this.root.classList.add('ad');
+    this.root.classList.add('ang'); // 「ad」で始まる名前は広告ブロッカーに隠されるので使わない
     // 左の列（横長で低い画面のとき）にまとめる部品は .g2d-side に入れる（ふつうの画面では、上下にばらして並ぶ）
-    this.root.append(h('div.g2d-side', null, h('div.ad-head.g2d-top', null, this.el.round, this.el.prompt, this.el.sub, this.el.timer), this.el.foot), this.el.canvas);
+    this.root.append(h('div.g2d-side', null, h('div.ang-head.g2d-top', null, this.el.round, this.el.prompt, this.el.sub, this.el.timer), this.el.foot), this.el.canvas);
     const c = this.el.canvas;
     this._down = false;
     this._onDown = (e) => {
@@ -252,8 +252,8 @@ class AngleDuel extends HostedGame {
     const sec = Math.ceil(Math.max(0, remain));
     if (sec !== this._lastSec && (ph === 'ready' || (ph === 'play' && sec <= 3))) this.sound.play('beep');
     this._lastSec = sec;
-    this.el.timer.querySelector('.ad-timer-num').textContent = ph === 'ready' ? `よーい… ${sec}` : ph === 'play' ? `のこり ${sec} 秒` : ph === 'judge' ? 'そこまで！' : '答え合わせ';
-    this.el.timer.querySelector('.ad-timer-bar').style.transform = `scaleX(${ph === 'play' ? Math.max(0, remain / s.limit) : ph === 'ready' ? 1 : 0})`;
+    this.el.timer.querySelector('.g2d-timer-num').textContent = ph === 'ready' ? `よーい… ${sec}` : ph === 'play' ? `のこり ${sec} 秒` : ph === 'judge' ? 'そこまで！' : '答え合わせ';
+    this.el.timer.querySelector('.g2d-timer-bar').style.transform = `scaleX(${ph === 'play' ? Math.max(0, remain / s.limit) : ph === 'ready' ? 1 : 0})`;
     this.el.timer.classList.toggle('hurry', ph === 'play' && remain < 3);
     this.root.classList.toggle('is-play', ph === 'play');
 
@@ -264,7 +264,21 @@ class AngleDuel extends HostedGame {
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, hh);
     // 右上のボタンに重なる所は避ける（横長の画面では、キャンバスがボタンの下まで来る）
-    const top = Math.min(hh * 0.4, topbarInset(c));
+    let top = Math.min(hh * 0.4, topbarInset(c));
+    // 見出し（お題・残り時間）が何かに隠されて見えないとき（拡張機能など）は、キャンバスの上に描く
+    const headHidden = ph !== 'reveal' && this.el.prompt.offsetHeight === 0;
+    if (headHidden) {
+      const fy = top + 8;
+      g.textAlign = 'center';
+      g.textBaseline = 'top';
+      g.fillStyle = '#4a3426';
+      g.font = '900 26px "M PLUS Rounded 1c", sans-serif';
+      g.fillText(`${s.target}° までもっていけ！`, w / 2, fy);
+      g.font = '800 16px "M PLUS Rounded 1c", sans-serif';
+      g.fillStyle = ph === 'play' && remain < 3 ? '#e0344a' : '#7a6152';
+      g.fillText(this.el.timer.querySelector('.g2d-timer-num').textContent, w / 2, fy + 34);
+      top = Math.min(hh * 0.45, fy + 60);
+    }
     const ah = hh - top;
     // 答え合わせではラベルを外側に並べるので、円を少し小さく
     const R = Math.max(30, Math.min(w / 2, ah / 2) - (ph === 'reveal' ? 64 : 22));
@@ -423,10 +437,10 @@ class AngleDuel extends HostedGame {
         this.sound.play(errs[this.me] === best ? 'finish' : 'lose');
         const lines = s.ans.map((a, i) => ({ i, e: errs[i] })).sort((x, y) => x.e - y.e);
         this.el.foot.replaceChildren(
-          h('div.ad-results', null,
+          h('div.g2d-results', null,
             lines.map((x) => {
               const p = this.who(x.i);
-              return h(`div.ad-res${x.e === best ? '.best' : ''}`, { style: { '--c': p.col } }, x.e === best ? '👑 ' : '', `${p.name}`, h('b', null, ` ずれ ${x.e}°`), h('small', null, `（${s.ans[x.i]}°）`));
+              return h(`div.g2d-res${x.e === best ? '.best' : ''}`, { style: { '--c': p.col } }, x.e === best ? '👑 ' : '', `${p.name}`, h('b', null, ` ずれ ${x.e}°`), h('small', null, `（${s.ans[x.i]}°）`));
             })),
         );
       }
