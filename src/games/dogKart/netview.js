@@ -58,7 +58,7 @@ export class Predictor {
       this.reset(server);
       return { d: 0, kind: 'init' };
     }
-    for (const f of ['lap', 'cp', 'item', 'roll', 'fin', 'ft', 'lapStart', 'best', 'stats', 'spinDur', 'wrong', 'bump', 'fd', 'ow']) this.k[f] = server[f];
+    for (const f of ['lap', 'cp', 'item', 'item2', 'roll', 'fin', 'ft', 'lapStart', 'best', 'stats', 'spinDur', 'wrong', 'bump', 'fd', 'ow']) this.k[f] = server[f];
     // タイミングブーストは自分の画面（予測）で進める。ホストのほうが先に進んでいたら合わせる
     if (server.tb > this.k.tb) {
       this.k.tb = server.tb;
