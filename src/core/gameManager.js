@@ -325,7 +325,8 @@ export class GameManager extends Emitter {
         this._acc -= FIXED;
         steps++;
         // 配信は「2 tick ごと」に、その tick の状態で送る（描画のタイミングで送ると配信の間隔が不揃いになり、相手の動きが揺れる）
-        if (this.isHost && !this.serverSim && this.running && this.game === game && (this._netTick = (this._netTick | 0) + 1) % NET_EVERY === 0) this._sendSnapshot();
+        // （ゲームが netEvery を持っていれば、その間隔。2D のゲームは動きが少ないので間隔を広げる）
+        if (this.isHost && !this.serverSim && this.running && this.game === game && (this._netTick = (this._netTick | 0) + 1) % (game.netEvery || NET_EVERY) === 0) this._sendSnapshot();
         if (this.game !== game || !this.running) break;
       }
     }
@@ -369,6 +370,7 @@ export class GameManager extends Emitter {
       return;
     }
     const payload = this.game.encodeNetSnapshot ? this.game.encodeNetSnapshot(snap) : snap;
+    if (payload === undefined && ev.length === 0) return; // 前回から変わっていない（ゲームが送らなくてよいと判断した）
     this.net.sendFast({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this._netSeq, snap: payload, ev });
   }
 

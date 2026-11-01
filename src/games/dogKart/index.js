@@ -5,7 +5,7 @@
 //         ほかの車・飛んでいるアイテムは、自分の車と同じ時刻まで先へ計算して描く（netview.js）。
 
 import { Track } from './track.js';
-import { RaceSim, sanitizeSnapshot, unpackNet, kartName, packNetBin, unpackNetBin, NET_EVENT_TYPES } from './race.js';
+import { RaceSim, sanitizeSnapshot, unpackNet, kartName, NetBinEncoder, unpackNetBin, NET_EVENT_TYPES, BIN_COLD_FIELDS } from './race.js';
 import { DogKartEngine } from './engine.js';
 import { Predictor, RemoteKarts } from './netview.js';
 import { stepKart } from './physics.js';
@@ -240,7 +240,8 @@ class DogKartGame {
     this._lastBits = bits;
     // （何も押していない間は 1 秒に 2 回、押しっぱなしの間は約 8 回。サーバーは前の入力を保つ）
     const every = this._same >= 30 && bits === 0 ? 30 : this._same >= 8 ? 8 : NET.INPUT_SEND_EVERY;
-    if (this.pending.length >= every || bits & IN.ONESHOT) {
+    // 押し方が変わった tick は、まとめずにすぐ送る（反応が 1 tick 速くなる）
+    if (this.pending.length >= every || bits & IN.ONESHOT || this._same === 0) {
       this.ctx.sendInput(this.seq, reliable ? this.pending.slice() : this.sentInputs.slice());
       this.pending = [];
     }
@@ -308,15 +309,40 @@ class DogKartGame {
 
   /** 定期配信用にバイナリで詰める（P2P のホスト。ev: この配信に載せる演出イベント） */
   encodeNetBinary(ev) {
-    return packNetBin(this.sim.s, ev);
+    return (this._enc ||= new NetBinEncoder()).encode(this.sim.s, ev);
   }
 
-  /** バイナリの定期配信を読む。{ snap, ev } または null */
+  /**
+   * バイナリの定期配信を読む。{ snap, ev } または null。
+   * ゆっくり変わる部分は変わったときしか載らないので、前に受け取った値（なければ今の状態）で補う
+   */
   decodeNetBinary(u8) {
-    return unpackNetBin(u8);
+    const s = this.sim.s;
+    const mem = this._binMem || {
+      tick: -1,
+      karts: s.karts.map((k) => Object.fromEntries(BIN_COLD_FIELDS.map((f) => [f, k[f]]))),
+      boxTaken: s.boxes.reduce((o, t, i) => (t > 0 && o.push(i), o), []),
+      foodTaken: s.foods.reduce((o, t, i) => (t > 0 && o.push(i), o), []),
+      bananas: s.bananas.map((b) => ({ id: b.id, o: b.o, x: b.x, z: b.z, life: b.life, age: b.age })),
+    };
+    if (mem.tick < 0) mem.tick = s.tick;
+    const d = unpackNetBin(u8, mem);
+    if (!d) return null;
+    if (d.snap.tick >= mem.tick) {
+      // 新しいものだけ覚える（P2P は順番が入れ替わって届くことがある）
+      mem.tick = d.snap.tick;
+      mem.karts = d.snap.karts.map((k) => Object.fromEntries(BIN_COLD_FIELDS.map((f) => [f, k[f]])));
+      mem.boxTaken = d.snap.boxTaken;
+      mem.foodTaken = d.snap.foodTaken;
+      mem.bananas = d.snap.bananas;
+      this._binMem = mem;
+    }
+    return d;
   }
 
   loadSnapshot(snap) {
+    this._binMem = null; // 完全な状態を読んだら、補う元もそれに合わせる
+    this._enc?.reset();
     this.sim.loadSnapshot(snap);
     const s = this.sim.s;
     this.world?.effects.clear();

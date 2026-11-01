@@ -149,6 +149,7 @@ export class Game {
         if (host && this.engine) {
           this.pause();
           this.gen = msg.gen;
+          this.engine.enc?.reset(); // 定期配信も、しばらくは全部載せる
           // 全員に完全な状態を送る。受け取った人は読み込んで、ホストに「読み込みました」と伝える（部屋の通信で）
           for (const c of this.socks) this.sendFull(c);
         }

@@ -569,16 +569,46 @@ export function unpackNet(p) {
 
 // ---- 定期配信のバイナリ形式（JSON の約 1/4 の大きさ。変換も速い） ----
 // 中身は packNet / unpackNet と同じ（unpackNetBin は unpackNet と同じ形を返すので、そのまま sanitizeSnapshot に渡せる）。
-// 位置は 1cm（24bit）、向きは 1/65536 周、速さは 1cm/s。めったに変わらない項目は、既定値でないものだけ印つきで載せる。
+// 位置は 2cm（16bit。コースの外まではみ出したときは 1cm・24bit）、向きは 1/65536 周、速さは 1cm/s。めったに変わらない項目は、既定値でないものだけ印つきで載せる。
 
 /** 演出イベントの種類（バイナリでは番号で送る） */
 export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house'];
-const BIN_VERSION = 2;
-// めったに変わらない項目。よく既定値以外になるものを先に並べる（印を可変長で送るので、先頭 7 項目までなら印は 1 バイト）
-const BIN_COLD = ['in', 'kx', 'kz', 'cp', 'grass', 'ms', 'fd', 'lap', 'item', 'boost', 'roll', 'y', 'vy', 'spin', 'spinDur', 'slow', 'inv', 'bump', 'rc', 'wrong', 'bc', 'tw', 'tb', 'wet', 'gd', 'ow', 'fin', 'ft', 'lapStart', 'best'];
+const BIN_VERSION = 3;
+// 車の項目のうち、ふだんは 0 で、0 でないときだけ載せるもの（タイマー・はじかれ・高さなど。0 でない間は毎回変わる）。
+// よく 0 以外になるものを先に並べる（印は可変長なので、先頭 7 項目までなら 1 バイト）
+const BIN_DYN = ['kx', 'kz', 'gd', 'boost', 'roll', 'inv', 'spin', 'bump', 'y', 'vy', 'wrong', 'slow', 'grass', 'rc', 'bc', 'tw', 'tb', 'wet', 'ow'];
+// めったに変わらない項目（チェックポイント・周回・ラップの時刻・アイテム・フード・最高速の倍率）。変わったときだけ載せる
+// （印は「印 × 2 + 1」を可変長で送る。0 は「この配信には載せていない」）
+const BIN_SLOW = ['cp', 'fd', 'ms', 'lap', 'item', 'spinDur', 'fin', 'ft', 'lapStart', 'best'];
+const BIN_COLD = [...BIN_DYN, ...BIN_SLOW];
+// ゆっくり変わる部分は、変わってからこの回数の配信まで載せ続ける（取りこぼしのある P2P でも届くように）。
+// さらに KEY_EVERY 回に 1 回は全部載せる（途中から受け取り始めた人・長く取りこぼした人もそろう）
+export const BIN_REPEAT = 15; // 0.5 秒
+export const BIN_KEY_EVERY = 30; // 1 秒
 const BIN_COLD_DEFAULT = BIN_COLD.map((f) => (f === 'spinDur' || f === 'ms' ? 1 : 0));
 // 項目ごとの詰め方: 'f' = 32bit 小数（時刻）、'b' = 0〜255 の整数、'p' = 1/100 単位の 0〜2.55、それ以外は 1/100 単位の 16bit 整数
-const BIN_COLD_KIND = BIN_COLD.map((f) => (['ft', 'lapStart', 'best'].includes(f) ? 'f' : ['grass', 'fin', 'lap', 'cp', 'item', 'tb', 'fd', 'in'].includes(f) ? 'b' : f === 'ms' ? 'p' : 'h'));
+const BIN_COLD_KIND = BIN_COLD.map((f) => (['ft', 'lapStart', 'best'].includes(f) ? 'f' : ['grass', 'fin', 'lap', 'cp', 'item', 'tb', 'fd'].includes(f) ? 'b' : f === 'ms' ? 'p' : 'h'));
+/** 車のゆっくり変わる部分の項目（受け取る側が、載っていない配信で前の値を補うのに使う） */
+export const BIN_COLD_FIELDS = BIN_SLOW;
+/** 車のゆっくり変わる部分を比べるための文字列（送るときの丸めと同じ細かさ） */
+const SLOW_IDX = BIN_SLOW.map((f) => BIN_COLD.indexOf(f));
+const DYN_IDX = BIN_DYN.map((f) => BIN_COLD.indexOf(f));
+const coldKey = (k) => SLOW_IDX.map((i) => (BIN_COLD_KIND[i] === 'f' ? Math.round((k[BIN_COLD[i]] || 0) * 1000) : Math.round((k[BIN_COLD[i]] || 0) * 100))).join(',');
+/** 項目 i を詰める / 読む */
+function putField(w, k, i) {
+  const f = BIN_COLD[i];
+  const kind = BIN_COLD_KIND[i];
+  if (kind === 'f') w.f32(k[f]);
+  else if (kind === 'b') w.u8(k[f]);
+  else if (kind === 'p') w.u8((k[f] || 0) * 100);
+  else w.i16((k[f] || 0) * 100);
+}
+function getField(r, i) {
+  const kind = BIN_COLD_KIND[i];
+  return kind === 'f' ? r.f32() : kind === 'b' ? r.u8() : kind === 'p' ? r.u8() / 100 : r.i16() / 100;
+}
+const isDefault = (k, i) => Math.round((k[BIN_COLD[i]] || 0) * 100) === Math.round(BIN_COLD_DEFAULT[i] * 100);
+const setKey = (a) => a.map((t) => (t > 0 ? 1 : 0)).join('');
 const TAU = Math.PI * 2;
 
 class BinWriter {
@@ -724,44 +754,113 @@ class BinReader {
   }
 }
 
-/** 定期配信用にバイナリで詰める（状態 s と、この配信に載せる演出イベント ev） */
-export function packNetBin(s, ev = []) {
+/**
+ * 定期配信の送り手。ゆっくり変わる部分が、いつ変わったかを覚えておき、変わってしばらくの間と、ときどき（キーフレーム）だけ載せる。
+ * 送る相手ごとではなく全員に同じものを送る（変わってからしばらく載せ続けるので、取りこぼしても次で届く）
+ */
+export class NetBinEncoder {
+  constructor() {
+    this.reset();
+  }
+  /** 最初からやり直す（しばらくは全部載せる） */
+  reset() {
+    this.n = 0;
+    this.keys = []; // 車ごとの、前回の比較用の文字列
+    this.changed = []; // 車ごとの、最後に変わった配信の番号
+    this.setsKey = '';
+    this.setsChanged = 0;
+    this.banKey = '';
+    this.banChanged = 0;
+  }
+  encode(s, ev = []) {
+    const n = ++this.n;
+    const key = n <= BIN_REPEAT || n % BIN_KEY_EVERY === 0;
+    const cold = s.karts.map((k, i) => {
+      const c = coldKey(k);
+      if (c !== this.keys[i]) {
+        this.keys[i] = c;
+        this.changed[i] = n;
+      }
+      return key || n - this.changed[i] < BIN_REPEAT;
+    });
+    const sk = setKey(s.boxes) + '|' + setKey(s.foods);
+    if (sk !== this.setsKey) {
+      this.setsKey = sk;
+      this.setsChanged = n;
+    }
+    // バナナは置いたら動かないので、増えた・消えたときだけ載せる（受け取る側は、持っているものの残り時間を進める）
+    const bk = s.bananas.map((b) => b.id).join(',');
+    if (bk !== this.banKey) {
+      this.banKey = bk;
+      this.banChanged = n;
+    }
+    return packNetBin(s, ev, { cold, sets: key || n - this.setsChanged < BIN_REPEAT, bananas: key || n - this.banChanged < BIN_REPEAT });
+  }
+}
+
+/**
+ * 定期配信用にバイナリで詰める（状態 s と、この配信に載せる演出イベント ev）。
+ * only: { cold: 車ごとに、ゆっくり変わる部分を載せるか, sets: 取られた箱・フードの一覧を載せるか }。なければ全部載せる
+ */
+export function packNetBin(s, ev = [], only = null) {
   const w = new BinWriter(512);
   w.u8(BIN_VERSION);
   w.uv(s.tick);
   w.u8(PHASES.indexOf(s.phase));
+  const withSets = !only || only.sets;
+  const withBananas = !only || only.bananas;
+  // 車の位置: コースは原点から ±655m に収まるので、ふだんは 2 バイト（2cm 単位）。はみ出す車がいれば 3 バイト（1cm 単位）
+  const short = s.karts.every((k) => Math.abs(k.x) < 655 && Math.abs(k.z) < 655);
+  // ふだんは既定値の項目（決着後の残り時間・勝者・雨・順位の印）は、既定値でないときだけ載せる
+  const extra = Math.round(s.endT * 100) !== 0 || s.winner !== -1 || Math.round(s.rain * 100) !== 0 || s.rk !== -1;
+  w.u8((withSets ? 1 : 0) | (withBananas ? 2 : 0) | (short ? 4 : 0) | (extra ? 8 : 0));
   w.f32(s.t);
-  w.i16(s.endT * 100);
-  w.i8(s.winner);
+  if (extra) {
+    w.i16(s.endT * 100);
+    w.i8(s.winner);
+    w.u16(s.rain * 100);
+    w.i8(s.rk);
+  }
   w.u8(s.acks.length);
   for (const a of s.acks) w.uv(a);
-  w.u16(s.rain * 100);
-  w.i8(s.rk);
   w.u8(s.karts.length);
-  for (const k of s.karts) {
-    w.i24(k.x * 100);
-    w.i24(k.z * 100);
+  s.karts.forEach((k, ki) => {
+    if (short) {
+      w.i16(k.x * 50);
+      w.i16(k.z * 50);
+    } else {
+      w.i24(k.x * 100);
+      w.i24(k.z * 100);
+    }
     w.u16((((k.h % TAU) + TAU) % TAU) * (65536 / TAU));
     w.i16(k.sp * 100);
     w.i8(k.st * 100);
     w.i8(k.th);
-    let mask = 0;
-    BIN_COLD.forEach((f, i) => {
-      if (Math.round((k[f] || 0) * 100) !== Math.round(BIN_COLD_DEFAULT[i] * 100)) mask |= 1 << i;
+    w.u8(k.in);
+    // タイマーなど: 0 でないものだけ、毎回
+    let dm = 0;
+    DYN_IDX.forEach((i, j) => {
+      if (!isDefault(k, i)) dm += 2 ** j;
     });
-    w.uv(mask >>> 0);
-    BIN_COLD.forEach((f, i) => {
-      if (!(mask & (1 << i))) return;
-      const kind = BIN_COLD_KIND[i];
-      if (kind === 'f') w.f32(k[f]);
-      else if (kind === 'b') w.u8(k[f]);
-      else if (kind === 'p') w.u8((k[f] || 0) * 100);
-      else w.i16((k[f] || 0) * 100);
+    w.uv(dm);
+    DYN_IDX.forEach((i, j) => Math.floor(dm / 2 ** j) % 2 && putField(w, k, i));
+    // めったに変わらないもの: 載せるときだけ
+    if (only && !only.cold[ki]) {
+      w.u8(0); // この配信には載せない（受け取る側は前の値を使う）
+      return;
+    }
+    let sm = 0;
+    SLOW_IDX.forEach((i, j) => {
+      if (!isDefault(k, i)) sm += 2 ** j;
     });
+    w.uv(sm * 2 + 1);
+    SLOW_IDX.forEach((i, j) => Math.floor(sm / 2 ** j) % 2 && putField(w, k, i));
+  });
+  if (withSets) {
+    const taken = (a) => a.reduce((o, t, i) => (t > 0 && o.push(i), o), []);
+    w.set(taken(s.boxes), s.boxes.length);
+    w.set(taken(s.foods), s.foods.length);
   }
-  const taken = (a) => a.reduce((o, t, i) => (t > 0 && o.push(i), o), []);
-  w.set(taken(s.boxes), s.boxes.length);
-  w.set(taken(s.foods), s.foods.length);
   w.u8(s.proj.length);
   for (const p of s.proj) {
     w.uv(p.id);
@@ -777,8 +876,9 @@ export function packNetBin(s, ev = []) {
     w.i8(p.t ?? -1);
     w.u16((p.d || 0) * 10);
   }
-  w.u8(s.bananas.length);
-  for (const b of s.bananas) {
+  const bans = withBananas ? s.bananas : [];
+  w.u8(bans.length);
+  for (const b of bans) {
     w.uv(b.id);
     w.u8(b.o);
     w.i24(b.x * 100);
@@ -814,40 +914,70 @@ export function packNetBin(s, ev = []) {
   return w.bytes();
 }
 
-/** packNetBin の逆。{ snap: unpackNet と同じ形, ev: 演出イベント } を返す。壊れていれば null */
-export function unpackNetBin(u8) {
+/**
+ * packNetBin の逆。{ snap: unpackNet と同じ形, ev: 演出イベント } を返す。壊れていれば null。
+ * 載っていなかった部分は prev から補う: prev = { karts: [車ごとのゆっくり変わる部分], boxTaken, foodTaken }
+ * （前に受け取った値。なければ受け取る側の今の状態）。補えなかったときは snap.partial = true
+ */
+export function unpackNetBin(u8, prev = null) {
   try {
     const r = new BinReader(u8);
     if (r.u8() !== BIN_VERSION) return null;
-    const snap = { tick: r.uv(), phase: PHASES[r.u8()], t: r.f32(), endT: r.i16() / 100, winner: r.i8() };
+    const snap = { tick: r.uv(), phase: PHASES[r.u8()] };
+    const flags = r.u8();
+    snap.t = r.f32();
+    if (flags & 8) {
+      snap.endT = r.i16() / 100;
+      snap.winner = r.i8();
+      snap.rain = r.u16() / 100;
+      snap.rk = r.i8();
+    } else Object.assign(snap, { endT: 0, winner: -1, rain: 0, rk: -1 });
     const na = r.u8();
     snap.acks = Array.from({ length: na }, () => r.uv());
-    snap.rain = r.u16() / 100;
-    snap.rk = r.i8();
+    const withSets = !!(flags & 1);
+    const withBananas = !!(flags & 2);
+    const short = !!(flags & 4);
     const nk = Math.min(r.u8(), RACE.MAX_KARTS + 1);
     snap.karts = [];
     for (let i = 0; i < nk; i++) {
-      const k = { x: r.i24() / 100, z: r.i24() / 100 };
+      const k = short ? { x: r.i16() / 50, z: r.i16() / 50 } : { x: r.i24() / 100, z: r.i24() / 100 };
       let h = (r.u16() * TAU) / 65536;
       if (h > Math.PI) h -= TAU;
       k.h = h;
       k.sp = r.i16() / 100;
       k.st = r.i8() / 100;
       k.th = r.i8();
-      const mask = r.uv();
-      BIN_COLD.forEach((f, j) => {
-        if (!(mask & (1 << j))) {
-          k[f] = BIN_COLD_DEFAULT[j];
-          return;
+      k.in = r.u8();
+      const dm = r.uv();
+      DYN_IDX.forEach((ci, j) => (k[BIN_COLD[ci]] = Math.floor(dm / 2 ** j) % 2 ? getField(r, ci) : BIN_COLD_DEFAULT[ci]));
+      const m = r.uv();
+      if (m === 0) {
+        // この配信には載っていない: 前の値を使う
+        const p = prev?.karts?.[i];
+        if (p) for (const f of BIN_SLOW) k[f] = p[f];
+        else {
+          for (const ci of SLOW_IDX) k[BIN_COLD[ci]] = BIN_COLD_DEFAULT[ci];
+          snap.partial = true;
         }
-        const kind = BIN_COLD_KIND[j];
-        k[f] = kind === 'f' ? r.f32() : kind === 'b' ? r.u8() : kind === 'p' ? r.u8() / 100 : r.i16() / 100;
-      });
+        snap.karts.push(k);
+        continue;
+      }
+      const sm = (m - 1) / 2;
+      SLOW_IDX.forEach((ci, j) => (k[BIN_COLD[ci]] = Math.floor(sm / 2 ** j) % 2 ? getField(r, ci) : BIN_COLD_DEFAULT[ci]));
       snap.karts.push(k);
     }
     snap.karts = snap.karts.slice(0, RACE.MAX_KARTS);
-    snap.boxTaken = r.set(200);
-    snap.foodTaken = r.set(400);
+    if (withSets) {
+      snap.boxTaken = r.set(200);
+      snap.foodTaken = r.set(400);
+    } else if (prev?.boxTaken && prev?.foodTaken) {
+      snap.boxTaken = prev.boxTaken.slice();
+      snap.foodTaken = prev.foodTaken.slice();
+    } else {
+      snap.boxTaken = [];
+      snap.foodTaken = [];
+      snap.partial = true;
+    }
     const np = r.u8();
     snap.proj = [];
     for (let i = 0; i < np; i++) {
@@ -856,6 +986,12 @@ export function unpackNetBin(u8) {
     const nbn = r.u8();
     snap.bananas = [];
     for (let i = 0; i < nbn; i++) snap.bananas.push({ id: r.uv(), o: r.u8(), x: r.i24() / 100, z: r.i24() / 100, life: r.u16() / 10, age: r.u16() / 10 });
+    if (!withBananas) {
+      // 載っていない: 前に受け取ったバナナの、残り時間を進めて使う（バナナは動かない）
+      const dt = Math.max(0, (snap.tick - (prev?.tick ?? snap.tick)) / 60);
+      if (prev?.bananas) snap.bananas = prev.bananas.map((b) => ({ ...b, life: b.life - dt, age: b.age + dt })).filter((b) => b.life > 0);
+      else snap.partial = true;
+    }
     const nh = r.u8();
     snap.houses = [];
     for (let i = 0; i < nh; i++) snap.houses.push({ id: r.uv(), o: r.u8(), t: r.u8(), x: r.i24() / 100, z: r.i24() / 100, age: r.u16() / 100 });

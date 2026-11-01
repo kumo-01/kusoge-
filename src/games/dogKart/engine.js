@@ -4,7 +4,7 @@
 
 import { NET, IN } from './constants.js';
 import { Track } from './track.js';
-import { RaceSim, packNet, packNetBin } from './race.js';
+import { RaceSim, packNet, NetBinEncoder } from './race.js';
 
 export class DogKartEngine {
   /** @param {{ course?: number, npcs?: number, boss?: number, players?: number[], track?: Track }} options */
@@ -170,7 +170,7 @@ export class DogKartEngine {
 
   /** 定期配信用のバイナリ（状態と、この配信に載せる演出イベント） */
   encodeBinary(ev) {
-    return packNetBin(this.sim.s, ev);
+    return (this.enc ||= new NetBinEncoder()).encode(this.sim.s, ev);
   }
 
   getSnapshot() {
@@ -180,6 +180,7 @@ export class DogKartEngine {
   loadSnapshot(snap) {
     this.sim.loadSnapshot(snap);
     this.resetQueues();
+    this.enc?.reset(); // しばらく全部載せる
   }
 
   /** 決着して演出時間が終わったら、結果を 1 度だけ返す（それ以外は null） */

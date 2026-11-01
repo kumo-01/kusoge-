@@ -94,8 +94,21 @@ export class HostedGame {
     this.onState?.();
   }
 
+  /** 配信の間隔（tick）。60 tick = 1 秒なので 6 で毎秒 10 回。時刻以外が変わっていなければ送らない（encodeNetSnapshot） */
+  get netEvery() {
+    return 6;
+  }
+
+  /** 毎回配る軽い状態。時刻のほかに何も変わっていなければ、0.5 秒に 1 回（時刻合わせ）だけ送る */
   encodeNetSnapshot() {
-    return this.light();
+    const l = this.light();
+    const { t, ...rest } = l;
+    const key = JSON.stringify(rest);
+    const at = nowMs();
+    if (key === this._sentKey && at - this._sentAt < 500) return undefined;
+    this._sentKey = key;
+    this._sentAt = at;
+    return l;
   }
 
   applyNetSnapshot(snap) {
