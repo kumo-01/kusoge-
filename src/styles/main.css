@@ -1112,6 +1112,38 @@ body[data-screen='game'] .app-main {
   font-size: 3rem;
   line-height: 1;
   text-shadow: none;
+  white-space: nowrap;
+}
+/* 絵文字を並べたアイコン（2枚フリスビー・横一列バナナ・2個犬小屋）は 1 行に収まるよう小さく */
+.hud-item-icon.multi {
+  font-size: 1.7rem;
+  letter-spacing: -0.15em;
+}
+/* 2 個目のアイテム（左上の小さな丸） */
+.hud-item2 {
+  position: absolute;
+  top: -14px;
+  left: -14px;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: rgba(255, 210, 63, 0.9);
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  line-height: 1;
+  white-space: nowrap;
+  text-shadow: none;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.15);
+}
+.hud-item2[hidden] {
+  display: none;
+}
+.hud-item2.multi {
+  font-size: 0.8rem;
+  letter-spacing: -0.15em;
 }
 .hud-item-name {
   font-size: 0.7rem;
@@ -1811,6 +1843,16 @@ body[data-screen='game'] {
 }
 .is-touch .hud-item-icon {
   font-size: 2.2rem;
+}
+.is-touch .hud-item-icon.multi {
+  font-size: 1.2rem;
+}
+.is-touch .hud-item2 {
+  width: 34px;
+  height: 34px;
+  top: -10px;
+  left: -10px;
+  font-size: 1.1rem;
 }
 .is-touch .hud-item-name {
   font-size: 0.6rem;

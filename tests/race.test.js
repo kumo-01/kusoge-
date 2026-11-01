@@ -33,6 +33,14 @@ function placeAhead(k, other, dist) {
 /** コースに沿って走るボット */
 function bot(k, latOff = 0, tr = track) {
   const p = tr.project(k.x, k.z);
+  // 前の倒木はよける（ふさがれていない側へ）。tr.logs はレースの計算が毎回入れる
+  for (const lg of tr.logs || []) {
+    const ds = tr.wrapDS(lg.s - p.s);
+    if (ds > -3 && ds < 40 && latOff > lg.a - 3 && latOff < lg.b + 3) {
+      latOff = lg.a <= -tr.roadHalf ? (lg.b + tr.roadHalf) / 2 : (lg.a - tr.roadHalf) / 2;
+      break;
+    }
+  }
   const tgt = tr.pointAt(p.s + 14, latOff);
   let d = Math.atan2(tgt.x - k.x, tgt.z - k.z) - k.h;
   while (d > Math.PI) d -= 2 * Math.PI;
@@ -260,24 +268,35 @@ test('プロトコル: 方向・形式・サイズが不正なメッセージは
   assert.equal(ok.players[0].ready, true);
 });
 
-test('アイテムを持っている車はボックスをすり抜け、箱は消えない（総取り防止）', () => {
+test('アイテムは 2 個まで: 2 個持っている車・ルーレット中の車はボックスをすり抜け、箱は消えない（総取り防止）', () => {
   const sim = newRace();
   const a = sim.s.karts[0];
   a.item = ITEMS.BONE;
+  a.item2 = ITEMS.BANANA;
   const box = sim.boxPos[0];
   Object.assign(a, { x: box.x, z: box.z });
   sim.step(DT, [0, 0]);
   assert.equal(sim.s.boxes[0], 0, 'box must remain');
   assert.equal(a.roll, 0);
   // ルーレット中も同様
-  a.item = 0;
+  a.item2 = 0;
   a.roll = 0.5;
   sim.step(DT, [0, 0]);
   assert.equal(sim.s.boxes[0], 0);
-  // 手ぶらなら取れる
+  // 1 個持っていても取れて、2 個目に入る
   a.roll = 0;
   sim.step(DT, [0, 0]);
   assert.ok(sim.s.boxes[0] > 0);
+  assert.ok(a.roll > 0);
+  for (let i = 0; i < 80; i++) sim.step(DT, [0, 0]);
+  assert.equal(a.item, ITEMS.BONE, '1 個目はそのまま');
+  assert.ok(a.item2 > 0, '2 個目が入る');
+  // 1 個目を使うと 2 個目が前に出る
+  const second = a.item2;
+  a.item = ITEMS.BOOST;
+  sim.step(DT, [IN.ITEM, 0]);
+  assert.equal(a.item, second);
+  assert.equal(a.item2, 0);
 });
 
 test('アイテムボックスは 6 か所に横 5 列', () => {

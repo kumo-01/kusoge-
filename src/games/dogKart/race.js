@@ -412,6 +412,7 @@ function sanitizeKart(r, i, prev) {
   k.lap = int(r.lap, 0, 0, 99);
   k.cp = int(r.cp, 0, 0, RACE.CHECKPOINTS - 1);
   k.item = int(r.item, 0, 0, ITEMS.COUNT - 1);
+  k.item2 = k.item ? int(r.item2, 0, 0, ITEMS.COUNT - 1) : 0;
   k.ow = num(r.ow, 0, 0, ITEMS.OWNER_TIME);
   k.gd = num(r.gd, 0, 0, ITEMS.GUARD_TIME);
   k.fd = int(r.fd, 0, 0, FOOD.MAX);
@@ -501,7 +502,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
 // 値は見た目に困らない細かさまで丸める（位置 1cm・向き 0.001rad）。タイミングのチャンス地点（tc）は試合の間変わらないので、完全な状態でだけ送る。
 const NET_HOT = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th'];
 const NET_HOT_DIGITS = [2, 2, 2, 2, 3, 2, 2, 2, 2, 2];
-const NET_COLD = ['spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow', 'in'];
+const NET_COLD = ['spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'item2', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow', 'in'];
 const NET_COLD_DEFAULT = NET_COLD.map((f) => (f === 'spinDur' || f === 'ms' ? 1 : 0));
 const NET_COLD_DIGITS = NET_COLD.map((f) => (f === 'ft' || f === 'lapStart' || f === 'best' ? 3 : 2));
 const PHASES = ['countdown', 'racing', 'finished'];
@@ -594,7 +595,7 @@ const BIN_VERSION = 3;
 const BIN_DYN = ['kx', 'kz', 'gd', 'boost', 'roll', 'inv', 'spin', 'bump', 'y', 'vy', 'wrong', 'slow', 'grass', 'rc', 'bc', 'tw', 'tb', 'wet', 'ow'];
 // めったに変わらない項目（チェックポイント・周回・ラップの時刻・アイテム・フード・最高速の倍率）。変わったときだけ載せる
 // （印は「印 × 2 + 1」を可変長で送る。0 は「この配信には載せていない」）
-const BIN_SLOW = ['cp', 'fd', 'ms', 'lap', 'item', 'spinDur', 'fin', 'ft', 'lapStart', 'best'];
+const BIN_SLOW = ['cp', 'fd', 'ms', 'lap', 'item', 'item2', 'spinDur', 'fin', 'ft', 'lapStart', 'best'];
 const BIN_COLD = [...BIN_DYN, ...BIN_SLOW];
 // ゆっくり変わる部分は、変わってからこの回数の配信まで載せ続ける（取りこぼしのある P2P でも届くように）。
 // さらに KEY_EVERY 回に 1 回は全部載せる（途中から受け取り始めた人・長く取りこぼした人もそろう）
@@ -602,7 +603,7 @@ export const BIN_REPEAT = 15; // 0.5 秒
 export const BIN_KEY_EVERY = 30; // 1 秒
 const BIN_COLD_DEFAULT = BIN_COLD.map((f) => (f === 'spinDur' || f === 'ms' ? 1 : 0));
 // 項目ごとの詰め方: 'f' = 32bit 小数（時刻）、'b' = 0〜255 の整数、'p' = 1/100 単位の 0〜2.55、それ以外は 1/100 単位の 16bit 整数
-const BIN_COLD_KIND = BIN_COLD.map((f) => (['ft', 'lapStart', 'best'].includes(f) ? 'f' : ['grass', 'fin', 'lap', 'cp', 'item', 'tb', 'fd'].includes(f) ? 'b' : f === 'ms' ? 'p' : 'h'));
+const BIN_COLD_KIND = BIN_COLD.map((f) => (['ft', 'lapStart', 'best'].includes(f) ? 'f' : ['grass', 'fin', 'lap', 'cp', 'item', 'item2', 'tb', 'fd'].includes(f) ? 'b' : f === 'ms' ? 'p' : 'h'));
 /** 車のゆっくり変わる部分の項目（受け取る側が、載っていない配信で前の値を補うのに使う） */
 export const BIN_COLD_FIELDS = BIN_SLOW;
 /** 車のゆっくり変わる部分を比べるための文字列（送るときの丸めと同じ細かさ） */

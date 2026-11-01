@@ -193,10 +193,12 @@ export class Game {
       k.stats.bumps = 1;
     } else if (op === 'item') {
       sim.s.karts[a.kart | 0].item = a.item | 0;
+      sim.s.karts[a.kart | 0].item2 = 0;
     } else if (op === 'roll') {
       // アイテムボックスを取った直後（ルーレット中）にする
       const k = sim.s.karts[a.kart | 0];
       k.item = 0;
+      k.item2 = 0;
       k.roll = 1.1;
     }
   }

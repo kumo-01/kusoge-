@@ -128,7 +128,7 @@ export function npcInput(sim, k, dt) {
     }
   }
   // アイテム
-  if (k.item && k.roll <= 0 && s.phase === 'racing') {
+  if (k.item && s.phase === 'racing') {
     const fx = Math.sin(k.h);
     const fz = Math.cos(k.h);
     let use = false;

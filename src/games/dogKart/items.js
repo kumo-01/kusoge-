@@ -11,9 +11,9 @@ export const ITEM_INFO = {
   [ITEMS.OWNER]: { name: '飼い主登場', icon: '🧑' },
   [ITEMS.RAIN]: { name: '豪雨', icon: '☔' },
   [ITEMS.HOUSE]: { name: '犬小屋', icon: '🏠' },
-  [ITEMS.FRISBEE2]: { name: '2枚フリスビー', icon: '🥏🥏' },
-  [ITEMS.BANANA_ROW]: { name: '横一列バナナ', icon: '🍌🍌🍌' },
-  [ITEMS.HOUSE2]: { name: '2個犬小屋', icon: '🏠🏠' },
+  [ITEMS.FRISBEE2]: { name: '2枚フリスビー', icon: '🥏🥏', multi: true },
+  [ITEMS.BANANA_ROW]: { name: '横一列バナナ', icon: '🍌🍌🍌', multi: true },
+  [ITEMS.HOUSE2]: { name: '2個犬小屋', icon: '🏠🏠', multi: true },
   [ITEMS.LOG]: { name: '倒木', icon: '🪵' },
 };
 
@@ -125,11 +125,16 @@ export function ownerTime(karts, k, progs) {
 
 /** progs: 全車の走行距離（フリスビー・犬小屋の狙いを決める）。callRain: 豪雨を降らせる処理。track: 横一列バナナ・倒木を置く場所を決める */
 export function useItem(s, k, events, progs = null, callRain = null, track = null) {
-  if (!k.item || k.roll > 0) return;
+  if (!k.item) return; // ルーレット中でも、すでに持っているアイテムは使える
   const held = k.item;
   // 2 回使えるものは、1 回目は普通のものとして使い、もう 1 つ残る
   const item = held === ITEMS.FRISBEE2 ? ITEMS.FRISBEE : held === ITEMS.HOUSE2 ? ITEMS.HOUSE : held;
   k.item = SECOND[held] || 0;
+  if (!k.item && k.item2) {
+    // 2 個目のアイテムが前に出てくる
+    k.item = k.item2;
+    k.item2 = 0;
+  }
   k.stats.items++;
   const fx = Math.sin(k.h);
   const fz = Math.cos(k.h);
@@ -260,7 +265,7 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
     }
     const p = boxPos[b];
     for (const k of karts) {
-      if (k.item || k.roll > 0 || (k.fin && !k.npc)) continue;
+      if (k.item2 || k.roll > 0 || (k.fin && !k.npc)) continue; // アイテムは 2 個まで
       const dx = k.x - p.x;
       const dz = k.z - p.z;
       if (dx * dx + dz * dz < (ITEMS.BOX_RADIUS + KART.RADIUS) ** 2 && k.y < 2) {
@@ -278,8 +283,10 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
       k.roll -= dt;
       if (k.roll <= 0) {
         k.roll = 0;
-        k.item = chooseItem(s, rankOf(k.i), karts.length);
-        events.push({ t: 'item', k: k.i, item: k.item });
+        const got = chooseItem(s, rankOf(k.i), karts.length);
+        if (!k.item) k.item = got;
+        else k.item2 = got;
+        events.push({ t: 'item', k: k.i, item: got });
       }
     }
   }

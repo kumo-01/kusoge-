@@ -279,8 +279,9 @@ class DogKartGame {
     // タイミングブーストのリングは自分の車の予測で出す（判定はサーバーが操作の順番どおりに行う）
     if (run) stepTiming(k, this.sim.progressOf(k), s.tc, !!(bits & IN.TAP), this.ctx.fixedDt, null);
     // ブーストのアイテムは、押した瞬間に自分の画面でも加速する（サーバーの useItem と同じ計算。結果は確定状態で確かめる）
-    if (run && bits & IN.ITEM && k.item === ITEMS.BOOST && !(k.roll > 0) && !(k.ow > 0)) {
-      k.item = 0;
+    if (run && bits & IN.ITEM && k.item === ITEMS.BOOST && !(k.ow > 0)) {
+      k.item = k.item2 || 0;
+      k.item2 = 0;
       k.boost = ITEMS.BOOST_TIME;
       k.sp = Math.min(KART.BOOST_SPEED, Math.max(k.sp, KART.MAX_SPEED * 0.85) + 6);
     }
@@ -886,6 +887,7 @@ class DogKartGame {
         speed: mine.sp,
         boost: mine.boost,
         item: sk.item,
+        item2: sk.item2 || 0,
         roll: sk.roll,
         wrong: sk.wrong,
         phase: s.phase,

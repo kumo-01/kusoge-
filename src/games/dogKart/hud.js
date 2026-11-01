@@ -22,7 +22,8 @@ export class Hud {
     this.speedBar = h('div.hud-speed-bar-fill');
     this.itemIcon = h('div.hud-item-icon', null, '');
     this.itemName = h('div.hud-item-name', null, 'アイテムなし');
-    this.itemSlot = h('div.hud-item', { 'data-ctl': '', onpointerdown: (e) => { e.preventDefault(); this.touch?.pressItem(); } }, this.itemIcon, this.itemName, h('div.hud-item-key', null, 'Space'), h('div.hud-item-tap', null, 'タップ'));
+    this.item2 = h('div.hud-item2', { hidden: true }, '');
+    this.itemSlot = h('div.hud-item', { 'data-ctl': '', onpointerdown: (e) => { e.preventDefault(); this.touch?.pressItem(); } }, this.item2, this.itemIcon, this.itemName, h('div.hud-item-key', null, 'Space'), h('div.hud-item-tap', null, 'タップ'));
     this.net = h('div.hud-net', null, '');
     this.center = h('div.hud-center');
     this.cdBox = h('div.hud-cd');
@@ -198,18 +199,28 @@ export class Hud {
 
     let icon = '';
     let name = 'アイテムなし';
-    if (d.roll > 0) {
+    let multi = false;
+    // 2 個目: 1 個目を持ったままルーレット中なら、2 個目の枠でルーレットを回す
+    let icon2 = '';
+    if (d.item && d.roll > 0) icon2 = ['🦴', '🍌', '⚡', '🛡️', '🥏', '🧑', '☔', '🏠'][Math.floor(performance.now() / 90) % 8];
+    else if (d.item2 && ITEM_INFO[d.item2]) icon2 = ITEM_INFO[d.item2].icon;
+    this._set('icon2', this.item2, icon2);
+    this.item2.hidden = !icon2;
+    this.item2.classList.toggle('multi', !!(d.item2 && !(d.item && d.roll > 0) && ITEM_INFO[d.item2]?.multi));
+    if (d.item && ITEM_INFO[d.item]) {
+      icon = ITEM_INFO[d.item].icon;
+      name = ITEM_INFO[d.item].name;
+      multi = !!ITEM_INFO[d.item].multi;
+    } else if (d.roll > 0) {
       const icons = ['🦴', '🍌', '⚡', '🛡️', '🥏', '🧑', '☔', '🏠'];
       icon = icons[Math.floor(performance.now() / 90) % icons.length];
       name = 'ルーレット中…';
-    } else if (d.item && ITEM_INFO[d.item]) {
-      icon = ITEM_INFO[d.item].icon;
-      name = ITEM_INFO[d.item].name;
     }
     this._set('icon', this.itemIcon, icon);
+    this.itemIcon.classList.toggle('multi', multi);
     this._set('iname', this.itemName, name);
-    this.itemSlot.classList.toggle('has-item', !!d.item && d.roll <= 0);
-    this.itemSlot.classList.toggle('rolling', d.roll > 0);
+    this.itemSlot.classList.toggle('has-item', !!d.item);
+    this.itemSlot.classList.toggle('rolling', !d.item && d.roll > 0);
 
     this._set('net', this.net, d.netText);
     if (d.netTone !== this._last.tone) {
