@@ -356,9 +356,18 @@ test('全コース: NPC 4 台（6 台）でレースが決着し、NPC も周回
     const sim = new RaceSim(t, { npcs: 4 });
     assert.equal(sim.s.karts.length, 6);
     const npcLaps = [0, 0, 0, 0, 0, 0];
+    // ボットの人間も、前の倒木はよける（ふさがれていない側へ）
+    const lane = (k, lat) => {
+      const ps = t.project(k.x, k.z).s;
+      for (const lg of sim.s.logs) {
+        const ds = t.wrapDS(lg.s - ps);
+        if (ds > -3 && ds < 40 && lat > lg.a - 3 && lat < lg.b + 3) return lg.a <= -t.roadHalf ? (lg.b + t.roadHalf) / 2 : (lg.a - t.roadHalf) / 2;
+      }
+      return lat;
+    };
     for (let i = 0; i < 60 * 480 && sim.s.phase !== 'finished'; i++) {
       const [a, b] = sim.s.karts;
-      sim.step(DT, [bot(a, 4, t), bot(b, -4, t)]);
+      sim.step(DT, [bot(a, lane(a, 4), t), bot(b, lane(b, -4), t)]);
       for (const e of sim.drainEvents()) if (e.t === 'lap') npcLaps[e.k]++;
     }
     assert.equal(sim.s.phase, 'finished', `${c.name} finished`);

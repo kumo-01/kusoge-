@@ -163,13 +163,14 @@ export function stepKart(k, input, dt, track, active, holdSteer = false) {
   return collideWalls(k, track);
 }
 
-/** コース外側の壁との衝突。戻り値は衝突速度 */
+/** コース外側の壁（と倒木: track.logs）との衝突。戻り値は衝突速度 */
 export function collideWalls(k, track) {
+  const logHit = collideLogs(k, track.logs);
   const p = track.project(k.x, k.z);
   const lat = p.lat;
   k.grass = Math.abs(lat) > track.roadHalf ? 1 : 0;
   const limit = track.wallDist - KART.RADIUS;
-  if (Math.abs(lat) <= limit) return 0;
+  if (Math.abs(lat) <= limit) return logHit;
   const sgn = lat > 0 ? 1 : -1;
   const nx = p.nx * sgn; // 外向き
   const nz = p.nz * sgn;
@@ -180,7 +181,7 @@ export function collideWalls(k, track) {
   let vx = fx * k.sp + k.kx;
   let vz = fz * k.sp + k.kz;
   const vn = vx * nx + vz * nz;
-  if (vn <= 0) return 0;
+  if (vn <= 0) return logHit;
   vx -= nx * vn * (1 + KART.WALL_RESTITUTION);
   vz -= nz * vn * (1 + KART.WALL_RESTITUTION);
   setVelocity(k, vx * 0.94, vz * 0.94);
@@ -188,7 +189,53 @@ export function collideWalls(k, track) {
     k.bump = 0.35;
     k.vy = Math.max(k.vy, 3.5);
   }
-  return vn;
+  return Math.max(vn, logHit);
+}
+
+/**
+ * 倒木（壁）との当たり。倒木は太さのある線分。めり込んだら押し出して、ぶつかった向きの速さを跳ね返す（コースの壁と同じ）。
+ * ジャンプ中で高いところにいる車は越えられる。戻り値は衝突速度
+ */
+export function collideLogs(k, logs) {
+  if (!logs?.length || k.y > 1.2) return 0;
+  let hit = 0;
+  const R = KART.RADIUS + ITEMS.LOG_R;
+  for (const lg of logs) {
+    const dx = lg.x2 - lg.x1;
+    const dz = lg.z2 - lg.z1;
+    const L = dx * dx + dz * dz;
+    const t = L > 0 ? Math.max(0, Math.min(1, ((k.x - lg.x1) * dx + (k.z - lg.z1) * dz) / L)) : 0;
+    const cx = lg.x1 + dx * t;
+    const cz = lg.z1 + dz * t;
+    let nx = k.x - cx;
+    let nz = k.z - cz;
+    const d = Math.hypot(nx, nz);
+    if (d >= R) continue;
+    if (d < 1e-6) {
+      nx = -dz;
+      nz = dx;
+    }
+    const nl = Math.hypot(nx, nz) || 1;
+    nx /= nl;
+    nz /= nl;
+    k.x = cx + nx * R;
+    k.z = cz + nz * R;
+    const fx = Math.sin(k.h);
+    const fz = Math.cos(k.h);
+    let vx = fx * k.sp + k.kx;
+    let vz = fz * k.sp + k.kz;
+    const vn = -(vx * nx + vz * nz); // 倒木へ向かう速さ
+    if (vn <= 0) continue;
+    vx += nx * vn * (1 + KART.WALL_RESTITUTION);
+    vz += nz * vn * (1 + KART.WALL_RESTITUTION);
+    setVelocity(k, vx * 0.9, vz * 0.9);
+    if (vn > 9) {
+      k.bump = 0.35;
+      k.vy = Math.max(k.vy, 3.5);
+    }
+    hit = Math.max(hit, vn);
+  }
+  return hit;
 }
 
 /**

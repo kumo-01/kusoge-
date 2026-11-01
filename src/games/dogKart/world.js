@@ -1392,6 +1392,19 @@ export class World {
       ringMat: this._track(new THREE.MeshToonMaterial({ color: 0xffffff })),
     };
     this.bananaViews = new Map();
+    // 倒木: 幹（長さは倒木ごとに伸ばす）・切り口の年輪・枝と葉
+    this.logViews = new Map();
+    this._logParts = {
+      trunk: this._track(new THREE.CylinderGeometry(1, 1, 1, 14).rotateX(Math.PI / 2)),
+      cap: this._track(new THREE.CircleGeometry(1, 14)),
+      ring: this._track(new THREE.RingGeometry(0.45, 0.55, 14)),
+      branch: this._track(new THREE.CylinderGeometry(0.18, 0.28, 2.2, 6)),
+      leaf: this._track(new THREE.IcosahedronGeometry(1, 0)),
+      bark: this._track(new THREE.MeshToonMaterial({ color: 0x7a4b28 })),
+      wood: this._track(new THREE.MeshToonMaterial({ color: 0xe8c48a })),
+      ringMat: this._track(new THREE.MeshToonMaterial({ color: 0xb98a52 })),
+      leafMat: this._track(new THREE.MeshToonMaterial({ color: 0x4f9a3a })),
+    };
     // 犬小屋: 落下地点の目印（赤い輪）と、空から落ちてくる小屋
     this.houseViews = new Map();
     this._houseParts = {
@@ -1404,7 +1417,7 @@ export class World {
       doorMat: this._track(new THREE.MeshBasicMaterial({ color: 0x3a2412 })),
       markMat: this._track(new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide })),
     };
-    this._viewPool = { bone: [], banana: [], frisbee: [], house: [] };
+    this._viewPool = { bone: [], banana: [], frisbee: [], house: [], log: [] };
   }
 
   _makeHouse() {
@@ -1467,6 +1480,40 @@ export class World {
     }
     g.traverse((o) => (o.castShadow = true));
     g.scale.setScalar(1.5);
+    return g;
+  }
+
+  _makeLog() {
+    const p = this._logParts;
+    const g = new THREE.Group();
+    const trunk = new THREE.Mesh(p.trunk, p.bark);
+    trunk.name = 'trunk';
+    g.add(trunk);
+    for (const end of [-1, 1]) {
+      const cap = new THREE.Group();
+      cap.name = end < 0 ? 'capA' : 'capB';
+      const c = new THREE.Mesh(p.cap, p.wood);
+      const r = new THREE.Mesh(p.ring, p.ringMat);
+      r.position.z = 0.01;
+      cap.add(c, r);
+      cap.rotation.y = end < 0 ? Math.PI : 0;
+      g.add(cap);
+    }
+    // 枝と葉（幹の途中から上に）
+    for (const [z, a] of [[-0.25, 0.5], [0.2, -0.6]]) {
+      const br = new THREE.Group();
+      br.name = 'branch';
+      br.userData.z = z;
+      const b = new THREE.Mesh(p.branch, p.bark);
+      b.position.y = 1.1;
+      const lf = new THREE.Mesh(p.leaf, p.leafMat);
+      lf.position.y = 2.4;
+      lf.scale.setScalar(1.3);
+      br.add(b, lf);
+      br.rotation.z = a;
+      g.add(br);
+    }
+    g.traverse((o) => (o.castShadow = true));
     return g;
   }
 
@@ -1537,6 +1584,23 @@ export class World {
         const wide = 1 + 0.1 * Math.exp(-g * 8);
         home.scale.set(wide * out, (0.78 + 0.22 * squish) * out, wide * out);
       }
+    });
+    this._syncViews(items.logs || [], this.logViews, 'log', () => this._makeLog(), (v, lg) => {
+      const R = ITEMS.LOG_R;
+      const len = Math.hypot(lg.x2 - lg.x1, lg.z2 - lg.z1);
+      if (v.userData.id !== lg.id) {
+        // 新しい倒木: 形を長さに合わせて、上から倒れてくる
+        v.userData.id = lg.id;
+        v.userData.born = t;
+        v.getObjectByName('trunk').scale.set(R, R, len);
+        v.getObjectByName('capA').position.z = -len / 2;
+        v.getObjectByName('capB').position.z = len / 2;
+        for (const c of ['capA', 'capB']) v.getObjectByName(c).scale.setScalar(R);
+        v.children.filter((o) => o.name === 'branch').forEach((o) => (o.position.z = o.userData.z * len));
+      }
+      const f = Math.min(1, (t - v.userData.born) / 0.55);
+      v.position.set((lg.x1 + lg.x2) / 2, R + (1 - f * f) * 7, (lg.z1 + lg.z2) / 2);
+      v.rotation.set(0, Math.atan2(lg.x2 - lg.x1, lg.z2 - lg.z1), 0);
     });
     this._syncViews(items.bananas, this.bananaViews, 'banana', () => this._makeBanana(), (v, b) => {
       v.position.set(b.x, 0.35, b.z);

@@ -58,8 +58,10 @@ export class RaceSim {
       rain: 0, // 豪雨の残り時間
       rk: -1, // 豪雨を使った車
       houses: [], // 落ちてくる犬小屋
+      logs: [], // 倒木（壁）。レースが終わるまで残る
     };
     this.s.tc = pickChances(this.s, t.length);
+    t.logs = this.s.logs; // 壁の当たり判定（physics.collideWalls）が使う
   }
 
   /** 1 ステップ進める。inputs[0] = ホスト, inputs[1] = ゲスト（NPC の入力はここで作る） */
@@ -67,6 +69,7 @@ export class RaceSim {
     const s = this.s;
     const ev = this.events;
     const track = this.track;
+    track.logs = s.logs;
     s.tick++;
     s.t += dt;
     if (s.phase === 'countdown' && s.t >= 0) {
@@ -97,7 +100,7 @@ export class RaceSim {
       if (active) {
         stepTiming(k, this.prog[k.i], s.tc, !!(inp & IN.TAP), dt, ev);
       }
-      if (active && inp & IN.ITEM) useItem(s, k, ev, this.prog, (u) => this.callRain(u));
+      if (active && inp & IN.ITEM) useItem(s, k, ev, this.prog, (u) => this.callRain(u), track);
       if (active && inp & IN.RESPAWN && k.npc) this.respawn(k); // 人は復帰できない（NPC が引っかかったときだけ）
       const wall = stepKart(k, inp, dt, track, active);
       if (wall > 8) {
@@ -301,6 +304,7 @@ export class RaceSim {
 
   loadSnapshot(snap) {
     this.s = sanitizeSnapshot(snap, this.s, this.boxPos.length);
+    this.track.logs = this.s.logs;
   }
 
   /** 連戦のポイント: 総合順位ポイント + ドッグフード + 体当たり + アイテム命中 + ファステストラップ（人間それぞれ。車の番号の順） */
@@ -458,7 +462,14 @@ export function sanitizeSnapshot(r, prev, boxCount) {
     rain: num(r.rain, 0, 0, RAIN.DURATION),
     rk: Number.isInteger(r.rk) && r.rk >= 0 && r.rk < r.karts.length ? r.rk : -1,
     houses: [],
+    logs: [],
   };
+  if (Array.isArray(r.logs)) {
+    for (const l of r.logs.slice(0, ITEMS.LOG_MAX)) {
+      if (!l || typeof l !== 'object') continue;
+      s.logs.push({ id: int(l.id), o: owner(l.o), s: num(l.s, 0, 0, 1e5), a: num(l.a, 0, -50, 50), b: num(l.b, 0, -50, 50), x1: num(l.x1), z1: num(l.z1), x2: num(l.x2), z2: num(l.z2) });
+    }
+  }
   if (Array.isArray(r.proj)) {
     for (const p of r.proj.slice(0, 32)) {
       if (!p || typeof p !== 'object') continue;
@@ -528,6 +539,7 @@ export function packNet(s) {
     pr: s.proj.map((p) => [p.id, p.o, q(p.x, 2), q(p.z, 2), q(p.vx, 2), q(p.vz, 2), q(p.life, 2), q(p.age, 2), p.b, p.f | 0, p.t ?? -1, q(p.d || 0, 1)]),
     bn: s.bananas.map((b) => [b.id, b.o, q(b.x, 2), q(b.z, 2), q(b.life, 1), q(b.age, 1)]),
     hs: s.houses.map((h) => [h.id, h.o, h.t, q(h.x, 2), q(h.z, 2), q(h.age, 2)]),
+    lg: s.logs.map((l) => [l.id, l.o, q(l.s, 2), q(l.a, 2), q(l.b, 2), q(l.x1, 2), q(l.z1, 2), q(l.x2, 2), q(l.z2, 2)]),
   };
 }
 
@@ -564,6 +576,7 @@ export function unpackNet(p) {
     proj: Array.isArray(p.pr) ? p.pr.slice(0, 32).map((a) => row(a, ['id', 'o', 'x', 'z', 'vx', 'vz', 'life', 'age', 'b', 'f', 't', 'd'])) : [],
     houses: Array.isArray(p.hs) ? p.hs.slice(0, 8).map((a) => row(a, ['id', 'o', 't', 'x', 'z', 'age'])) : [],
     bananas: Array.isArray(p.bn) ? p.bn.slice(0, 16).map((a) => row(a, ['id', 'o', 'x', 'z', 'life', 'age'])) : [],
+    logs: Array.isArray(p.lg) ? p.lg.slice(0, ITEMS.LOG_MAX).map((a) => row(a, ['id', 'o', 's', 'a', 'b', 'x1', 'z1', 'x2', 'z2'])) : [],
   };
 }
 
@@ -572,7 +585,7 @@ export function unpackNet(p) {
 // 位置は 2cm（16bit。コースの外まではみ出したときは 1cm・24bit）、向きは 1/65536 周、速さは 1cm/s。めったに変わらない項目は、既定値でないものだけ印つきで載せる。
 
 /** 演出イベントの種類（バイナリでは番号で送る） */
-export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house'];
+export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house', 'log'];
 const BIN_VERSION = 3;
 // 車の項目のうち、ふだんは 0 で、0 でないときだけ載せるもの（タイマー・はじかれ・高さなど。0 でない間は毎回変わる）。
 // よく 0 以外になるものを先に並べる（印は可変長なので、先頭 7 項目までなら 1 バイト）
@@ -771,6 +784,8 @@ export class NetBinEncoder {
     this.setsChanged = 0;
     this.banKey = '';
     this.banChanged = 0;
+    this.logKey = '';
+    this.logChanged = 0;
   }
   encode(s, ev = []) {
     const n = ++this.n;
@@ -794,7 +809,13 @@ export class NetBinEncoder {
       this.banKey = bk;
       this.banChanged = n;
     }
-    return packNetBin(s, ev, { cold, sets: key || n - this.setsChanged < BIN_REPEAT, bananas: key || n - this.banChanged < BIN_REPEAT });
+    // 倒木も動かないので、増えたときだけ
+    const lk = s.logs.map((l) => l.id).join(',');
+    if (lk !== this.logKey) {
+      this.logKey = lk;
+      this.logChanged = n;
+    }
+    return packNetBin(s, ev, { cold, sets: key || n - this.setsChanged < BIN_REPEAT, bananas: key || n - this.banChanged < BIN_REPEAT, logs: key || n - this.logChanged < BIN_REPEAT });
   }
 }
 
@@ -813,7 +834,8 @@ export function packNetBin(s, ev = [], only = null) {
   const short = s.karts.every((k) => Math.abs(k.x) < 655 && Math.abs(k.z) < 655);
   // ふだんは既定値の項目（決着後の残り時間・勝者・雨・順位の印）は、既定値でないときだけ載せる
   const extra = Math.round(s.endT * 100) !== 0 || s.winner !== -1 || Math.round(s.rain * 100) !== 0 || s.rk !== -1;
-  w.u8((withSets ? 1 : 0) | (withBananas ? 2 : 0) | (short ? 4 : 0) | (extra ? 8 : 0));
+  const withLogs = !only || only.logs;
+  w.u8((withSets ? 1 : 0) | (withBananas ? 2 : 0) | (short ? 4 : 0) | (extra ? 8 : 0) | (withLogs ? 16 : 0));
   w.f32(s.t);
   if (extra) {
     w.i16(s.endT * 100);
@@ -895,6 +917,20 @@ export function packNetBin(s, ev = [], only = null) {
     w.i24(h.z * 100);
     w.u16(h.age * 100);
   }
+  if (withLogs) {
+    w.u8(s.logs.length);
+    for (const l of s.logs) {
+      w.uv(l.id);
+      w.u8(l.o);
+      w.u32(l.s * 100);
+      w.i16(l.a * 100);
+      w.i16(l.b * 100);
+      w.i24(l.x1 * 100);
+      w.i24(l.z1 * 100);
+      w.i24(l.x2 * 100);
+      w.i24(l.z2 * 100);
+    }
+  }
   const evs = ev.filter((e) => NET_EVENT_TYPES.includes(e.t)).slice(0, 255);
   w.u8(evs.length);
   for (const e of evs) {
@@ -937,6 +973,7 @@ export function unpackNetBin(u8, prev = null) {
     const withSets = !!(flags & 1);
     const withBananas = !!(flags & 2);
     const short = !!(flags & 4);
+    const withLogs = !!(flags & 16);
     const nk = Math.min(r.u8(), RACE.MAX_KARTS + 1);
     snap.karts = [];
     for (let i = 0; i < nk; i++) {
@@ -995,6 +1032,16 @@ export function unpackNetBin(u8, prev = null) {
     const nh = r.u8();
     snap.houses = [];
     for (let i = 0; i < nh; i++) snap.houses.push({ id: r.uv(), o: r.u8(), t: r.u8(), x: r.i24() / 100, z: r.i24() / 100, age: r.u16() / 100 });
+    if (withLogs) {
+      const nl = Math.min(r.u8(), 255);
+      snap.logs = [];
+      for (let i = 0; i < nl; i++) snap.logs.push({ id: r.uv(), o: r.u8(), s: r.u32() / 100, a: r.i16() / 100, b: r.i16() / 100, x1: r.i24() / 100, z1: r.i24() / 100, x2: r.i24() / 100, z2: r.i24() / 100 });
+      snap.logs = snap.logs.slice(0, ITEMS.LOG_MAX);
+    } else if (prev?.logs) snap.logs = prev.logs.map((l) => ({ ...l }));
+    else {
+      snap.logs = [];
+      snap.partial = true;
+    }
     const ne = r.u8();
     const ev = [];
     for (let i = 0; i < ne; i++) {

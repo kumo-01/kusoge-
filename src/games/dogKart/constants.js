@@ -41,7 +41,11 @@ export const ITEMS = {
   OWNER: 6, // 飼い主登場（マリオカートのキラー）
   RAIN: 7, // 豪雨
   HOUSE: 8, // 犬小屋（1位に必ず当たる）
-  COUNT: 9,
+  FRISBEE2: 9, // 2枚フリスビー（1 回使うとフリスビーが 1 枚残る）
+  BANANA_ROW: 10, // 横一列バナナ（後ろに、道幅いっぱいに並べる）
+  HOUSE2: 11, // 2個犬小屋（1 回使うと犬小屋が 1 個残る）
+  LOG: 12, // 倒木（後ろのコースに倒れて、道の片側をふさぐ壁になる。レースが終わるまで残る）
+  COUNT: 13,
   BOX_RESPAWN: 4.0,
   BOX_RADIUS: 2.2,
   ROULETTE: 1.1, // アイテムが決まるまでのルーレット時間
@@ -53,7 +57,13 @@ export const ITEMS = {
   BANANA_LIFE: 25,
   BANANA_HIT_R: 1.7,
   BANANA_SPIN: 1.05,
-  BANANA_MAX: 6,
+  BANANA_MAX: 14, // コースに置けるバナナの数（横一列バナナの 7 本も入る）
+  BANANA_ROW_N: 7, // 横一列バナナの本数（道幅いっぱい。すき間はなく、よけるには芝生へ）
+  BANANA_ROW_BACK: 6, // 自分の何 m 後ろに並べるか
+  LOG_BACK: 14, // 倒木: 自分の何 m 後ろに倒れるか
+  LOG_COVER: 0.6, // 壁から壁までの幅の何割をふさぐか（反対側は通れる）
+  LOG_R: 0.75, // 倒木の太さ（半径 m）
+  LOG_MAX: 6, // 1 レースで置ける倒木の数（これ以上は出ない）
   BOOST_TIME: 2.4,
   GUARD_TIME: 20, // ガードの持続（秒）。何かに当たると 1 回で消える
   FRISBEE_SPEED: 46, // 自分の速度に足す速さ

@@ -72,6 +72,18 @@ export function npcInput(sim, k, dt) {
     }
   }
 
+  // 前方の倒木はよける: ふさがれていない側の真ん中を走る
+  for (const lg of s.logs || []) {
+    const ds = track.wrapDS(lg.s - ps);
+    if (ds < 2 || ds > 40) continue;
+    // （ふさがれていない側は、道路の外の芝生まで使ってよい）
+    const lo = -(track.wallDist - 2);
+    const hi = track.wallDist - 2;
+    const freeLo = lg.a <= lo ? lg.b + KART.RADIUS + 1.5 : lo; // ふさがれていない範囲
+    const freeHi = lg.a <= lo ? hi : lg.a - KART.RADIUS - 1.5;
+    if (k.al < freeLo || k.al > freeHi) k.al = Math.max(freeLo, Math.min(freeHi, (freeLo + freeHi) / 2));
+  }
+
   const look = (boss ? 12 : 10) + Math.max(0, k.sp) * (boss ? 0.5 : 0.45);
   const tgt = track.pointAt(ps + look, k.al);
   const d = angleTo(k, tgt.x, tgt.z);
@@ -84,6 +96,18 @@ export function npcInput(sim, k, dt) {
   const fast = k.sp > KART.MAX_SPEED * k.ms * 0.78;
   if (bend > (boss ? 1.5 : 1.25) && fast) bits |= IN.DOWN;
   else if (!(bend > (boss ? 1.05 : 0.85) && fast)) bits |= IN.UP;
+  // 倒木に正面から引っかかったら（すぐ前で止まっている）、1.2 秒ほど下がってから回り込む（lb: 下がる残り時間。NPC の考えだけで、配信はしない）
+  if (!(k.lb > 0)) {
+    for (const lg of s.logs || []) {
+      const ds = track.wrapDS(lg.s - ps);
+      if (ds > -1 && ds < 5 && plat > lg.a - 1.5 && plat < lg.b + 1.5 && Math.abs(k.sp) < 5) k.lb = 1.2;
+    }
+  }
+  if (k.lb > 0) {
+    k.lb -= dt;
+    k.as = 0; // 引っかかり（復帰）としては数えない
+    return (bits & IN.TAP) | IN.DOWN;
+  }
   // 芝生に出ていたら道路へ戻る
   if (Math.abs(plat) > track.roadHalf + 0.5) bits |= IN.UP;
 
@@ -112,12 +136,20 @@ export function npcInput(sim, k, dt) {
       use = bend < 0.5;
     } else if (k.item === ITEMS.GUARD || k.item === ITEMS.OWNER || k.item === ITEMS.RAIN) {
       use = nextRandom(s) < dt * 0.8; // すぐ使う
-    } else if (k.item === ITEMS.HOUSE) {
+    } else if (k.item === ITEMS.HOUSE || k.item === ITEMS.HOUSE2) {
       // 自分より前に誰かがいるときに使う（先頭の自分には当てられない）
       let ahead = false;
       for (const o of s.karts) if (o !== k && sim.prog[o.i] > sim.prog[k.i]) ahead = true;
       use = ahead && nextRandom(s) < dt * 0.8;
-    } else if (k.item === ITEMS.FRISBEE) {
+    } else if (k.item === ITEMS.BANANA_ROW || k.item === ITEMS.LOG) {
+      // 後ろに誰かが近づいてきたら置く
+      for (const o of s.karts) {
+        if (o === k) continue;
+        const behind = sim.prog[k.i] - sim.prog[o.i];
+        if (behind > 8 && behind < 45) use = true;
+      }
+      if (!use && nextRandom(s) < dt * 0.1) use = true;
+    } else if (k.item === ITEMS.FRISBEE || k.item === ITEMS.FRISBEE2) {
       // 前に誰かがいて、そこそこ近いときに投げる（ボス犬は外さないよう、もっと近づいてから）
       const near = boss ? 60 : 80;
       for (const o of s.karts) {

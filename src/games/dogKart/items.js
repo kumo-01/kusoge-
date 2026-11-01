@@ -1,4 +1,5 @@
-// アイテム: ホネアタック / バナナトラップ / わんわんブースト / ガード / フリスビー / 飼い主登場 / 豪雨 / 犬小屋（判定はホストのみ）
+// アイテム: ホネアタック / バナナトラップ / わんわんブースト / ガード / フリスビー / 飼い主登場 / 豪雨 / 犬小屋
+// / 2枚フリスビー / 横一列バナナ / 2個犬小屋 / 倒木（判定はホストのみ。倒木の壁との当たりは、予測する側も同じ計算）
 import { ITEMS, KART, FOOD } from './constants.js';
 
 export const ITEM_INFO = {
@@ -10,7 +11,14 @@ export const ITEM_INFO = {
   [ITEMS.OWNER]: { name: '飼い主登場', icon: '🧑' },
   [ITEMS.RAIN]: { name: '豪雨', icon: '☔' },
   [ITEMS.HOUSE]: { name: '犬小屋', icon: '🏠' },
+  [ITEMS.FRISBEE2]: { name: '2枚フリスビー', icon: '🥏🥏' },
+  [ITEMS.BANANA_ROW]: { name: '横一列バナナ', icon: '🍌🍌🍌' },
+  [ITEMS.HOUSE2]: { name: '2個犬小屋', icon: '🏠🏠' },
+  [ITEMS.LOG]: { name: '倒木', icon: '🪵' },
 };
+
+/** 2 回使えるアイテム → 1 回使ったあとに残るもの */
+const SECOND = { [ITEMS.FRISBEE2]: ITEMS.FRISBEE, [ITEMS.HOUSE2]: ITEMS.HOUSE };
 
 /** 決定的な乱数（状態をスナップショットに保存できる） */
 export function nextRandom(s) {
@@ -24,6 +32,8 @@ export function nextRandom(s) {
  * 順位に応じてアイテムを選ぶ。rank: 1 = 先頭, total: 台数
  * - 飼い主登場・ブーストは後ろの順位ほど出やすい
  * - フリスビー・犬小屋は 2 位以下だけ / ガードは最下位以外 / 豪雨は最下位だけ
+ * - 2枚フリスビーは 2 位以下、2個犬小屋は後ろの順位ほど出やすい
+ * - 横一列バナナ・倒木は（後ろの車の邪魔なので）前の順位ほど出やすい。最下位には出ない
  */
 export function itemWeights(rank, total) {
   const f = total > 1 ? (rank - 1) / (total - 1) : 0; // 0 = 先頭, 1 = 最下位
@@ -37,11 +47,16 @@ export function itemWeights(rank, total) {
   w[ITEMS.OWNER] = 0.32 * f * f;
   w[ITEMS.RAIN] = last ? 0.14 : 0;
   w[ITEMS.HOUSE] = rank >= 2 ? 0.05 + 0.1 * f : 0;
+  w[ITEMS.FRISBEE2] = rank >= 2 ? 0.05 : 0;
+  w[ITEMS.BANANA_ROW] = last ? 0 : 0.03 + 0.07 * (1 - f);
+  w[ITEMS.HOUSE2] = rank >= 2 ? 0.07 * f * f : 0;
+  w[ITEMS.LOG] = last ? 0 : 0.02 + 0.06 * (1 - f);
   return w;
 }
 
 export function chooseItem(s, rank, total) {
   const w = itemWeights(rank, total);
+  if ((s.logs?.length || 0) >= ITEMS.LOG_MAX) w[ITEMS.LOG] = 0; // 倒木はもう置けない
   let sum = 0;
   for (let i = 1; i < w.length; i++) sum += w[i];
   const r = nextRandom(s) * sum;
@@ -85,11 +100,13 @@ export function ownerTime(karts, k, progs) {
   return ITEMS.OWNER_MIN + ((ITEMS.OWNER_TIME - ITEMS.OWNER_MIN) * (rank - 1)) / (n - 1);
 }
 
-/** progs: 全車の走行距離（フリスビー・犬小屋の狙いを決める）。callRain: 豪雨を降らせる処理 */
-export function useItem(s, k, events, progs = null, callRain = null) {
+/** progs: 全車の走行距離（フリスビー・犬小屋の狙いを決める）。callRain: 豪雨を降らせる処理。track: 横一列バナナ・倒木を置く場所を決める */
+export function useItem(s, k, events, progs = null, callRain = null, track = null) {
   if (!k.item || k.roll > 0) return;
-  const item = k.item;
-  k.item = 0;
+  const held = k.item;
+  // 2 回使えるものは、1 回目は普通のものとして使い、もう 1 つ残る
+  const item = held === ITEMS.FRISBEE2 ? ITEMS.FRISBEE : held === ITEMS.HOUSE2 ? ITEMS.HOUSE : held;
+  k.item = SECOND[held] || 0;
   k.stats.items++;
   const fx = Math.sin(k.h);
   const fz = Math.cos(k.h);
@@ -109,6 +126,33 @@ export function useItem(s, k, events, progs = null, callRain = null) {
   } else if (item === ITEMS.BANANA) {
     s.bananas.push({ id: s.nextId++, o: k.i, x: k.x - fx * 2.8, z: k.z - fz * 2.8, life: ITEMS.BANANA_LIFE, age: 0 });
     while (s.bananas.length > ITEMS.BANANA_MAX) s.bananas.shift();
+  } else if (item === ITEMS.BANANA_ROW) {
+    // 自分の少し後ろに、道幅いっぱいに横一列（すき間なし。よけるには芝生へ出るか、ガード・飼い主で）
+    if (track) {
+      const p = track.project(k.x, k.z);
+      const n = ITEMS.BANANA_ROW_N;
+      const half = track.roadHalf - 0.8;
+      for (let j = 0; j < n; j++) {
+        const q = track.pointAt(p.s - ITEMS.BANANA_ROW_BACK, -half + (2 * half * j) / (n - 1));
+        s.bananas.push({ id: s.nextId++, o: k.i, x: q.x, z: q.z, life: ITEMS.BANANA_LIFE, age: 0 });
+      }
+      while (s.bananas.length > ITEMS.BANANA_MAX) s.bananas.shift();
+    }
+  } else if (item === ITEMS.LOG) {
+    // 自分の後ろに倒木: 片側の壁から道幅の 6 割をふさぐ（どちら側かはランダム。反対側は通れる）。レースが終わるまで残る
+    if (track && (s.logs ||= []).length < ITEMS.LOG_MAX) {
+      const p = track.project(k.x, k.z);
+      const ls = p.s - ITEMS.LOG_BACK;
+      // どちら側をふさぐかはランダム。ただし近く（前後 30m）に倒木があれば同じ側に（反対側同士だと道がふさがってしまう）
+      const near = s.logs.find((l) => Math.abs(track.wrapDS(l.s - ls)) < 30);
+      const side = near ? (near.a <= -track.roadHalf ? -1 : 1) : nextRandom(s) < 0.5 ? -1 : 1;
+      const from = side * track.wallDist;
+      const to = from - side * 2 * track.wallDist * ITEMS.LOG_COVER;
+      const a = track.pointAt(ls, from);
+      const b = track.pointAt(ls, to);
+      s.logs.push({ id: s.nextId++, o: k.i, s: ((ls % track.length) + track.length) % track.length, a: Math.min(from, to), b: Math.max(from, to), x1: a.x, z1: a.z, x2: b.x, z2: b.z });
+      events.push({ t: 'log', k: k.i, x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 });
+    }
   } else if (item === ITEMS.GUARD) {
     k.gd = ITEMS.GUARD_TIME;
   } else if (item === ITEMS.FRISBEE) {
@@ -172,8 +216,9 @@ export function useItem(s, k, events, progs = null, callRain = null) {
     k.sp = Math.min(KART.BOOST_SPEED, Math.max(k.sp, KART.MAX_SPEED * 0.85) + 6);
     k.stats.boosts++;
   }
-  events.push({ t: 'use', k: k.i, item, x: k.x, z: k.z });
+  events.push({ t: 'use', k: k.i, item: held, x: k.x, z: k.z });
 }
+
 
 /**
  * アイテムボックス・飛翔物・バナナの更新と当たり判定

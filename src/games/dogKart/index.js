@@ -324,6 +324,7 @@ class DogKartGame {
       boxTaken: s.boxes.reduce((o, t, i) => (t > 0 && o.push(i), o), []),
       foodTaken: s.foods.reduce((o, t, i) => (t > 0 && o.push(i), o), []),
       bananas: s.bananas.map((b) => ({ id: b.id, o: b.o, x: b.x, z: b.z, life: b.life, age: b.age })),
+      logs: (s.logs || []).map((l) => ({ ...l })),
     };
     if (mem.tick < 0) mem.tick = s.tick;
     const d = unpackNetBin(u8, mem);
@@ -335,6 +336,7 @@ class DogKartGame {
       mem.boxTaken = d.snap.boxTaken;
       mem.foodTaken = d.snap.foodTaken;
       mem.bananas = d.snap.bananas;
+      mem.logs = d.snap.logs;
       this._binMem = mem;
     }
     return d;
@@ -400,6 +402,7 @@ class DogKartGame {
       this.clock += (t - this.clock) * 0.08;
     }
     this.sim.s = s;
+    this.track.logs = s.logs; // 自分の車の予測・ほかの車の推定も、倒木に当たる
     if (NET.PREDICTION) {
       const r = this.pred.reconcile(s.karts[this.me], s.acks[this.me] || 0, this._predStepFn || (this._predStepFn = (k, b) => this._predStep(k, b)));
       const dg = this.diag;
@@ -483,9 +486,17 @@ class DogKartGame {
           if (e.item === ITEMS.BONE) {
             snd.play('throw');
             fx?.text('ワン!', k.x, 3.5, k.z, 3);
-          } else if (e.item === ITEMS.FRISBEE) {
+          } else if (e.item === ITEMS.FRISBEE || e.item === ITEMS.FRISBEE2) {
             snd.play('throw');
             fx?.text('ピュン!', k.x, 3.5, k.z, 3);
+            if (e.k === me && e.item === ITEMS.FRISBEE2) this.hud.flash('🥏 もう 1 枚！', 'good', 1100);
+          } else if (e.item === ITEMS.BANANA_ROW) {
+            snd.play('drop');
+            fx?.text('ズラッ!', k.x, 3.5, k.z, 3.5);
+            if (e.k === me) this.hud.flash('🍌🍌🍌 横一列バナナ！', 'good', 1300);
+          } else if (e.item === ITEMS.LOG) {
+            snd.play('throw');
+            if (e.k === me) this.hud.flash('🪵 後ろに倒木！', 'good', 1300);
           } else if (e.item === ITEMS.GUARD) {
             snd.play('itemReady');
             fx?.ring(k.x, 0.8, k.z, 0x7fd0ff, 5);
@@ -499,7 +510,7 @@ class DogKartGame {
             snd.play('boost');
             fx?.ring(k.x, 0.5, k.z, 0xffd23f, 7);
             fx?.sparkle(k.x, 1.5, k.z, 14);
-          } else if (e.item === ITEMS.HOUSE) {
+          } else if (e.item === ITEMS.HOUSE || e.item === ITEMS.HOUSE2) {
             snd.play('throw');
             fx?.text('ヒュー…', k.x, 3.5, k.z, 3.5);
             // 文字は本人にだけ（落とした人と、狙われた人）
@@ -509,6 +520,13 @@ class DogKartGame {
           }
           break;
         }
+        case 'log':
+          // 倒木が倒れた: 土けむりと揺れ
+          snd.play('bigBump');
+          fx?.puff(e.x, 0.8, e.z, { color: 0xb08a5a, n: 16, size: 1.6, spread: 7 });
+          fx?.text('メキメキ…ドーン!', e.x, 4.5, e.z, 4.5);
+          this.cam?.addShake(0.35);
+          break;
         case 'house':
           snd.play('hit');
           fx?.puff(e.x, 1, e.z, { n: 14, size: 1.6, spread: 5 });
@@ -734,7 +752,7 @@ class DogKartGame {
       const q = prevHouse.get(p.id);
       return q ? { ...p, x: lerp(q.x, p.x, f), z: lerp(q.z, p.z, f) } : p;
     });
-    return { karts, items: { boxes: s.boxes, proj, bananas, houses, foods: s.foods } };
+    return { karts, items: { boxes: s.boxes, proj, bananas, houses, foods: s.foods, logs: s.logs || [] } };
   }
 
   /** 車ごとの追加演出（ドリフトの火花・着地の土煙・ブースト煙など） */
