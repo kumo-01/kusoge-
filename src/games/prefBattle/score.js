@@ -3,22 +3,24 @@
 // 座標は「地図の単位」（ウェブメルカトル。範囲の幅 = 1000。tools/japan-map/view.mjs）。データの中では ×10 の整数。
 // お題の「県境」は、となりの都道府県と接している陸の境だけ（海岸線・島は含まない。borders）。
 //
-// 測り方（すべて実際の地上の距離 km で測る）:
+// 採点（100 点満点。すべて実際の地上の距離 km で測る）:
 //   メルカトル図法は北ほど引き伸ばされる（北緯 24° と 41° で 1.2 倍ちがう）ので、地図の単位の長さを
-//   その場所の緯度で km に直してから測る（unitKm）。
-//   1) 本物の県境と描いた線を、それぞれ 0.25km ごとの点に分ける
-//   2) 本物の県境の各点 → 描いた線までの最短距離、描いた線の各点 → 本物の県境までの最短距離を求める
-//   3) 1 点の得点: 距離が A 以内なら満点 1、A〜T は直線的に減り、T より遠ければ 0
-//      T（許容距離）= 県境の広がり（外接箱の対角）の 7%（5〜13km）、A（満点の距離）= T の 1/4
-//   4) なぞれた割合（網羅）= 本物の県境の点の得点の平均、線の正確さ = 描いた線の点の得点の平均
-//   5) 一致率 = 2 × 網羅 × 正確さ ÷（網羅 + 正確さ）（調和平均。片方だけ高くても上がらない）
-//   6) 塗りつぶし対策: 描いた線が通った 1km 四方のマスの数が、本物の県境の 1.5 倍を超えたら、その分だけ割り引く
-//      （同じ所を何度なぞってもマスは増えないので、描き直しは損にならない）
+//   その場所の緯度で km に直してから測る（unitKm）。本物の県境と描いた線は 0.25km ごとの点に分けて測る。
+//   目安の距離 T = 県境の広がり（外接箱の対角）の 8%（6〜16km）。1 点の評価は、相手の線までの距離が
+//   T/2 以内なら満点 1、そこから 2T にかけてなめらかに 0 まで下がる（ちょっとのずれは気にしない）。
+//   ① 位置（40 点）: 本物の県境をどれだけなぞれたか（網羅）と、描いた線がどれだけ県境の上にあるか（正確さ）の調和平均
+//   ② 形（40 点）: 描いた線を丸ごと少し（最大 T）ずらして、いちばん合う所で ① と同じ計算。場所が少しずれていても形が合えば点になる
+//                  （ずらした距離に応じて最大 3 割引き）
+//   ③ 長さ（20 点）: 描いた線の量（1km 四方のマスの数）が本物の 0.8〜1.25 倍なら満点、0.3 倍・2.5 倍で 0。② の形の点を掛ける
+//   線が多すぎる（本物の 2 倍を超える）ときは全体をその分割り引く（ぐちゃぐちゃ塗り対策。同じ所のなぞり直しは損にならない）
 
 export const EARTH_R = 6371.0088; // 地球の平均半径 km
 export const STEP_KM = 0.25; // 点に分ける間隔
-export const FULL_RATIO = 0.25; // 満点の距離 A = T × これ
-export const OVER_LIMIT = 1.5; // 線の量がこれを超えたら割り引く
+export const FULL_RATIO = 0.3; // 満点の距離 = T × これ
+export const ZERO_RATIO = 1.5; // 0 点になる距離 = T × これ
+export const SHIFT_RATIO = 1; // ② 形: ずらせる距離の上限 = T × これ
+export const OVER_LIMIT = 2; // 線の量がこれを超えたら割り引く
+export const WEIGHTS = { pos: 40, shape: 40, len: 20 };
 
 /** 地図の単位 1 が、地図の y の所で何 km か（メルカトルの縮尺は緯度だけで決まる） */
 export function unitKm(view, y) {
@@ -42,11 +44,27 @@ export function prefLines(pref) {
   });
 }
 
-/** 許容距離 T（km）: 県境の広がり（外接箱の対角）の 7%。5〜13km の間 */
+/** 目安の距離 T（km）: 県境の広がり（外接箱の対角）の 8%。6〜16km の間 */
 export function tolerance(pref, view) {
   const [x0, y0, x1, y1] = pref.borderBox || pref.box;
   const diagKm = Math.hypot(x1 - x0, y1 - y0) * unitKm(view, (y0 + y1) / 2);
-  return Math.max(5, Math.min(13, 0.07 * diagKm));
+  return Math.max(6, Math.min(16, 0.08 * diagKm));
+}
+
+/** 距離 d km の点の評価（0〜1）。T/2 以内は 1、2T で 0（その間は余弦でなめらかに） */
+export function credit(d, T) {
+  const a = T * FULL_RATIO;
+  const z = T * ZERO_RATIO;
+  if (d <= a) return 1;
+  if (d >= z) return 0;
+  return 0.5 + 0.5 * Math.cos((Math.PI * (d - a)) / (z - a));
+}
+
+/** ③ 長さの評価（0〜1）。線の量の比 r が 0.8〜1.25 なら 1、0.3 / 2.5 で 0 */
+export function lengthCredit(r) {
+  if (r >= 0.8 && r <= 1.25) return 1;
+  if (r < 0.8) return Math.max(0, (r - 0.3) / 0.5);
+  return Math.max(0, (2.5 - r) / 1.25);
 }
 
 /** 折れ線の長さ（km） */
@@ -124,54 +142,95 @@ function cellCount(pts, kmCell) {
 }
 
 /**
- * 描いた線を本物の県境と比べて採点する（測り方はこのファイルの先頭）。
- * truth: 本物の県境、drawn: 描いた線（どちらも地図の単位の折れ線の配列）、view: 地図の投影、T: 許容距離 km
- * @returns {{ pct: number, cover: number, precise: number, dev: number, miss: number, T: number, A: number, over: number, pts: number[] }}
- *   pct: 一致率（0〜100、小数 1 桁）、cover: なぞれた割合、precise: 線の正確さ（0〜1）、
- *   dev: 描いた線の、本物の県境からの平均のずれ km、miss: 本物の県境の点のうち、描いた線から T より遠い割合、over: 線の量の比
+ * 描いた線を本物の県境と比べて採点する（採点の仕方はこのファイルの先頭）。
+ * truth: 本物の県境、drawn: 描いた線（どちらも地図の単位の折れ線の配列）、view: 地図の投影、T: 目安の距離 km
+ * @returns 採点の内訳。pct: 合計（0〜100、小数 1 桁）、pos / shape / lenS: ①②③ の評価（0〜1）、
+ *   cover / precise: ① の網羅・正確さ、shift: ② でずらした距離 km、over: 線の量の比、
+ *   dev: 描いた線の、本物の県境からの平均のずれ km、miss: 本物の県境のうち描いた線から 2T より遠い割合
  */
 export function scoreDrawing(truth, drawn, view, T) {
-  const A = T * FULL_RATIO;
   const dLines = drawn.filter((l) => l.length > 0);
-  const empty = { pct: 0, cover: 0, precise: 0, dev: 0, miss: 1, T, A, over: 0 };
+  const empty = { pct: 0, pos: 0, shape: 0, lenS: 0, cover: 0, precise: 0, shift: 0, dev: 0, miss: 1, T, over: 0 };
   if (!dLines.length || !truth.length) return empty;
   const tp = resample(truth, STEP_KM, view);
   const dp = resample(dLines, STEP_KM, view);
-  // 格子の大きさ: T を地図の単位にしたもの（北ほど 1 単位が短いので、範囲でいちばん北の縮尺を使う）
+  if (!tp.length || !dp.length) return empty;
   let yMin = Infinity;
-  for (const [, y] of tp) yMin = Math.min(yMin, y);
-  const kN = unitKm(view, yMin);
-  const cellU = T / kN;
-  const nearDrawn = segIndex(dLines, cellU);
-  const nearTruth = segIndex(truth, cellU);
-  const credit = (dKm) => (dKm <= A ? 1 : dKm >= T ? 0 : (T - dKm) / (T - A));
-  let cover = 0;
+  let yMax = -Infinity;
+  let cx = 0;
+  let cy = 0;
+  for (const [x, y] of tp) {
+    yMin = Math.min(yMin, y);
+    yMax = Math.max(yMax, y);
+    cx += x;
+    cy += y;
+  }
+  cx /= tp.length;
+  cy /= tp.length;
+  const kN = unitKm(view, yMin); // 範囲でいちばん北の縮尺（1 単位がいちばん短い）
+  const kC = unitKm(view, cy); // ずらすときの縮尺（県境の真ん中）
+  const Z = T * ZERO_RATIO;
+  const nearDrawn = segIndex(dLines, Z / kN);
+  const nearTruth = segIndex(truth, Z / kN);
+  // ①② 共通: (ux, uy) だけずらした描いた線の、網羅・正確さ・調和平均（tpS / dpS は点の間引き）
+  const evalAt = (ux, uy, tpS, dpS) => {
+    let cov = 0;
+    for (const [x, y] of tpS) {
+      const k = unitKm(view, y);
+      cov += credit(nearDrawn(x - ux, y - uy, Z / k) * k, T);
+    }
+    cov /= tpS.length;
+    let pre = 0;
+    for (const [x, y] of dpS) {
+      const k = unitKm(view, y);
+      pre += credit(nearTruth(x + ux, y + uy, Z / k) * k, T);
+    }
+    pre /= dpS.length;
+    return { cov, pre, f: cov + pre > 0 ? (2 * cov * pre) / (cov + pre) : 0 };
+  };
+  // ① 位置
+  const base = evalAt(0, 0, tp, dp);
+  // ② 形: 粗い点で、ずらす量を粗く → 細かく探す
+  const thin = (pts, n) => (pts.length <= n ? pts : pts.filter((_, i) => i % Math.ceil(pts.length / n) === 0));
+  const tpC = thin(tp, 160);
+  const dpC = thin(dp, 160);
+  const maxU = (T * SHIFT_RATIO) / kC;
+  let best = { f: -1, ux: 0, uy: 0 };
+  const tryAt = (ux, uy) => {
+    if (Math.hypot(ux, uy) > maxU + 1e-9) return;
+    const r = evalAt(ux, uy, tpC, dpC);
+    if (r.f > best.f) best = { f: r.f, ux, uy };
+  };
+  for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) tryAt((i * maxU) / 3, (j * maxU) / 3);
+  const b0 = best;
+  for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) if (i || j) tryAt(b0.ux + (i * maxU) / 8, b0.uy + (j * maxU) / 8);
+  const fine = evalAt(best.ux, best.uy, tp, dp);
+  const shift = Math.hypot(best.ux, best.uy) * kC;
+  const shapeRaw = Math.max(fine.f, base.f);
+  const shape = Math.max(base.f, shapeRaw * (1 - 0.3 * Math.min(1, shift / (T * SHIFT_RATIO))));
+  // ③ 長さ（線の量は 1km 四方のマスの数で比べる。同じ所のなぞり直しは増えない）
+  const kmCell = 1 / unitKm(view, (yMin + yMax) / 2);
+  const over = cellCount(dp, kmCell) / Math.max(1, cellCount(tp, kmCell));
+  const lenS = lengthCredit(over);
+  let total = WEIGHTS.pos * base.f + WEIGHTS.shape * shape + WEIGHTS.len * lenS * shape;
+  if (over > OVER_LIMIT) total *= OVER_LIMIT / over;
+  // 参考: 平均のずれと、取りこぼし
+  const FAR = 200;
+  const farTruth = segIndex(truth, FAR / kN);
+  let dev = 0;
+  for (const [x, y] of dp) {
+    const k = unitKm(view, y);
+    let d = nearTruth(x, y, Z / k) * k;
+    if (d >= Z) d = farTruth(x, y, FAR / k) * k; // 遠い点だけ、広い範囲で探す
+    dev += d;
+  }
+  dev /= dp.length;
   let missN = 0;
   for (const [x, y] of tp) {
     const k = unitKm(view, y);
-    const d = nearDrawn(x, y, T / k) * k;
-    cover += credit(d);
-    if (d >= T) missN++;
+    if (nearDrawn(x, y, Z / k) * k >= Z) missN++;
   }
-  cover /= tp.length;
-  let precise = 0;
-  let dev = 0;
-  const FAR = 200; // 平均のずれは、遠くても 200km まで数える
-  const farTruth = segIndex(truth, FAR / kN);
-  for (const [x, y] of dp) {
-    const k = unitKm(view, y);
-    let d = nearTruth(x, y, T / k) * k;
-    precise += credit(d);
-    if (d >= T) d = farTruth(x, y, FAR / k) * k;
-    dev += d;
-  }
-  precise /= dp.length;
-  dev /= dp.length;
-  let f = cover + precise > 0 ? (2 * cover * precise) / (cover + precise) : 0;
-  const kmCell = 1 / unitKm(view, (yMin + tp.reduce((m, p) => Math.max(m, p[1]), -Infinity)) / 2);
-  const over = cellCount(dp, kmCell) / Math.max(1, cellCount(tp, kmCell));
-  if (over > OVER_LIMIT) f *= OVER_LIMIT / over;
-  return { pct: Math.round(f * 1000) / 10, cover, precise, dev, miss: missN / tp.length, T, A, over };
+  return { pct: Math.round(Math.min(100, total) * 10) / 10, pos: base.f, shape, lenS, cover: base.cov, precise: base.pre, shift, dev, miss: missN / tp.length, T, over };
 }
 
 /** 折れ線を間引く（Douglas–Peucker）。送る前に点を減らす */
@@ -262,4 +321,116 @@ export function eraseAt(strokes, x, y, r) {
     if (cur.length) out.push(cur);
   }
   return changed ? out : strokes;
+}
+
+/**
+ * CPU の描く線: 本物の県境を「だいたい覚えている人」が手で描いたような線を作る。
+ * - となり合う県境の線は端どうしをつないで、ひと筆書きの長い線にする（とぎれとぎれにしない）
+ * - 細かいギザギザは覚えていない（強さに応じた粗さで単純にする）
+ * - 全体の位置・大きさ・向きが少しずれ、線もゆっくりうねり、手のふるえも少し入る
+ * - よわい CPU は、短い区間をまるごと描き忘れることがある
+ * level: 1 よわい / 2 ふつう / 3 つよい、rnd: 0〜1 の乱数、gauss: 標準正規乱数
+ */
+export const CPU_LEVELS = {
+  // simp / off / wob / jit は「県境の大きさ U（外接箱の対角の 8%）」の何倍か（大きな県ほど、ずれも大きい）
+  1: { simp: 1.3, off: 1.4, scale: 0.12, rot: 7, wob: 1.0, jit: 0.1, forget: 0.35 },
+  2: { simp: 0.9, off: 0.9, scale: 0.08, rot: 4, wob: 0.7, jit: 0.08, forget: 0.15 },
+  3: { simp: 0.5, off: 0.5, scale: 0.04, rot: 2, wob: 0.45, jit: 0.06, forget: 0.05 },
+};
+export function cpuDrawing(truth, view, level, rnd = Math.random, gauss = null) {
+  const g = gauss || (() => Math.sqrt(-2 * Math.log(Math.max(1e-9, rnd()))) * Math.cos(2 * Math.PI * rnd()));
+  const c = CPU_LEVELS[level] || CPU_LEVELS[2];
+  const lines = truth.filter((l) => l.length > 1);
+  if (!lines.length) return [];
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (const l of lines) for (const [x, y] of l) (sx += x), (sy += y), n++;
+  const cx = sx / n;
+  const cy = sy / n;
+  const k = unitKm(view, cy); // 1 単位 = k km（県境の真ん中の縮尺で十分）
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const l of lines) for (const [x, y] of l) (x0 = Math.min(x0, x)), (y0 = Math.min(y0, y)), (x1 = Math.max(x1, x)), (y1 = Math.max(y1, y));
+  const U = Math.max(2, 0.08 * Math.hypot(x1 - x0, y1 - y0) * k); // ずれの大きさの単位 km
+  // 1) 端どうしが近い線をつないで、ひと筆書きの線にする
+  const JOIN = 4 / k;
+  const left = lines.map((l) => l.slice());
+  const chains = [];
+  while (left.length) {
+    let ch = left.shift();
+    for (let found = true; found; ) {
+      found = false;
+      for (let i = 0; i < left.length; i++) {
+        const l = left[i];
+        const d = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+        const tail = ch[ch.length - 1];
+        const head = ch[0];
+        let add = null;
+        if (d(tail, l[0]) < JOIN) add = () => (ch = ch.concat(l));
+        else if (d(tail, l[l.length - 1]) < JOIN) add = () => (ch = ch.concat(l.slice().reverse()));
+        else if (d(head, l[l.length - 1]) < JOIN) add = () => (ch = l.concat(ch));
+        else if (d(head, l[0]) < JOIN) add = () => (ch = l.slice().reverse().concat(ch));
+        if (add) {
+          add();
+          left.splice(i, 1);
+          found = true;
+          break;
+        }
+      }
+    }
+    chains.push(ch);
+  }
+  // 2) 全体のずれ（位置・大きさ・向き）
+  const ang = rnd() * Math.PI * 2;
+  const offU = (c.off * U * (0.5 + rnd())) / k;
+  const ox = Math.cos(ang) * offU;
+  const oy = Math.sin(ang) * offU;
+  const sc = 1 + g() * c.scale;
+  const rot = (g() * c.rot * Math.PI) / 180;
+  const cs = Math.cos(rot);
+  const sn = Math.sin(rot);
+  const warp = ([x, y]) => {
+    const dx = (x - cx) * sc;
+    const dy = (y - cy) * sc;
+    return [cx + dx * cs - dy * sn + ox, cy + dx * sn + dy * cs + oy];
+  };
+  const total = lengthKm(chains, view);
+  const out = [];
+  for (const ch of chains) {
+    const len = lengthKm([ch], view);
+    if (len < total * 0.25 && rnd() < c.forget) continue; // 短い区間を、まるごと描き忘れる
+    // 3) 細かいところは覚えていない → 単純にして、手で描くくらいの間隔の点に
+    const simple = simplifyLine(ch, (c.simp * U) / k);
+    let pts = resample([simple], 1.2, view);
+    if (pts.length < 2) continue;
+    // 4) ゆっくりしたうねり（波長 40〜90km）と、手のふるえ（なめらかにしたもの）
+    const w1 = (2 * Math.PI * 1.2) / (40 + rnd() * 50);
+    const w2 = (2 * Math.PI * 1.2) / (15 + rnd() * 15);
+    const p1 = rnd() * 6.3;
+    const p2 = rnd() * 6.3;
+    let jit = 0;
+    pts = pts.map(([x, y], i) => {
+      const a = pts[Math.max(0, i - 1)];
+      const b = pts[Math.min(pts.length - 1, i + 1)];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      const nx = -(b[1] - a[1]) / L;
+      const ny = (b[0] - a[0]) / L;
+      jit = jit * 0.8 + g() * c.jit * U * 0.6;
+      const km = c.wob * U * (0.75 * Math.sin(i * w1 + p1) + 0.25 * Math.sin(i * w2 + p2)) + jit;
+      return warp([x + (nx * km) / k, y + (ny * km) / k]);
+    });
+    // 5) 角を少し丸める（Chaikin を 2 回）
+    for (let it = 0; it < 2; it++) {
+      const q = [pts[0]];
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const [ax, ay] = pts[i];
+        const [bx, by] = pts[i + 1];
+        q.push([ax * 0.75 + bx * 0.25, ay * 0.75 + by * 0.25], [ax * 0.25 + bx * 0.75, ay * 0.25 + by * 0.75]);
+      }
+      q.push(pts[pts.length - 1]);
+      pts = q;
+    }
+    out.push(pts);
+  }
+  return out;
 }

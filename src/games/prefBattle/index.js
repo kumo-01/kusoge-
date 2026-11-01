@@ -14,7 +14,7 @@ import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut, gauss } from '.
 import DATA from './japan-prefs.json';
 import BASE_URL from './japan-base.jpg';
 import { TileMap } from './tiles.js';
-import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt, lengthKm, unitKm, resample, FULL_RATIO, OVER_LIMIT } from './score.js';
+import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt, lengthKm, unitKm, cpuDrawing, FULL_RATIO, ZERO_RATIO, SHIFT_RATIO, OVER_LIMIT, WEIGHTS } from './score.js';
 
 export const PREF = {
   READY: 3, // お題を見せてから描けるまで（秒）
@@ -68,7 +68,7 @@ class PrefBattle extends HostedGame {
       limit: [10, 15, 30, 45, 60, 90].includes(o.limit) ? o.limit : 60,
       strokes: Array.from({ length: n }, () => []), // 人ごとの線（×10 の整数。packStrokes の形）
       fin: Array.from({ length: n }, () => false), // 最後の線が届いたか
-      scores: null, // [{ pct, cover, precise, dev, miss, over, T, len }]（len: 描いた線の長さ km）
+      scores: null, // [{ pct, pos, shape, lenS, shift, cover, precise, dev, miss, over, T, len }]（len: 描いた線の長さ km）
       revealed: false,
       revealT: 0,
       done: false,
@@ -97,7 +97,7 @@ class PrefBattle extends HostedGame {
     const num = (x, lo, hi) => (typeof x === 'number' && Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : 0);
     return Array.from({ length: this.n }, (_, i) => {
       const s = v[i] || {};
-      return { pct: num(s.pct, 0, 100), cover: num(s.cover, 0, 1), precise: num(s.precise, 0, 1), dev: num(s.dev, 0, 1e4), miss: num(s.miss, 0, 1), over: num(s.over, 0, 1e3), T: num(s.T, 0, 100), len: num(s.len, 0, 1e6) };
+      return { pct: num(s.pct, 0, 100), pos: num(s.pos, 0, 1), shape: num(s.shape, 0, 1), lenS: num(s.lenS, 0, 1), shift: num(s.shift, 0, 1e3), cover: num(s.cover, 0, 1), precise: num(s.precise, 0, 1), dev: num(s.dev, 0, 1e4), miss: num(s.miss, 0, 1), over: num(s.over, 0, 1e3), T: num(s.T, 0, 100), len: num(s.len, 0, 1e6) };
     });
   }
 
@@ -149,47 +149,13 @@ class PrefBattle extends HostedGame {
   }
 
   /**
-   * CPU: 時間切れの瞬間に、本物の県境を「うろ覚え」でなぞった線を出す。
-   * 強さで、線のうねり（よわい 7km / ふつう 3.5km / つよい 1.4km）と、描き忘れる割合（35% / 15% / 4%）が変わる
+   * CPU: 時間切れの瞬間に、県境を「だいたい覚えている人」が手で描いたような線を出す（cpuDrawing）。
+   * 強さで、覚えている細かさ・全体のずれ・うねりが変わる
    */
   cpuStep(i, level) {
     const s = this.s;
     if (s.revealed || s.fin[i] || s.t < PREF.READY + s.limit) return;
-    const amp = { 1: 7, 2: 3.5, 3: 1.4 }[level] || 3.5;
-    const skip = { 1: 0.35, 2: 0.15, 3: 0.04 }[level] || 0.15;
-    const view = DATA.view;
-    const out = [];
-    for (const line of prefLines(prefOf(s.code))) {
-      const pts = resample([line], 2, view);
-      if (pts.length < 2) continue;
-      const f1 = 0.08 + Math.random() * 0.1;
-      const f2 = 0.25 + Math.random() * 0.2;
-      const p1 = Math.random() * 6.3;
-      const p2 = Math.random() * 6.3;
-      let cur = [];
-      pts.forEach(([x, y], k) => {
-        if (k % 8 === 0 && Math.random() < skip) {
-          if (cur.length > 1) out.push(cur);
-          cur = [];
-          this._cpuSkip = 8; // この先 8 点（約 16km）は描き忘れ
-        }
-        if (this._cpuSkip > 0) {
-          this._cpuSkip--;
-          return;
-        }
-        const a = pts[Math.max(0, k - 1)];
-        const b = pts[Math.min(pts.length - 1, k + 1)];
-        const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-        const nx = -(b[1] - a[1]) / len;
-        const ny = (b[0] - a[0]) / len;
-        const km = amp * (0.65 * Math.sin(k * f1 + p1) + 0.35 * Math.sin(k * f2 + p2)) + gauss() * amp * 0.12;
-        const u = km / unitKm(view, y);
-        cur.push([x + nx * u, y + ny * u]);
-      });
-      this._cpuSkip = 0;
-      if (cur.length > 1) out.push(cur);
-    }
-    s.strokes[i] = packStrokes(out);
+    s.strokes[i] = packStrokes(cpuDrawing(prefLines(prefOf(s.code)), DATA.view, level, Math.random, gauss));
     s.fin[i] = true;
   }
 
@@ -202,7 +168,7 @@ class PrefBattle extends HostedGame {
     s.scores = s.strokes.map((v) => {
       const lines = unpackStrokes(v, MAP_W, MAP_H);
       const r = scoreDrawing(truth, lines, DATA.view, T);
-      return { pct: r.pct, cover: r3(r.cover), precise: r3(r.precise), dev: Math.round(r.dev * 10) / 10, miss: r3(r.miss), over: Math.round(r.over * 100) / 100, T: Math.round(T * 10) / 10, len: Math.round(lengthKm(lines, DATA.view)) };
+      return { pct: r.pct, pos: r3(r.pos), shape: r3(r.shape), lenS: r3(r.lenS), shift: Math.round(r.shift * 10) / 10, cover: r3(r.cover), precise: r3(r.precise), dev: Math.round(r.dev * 10) / 10, miss: r3(r.miss), over: Math.round(r.over * 100) / 100, T: Math.round(T * 10) / 10, len: Math.round(lengthKm(lines, DATA.view)) };
     });
     s.revealed = true;
     s.revealT = s.t;
@@ -230,7 +196,7 @@ class PrefBattle extends HostedGame {
     const s = this.s;
     const pref = prefOf(s.code);
     const T = tolerance(pref, DATA.view);
-    const sc = s.scores || s.strokes.map(() => ({ pct: 0, cover: 0, precise: 0, dev: 0, miss: 1, over: 0, T, len: 0 }));
+    const sc = s.scores || s.strokes.map(() => ({ pct: 0, pos: 0, shape: 0, lenS: 0, shift: 0, cover: 0, precise: 0, dev: 0, miss: 1, over: 0, T, len: 0 }));
     const pcts = sc.map((x) => x.pct);
     const best = Math.max(...pcts);
     const tops = pcts.map((p, i) => (p === best ? i : -1)).filter((i) => i >= 0);
@@ -251,16 +217,17 @@ class PrefBattle extends HostedGame {
         detail: `一致率 ${x.pct.toFixed(1)}%`,
       })),
       stats: [
-        { label: '一致率', values: sc.map((x) => `${x.pct.toFixed(1)}%`) },
-        { label: '① なぞれた割合（網羅）', values: sc.map((x) => pc(x.cover)) },
-        { label: '② 線の正確さ', values: sc.map((x) => pc(x.precise)) },
-        { label: '③ 線の量（本物 = 1）', values: sc.map((x) => (x.len ? `${x.over.toFixed(2)} 倍${x.over > OVER_LIMIT ? `（×${(OVER_LIMIT / x.over).toFixed(2)} 割引）` : ''}` : '-')) },
+        { label: '一致率（100点満点）', values: sc.map((x) => `${x.pct.toFixed(1)}%`) },
+        { label: `① 位置（${WEIGHTS.pos}点）`, values: sc.map((x) => `${(x.pos * WEIGHTS.pos).toFixed(1)} 点（なぞれた ${pc(x.cover)}・正確さ ${pc(x.precise)}）`) },
+        { label: `② 形（${WEIGHTS.shape}点）`, values: sc.map((x) => (x.len ? `${(x.shape * WEIGHTS.shape).toFixed(1)} 点（${x.shift.toFixed(1)}km ずらして比較）` : '-')) },
+        { label: `③ 長さ（${WEIGHTS.len}点）`, values: sc.map((x) => (x.len ? `${(x.lenS * x.shape * WEIGHTS.len).toFixed(1)} 点（線の量 本物の ${x.over.toFixed(2)} 倍）` : '-')) },
+        { label: '線が多すぎの割引', values: sc.map((x) => (x.over > OVER_LIMIT ? `×${(OVER_LIMIT / x.over).toFixed(2)}` : 'なし')) },
         { label: '描いた線の平均のずれ', values: sc.map((x) => (x.len ? `${x.dev.toFixed(1)} km` : '-')) },
         { label: '取りこぼした県境', values: sc.map((x) => pc(x.miss)) },
         { label: '描いた線の長さ', values: sc.map((x) => `約 ${x.len} km`) },
         { label: '本物の県境の長さ', text: `約 ${Math.round(truthLen)} km（となりと接している陸の境だけ）` },
-        { label: '許容距離', text: `満点 ${(T * FULL_RATIO).toFixed(1)} km 以内 → ${T.toFixed(1)} km で 0 点（県境の大きさで決まる）` },
-        { label: '計算式', text: `一致率 = 2×①×②÷(①+②)。③が ${OVER_LIMIT} 倍を超えると割引。距離は緯度ごとの縮尺で地上の km に直して 0.25km ごとに測定` },
+        { label: '距離の目安', text: `県境から ${(T * FULL_RATIO).toFixed(1)} km 以内は満点 → ${(T * ZERO_RATIO).toFixed(1)} km でなめらかに 0 点（県境の大きさで決まる）` },
+        { label: '計算式', text: `①位置 = なぞれた割合と正確さの調和平均。②形 = 線を丸ごと最大 ${(T * SHIFT_RATIO).toFixed(1)}km ずらして一番合う所で同じ計算（ずらした分だけ最大3割引）。③長さ = 線の量が本物の0.8〜1.25倍で満点（×②）。線が本物の ${OVER_LIMIT} 倍を超えると全体を割引` },
         { label: 'となりの都道府県', text: pref.neighbors.map((c) => DATA.prefs.find((p) => p.code === c)?.name).filter(Boolean).join('・') },
       ],
       score: [
@@ -695,14 +662,14 @@ class PrefBattle extends HostedGame {
       g.rect(C.x, C.y, C.w, C.h);
       g.clip();
       g.globalAlpha = bandT;
-      this._strokeLines(g, truth, map, 'rgba(255,240,150,0.36)', 2 * T * pxPerKm);
+      this._strokeLines(g, truth, map, 'rgba(255,240,150,0.36)', 2 * T * ZERO_RATIO * pxPerKm);
       this._strokeLines(g, truth, map, 'rgba(255,225,90,0.5)', 2 * T * FULL_RATIO * pxPerKm);
       g.restore();
       // 凡例（地図の左下）
       g.save();
       g.globalAlpha = bandT;
       g.font = '800 12px "M PLUS Rounded 1c", sans-serif';
-      const lines2 = [`🟨 濃い帯: 県境から ${(T * FULL_RATIO).toFixed(1)}km 以内 = 満点`, `🟨 うすい帯: ${T.toFixed(1)}km 以内 = 遠いほど減点（外は 0 点）`];
+      const lines2 = [`🟨 濃い帯: 県境から ${(T * FULL_RATIO).toFixed(1)}km 以内 = 満点`, `🟨 うすい帯: ${(T * ZERO_RATIO).toFixed(1)}km 以内 = 遠いほど減点（外は 0 点）`];
       const bw = Math.max(...lines2.map((x) => g.measureText(x).width)) + 16;
       const bx = C.x + 8;
       const by = C.y + C.h - 8 - lines2.length * 17 - 8;
@@ -794,7 +761,7 @@ class PrefBattle extends HostedGame {
           const p = this.who(i);
           const num = h('b', null, '0.0%');
           const sx = s.scores[i];
-          const det = h('small.pb-detail', null, `なぞれた ${(sx.cover * 100).toFixed(1)}% × 正確さ ${(sx.precise * 100).toFixed(1)}%${sx.over > OVER_LIMIT ? `・線が多すぎ ×${(OVER_LIMIT / sx.over).toFixed(2)}` : ''}・平均のずれ ${sx.dev.toFixed(1)}km`);
+          const det = h('small.pb-detail', null, `位置 ${(sx.pos * WEIGHTS.pos).toFixed(1)} + 形 ${(sx.shape * WEIGHTS.shape).toFixed(1)} + 長さ ${(sx.lenS * sx.shape * WEIGHTS.len).toFixed(1)}${sx.over > OVER_LIMIT ? `・線が多すぎ ×${(OVER_LIMIT / sx.over).toFixed(2)}` : ''}・平均のずれ ${sx.dev.toFixed(1)}km`);
           const el = h('div.g2d-res', { style: { '--c': p.col } }, h('span.pb-crown', null, ''), `${p.icon} ${p.name}　`, num, det);
           return { el, num, i, det };
         });

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { angleError, anglePoints } from '../src/games/angleDuel/index.js';
-import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt, MAX_POINTS, unitKm, lengthKm } from '../src/games/prefBattle/score.js';
+import { prefLines, tolerance, scoreDrawing, packStrokes, unpackStrokes, eraseAt, MAX_POINTS, unitKm, lengthKm, cpuDrawing } from '../src/games/prefBattle/score.js';
 
 const DATA = JSON.parse(fs.readFileSync(new URL('../src/games/prefBattle/japan-prefs.json', import.meta.url)));
 const pref = (name) => DATA.prefs.find((p) => p.name === name);
@@ -42,7 +42,7 @@ test('県境データ: 47 都道府県があり、県境は陸の境だけ（北
   assert.ok(!pref('広島県').neighbors.includes(38));
 });
 
-test('一致率: 本物どおりは 100%、ずれるほど・半分だけ・塗りつぶし・別の県は低い', () => {
+test('一致率（新しい採点）: 本物どおりは 100%、少しのずれは満点近く、ずれるほど・半分だけ・塗りつぶし・別の県は低い', () => {
   const V = DATA.view;
   for (const name of ['埼玉県', '香川県', '長野県', '岐阜県', '青森県', '鹿児島県']) {
     const p = pref(name);
@@ -52,29 +52,49 @@ test('一致率: 本物どおりは 100%、ずれるほど・半分だけ・塗�
     const shift = (km) => truth.map((l) => l.map(([x, y]) => [x + km / k, y]));
     const s = (lines) => scoreDrawing(truth, lines, V, T).pct;
     assert.equal(s(truth), 100, name);
-    // 満点の距離（T/4）以内のずれは 100%
-    assert.equal(s(shift(T * 0.2)), 100, `${name} ずれ ${T * 0.2}km`);
-    assert.ok(s(shift(T * 0.5)) > 50 && s(shift(T * 0.5)) < 98, `${name} ずれ T/2: ${s(shift(T * 0.5))}`);
-    assert.ok(s(shift(T * 0.8)) < s(shift(T * 0.5)), `${name} 遠いほど低い`);
-    assert.ok(s(truth.map((l) => l.slice(0, l.length >> 1))) < 85, `${name} 半分`);
-    // 同じ所を 2 回なぞっても下がらない
-    assert.equal(s([...truth, ...truth]), 100, `${name} 2 回なぞる`);
+    assert.ok(s(shift(T * 0.25)) >= 99, `${name} 少しのずれ ${s(shift(T * 0.25))}`);
+    assert.ok(s(shift(T)) > 70 && s(shift(T)) < 99, `${name} ずれ T: ${s(shift(T))}`);
+    assert.ok(s(shift(T * 3)) < s(shift(T)), `${name} 遠いほど低い`);
+    assert.ok(s(truth.map((l) => l.slice(0, l.length >> 1))) < 75, `${name} 半分`);
+    assert.equal(s([...truth, ...truth]), 100, `${name} 2 回なぞっても下がらない`);
     const [x0, y0, x1, y1] = p.borderBox;
     const scribble = [Array.from({ length: 400 }, (_, i) => [x0 + ((i * 37) % 100) / 100 * (x1 - x0), y0 + ((i * 61) % 100) / 100 * (y1 - y0)])];
-    assert.ok(s(scribble) < 15, `${name} 塗りつぶし ${s(scribble)}`);
+    assert.ok(s(scribble) < 25, `${name} 塗りつぶし ${s(scribble)}`);
     assert.equal(s([]), 0);
-    // 平均のずれは km で測れている
     const r = scoreDrawing(truth, shift(3), V, T);
     assert.ok(r.dev > 0.5 && r.dev <= 3.05, `${name} 平均のずれ ${r.dev}`);
   }
   assert.ok(scoreDrawing(prefLines(pref('埼玉県')), prefLines(pref('鹿児島県')), V, tolerance(pref('埼玉県'), V)).pct === 0);
-  // 海岸線まで描くと（県全体の形）、県境の外の線が多いので下がる
   const kana = pref('神奈川県');
   const T = tolerance(kana, V);
   const truth = prefLines(kana);
   const [x0, y0, x1, y1] = kana.box;
   const coast = [[x1, y0], [x1, y1], [x0, y1]];
   assert.ok(scoreDrawing(truth, [...truth, coast], V, T).pct < scoreDrawing(truth, truth, V, T).pct);
+});
+
+test('CPU の線: ひと筆書きでつながっていて（とぎれとぎれでない）、本物そのままではなく、強いほど点が高い', () => {
+  const V = DATA.view;
+  for (const name of ['埼玉県', '長野県', '鹿児島県', '東京都']) {
+    const p = pref(name);
+    const T = tolerance(p, V);
+    const truth = prefLines(p);
+    const avg = (lv) => {
+      let sum = 0;
+      for (let i = 0; i < 12; i++) {
+        const d = cpuDrawing(truth, V, lv);
+        assert.ok(d.length <= truth.length, `${name} 線の本数 ${d.length}`);
+        // 線の中で点の間が大きく飛ばない
+        for (const l of d) for (let j = 1; j < l.length; j++) assert.ok(lengthKm([[l[j - 1], l[j]]], V) < 5, `${name} とぎれ`);
+        sum += scoreDrawing(truth, d, V, T).pct;
+      }
+      return sum / 12;
+    };
+    const [a1, a2, a3] = [avg(1), avg(2), avg(3)];
+    assert.ok(a1 < a2 && a2 < a3, `${name} 強さ ${a1} ${a2} ${a3}`);
+    assert.ok(a3 < 99.5, `${name} つよいでも本物そのままではない ${a3}`);
+    assert.ok(a1 > 25, `${name} よわい ${a1}`);
+  }
 });
 
 test('距離: メルカトルの縮尺を緯度で直して地上の km で測る', () => {
