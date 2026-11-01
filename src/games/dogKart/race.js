@@ -577,7 +577,7 @@ export function unpackNet(p) {
     foodTaken: Array.isArray(p.fo) ? p.fo.slice(0, 400) : [],
     proj: Array.isArray(p.pr) ? p.pr.slice(0, 32).map((a) => row(a, ['id', 'o', 'x', 'z', 'vx', 'vz', 'life', 'age', 'b', 'f', 't', 'd'])) : [],
     houses: Array.isArray(p.hs) ? p.hs.slice(0, 8).map((a) => row(a, ['id', 'o', 't', 'x', 'z', 'age'])) : [],
-    bananas: Array.isArray(p.bn) ? p.bn.slice(0, 16).map((a) => row(a, ['id', 'o', 'x', 'z', 'life', 'age'])) : [],
+    bananas: Array.isArray(p.bn) ? p.bn.slice(0, ITEMS.BANANA_MAX + 2).map((a) => row(a, ['id', 'o', 'x', 'z', 'life', 'age'])) : [],
     logs: Array.isArray(p.lg) ? p.lg.slice(0, ITEMS.LOG_MAX).map((a) => row(a, ['id', 'o', 's', 'a', 'b', 'x1', 'z1', 'x2', 'z2'])) : [],
   };
 }
@@ -1066,7 +1066,7 @@ export function unpackNetBin(u8, prev = null) {
       if (e.t) ev.push(e);
     }
     snap.proj = snap.proj.slice(0, 32);
-    snap.bananas = snap.bananas.slice(0, 16);
+    snap.bananas = snap.bananas.slice(0, ITEMS.BANANA_MAX + 2);
     snap.houses = snap.houses.slice(0, 8);
     return { snap, ev };
   } catch {

@@ -57,7 +57,7 @@ export const ITEMS = {
   BANANA_LIFE: 999, // 時間では消えない（表示用の値）
   BANANA_HIT_R: 1.7,
   BANANA_SPIN: 1.05,
-  BANANA_MAX: 14, // コースに置けるバナナの数（横一列バナナの 7 本も入る）
+  BANANA_MAX: 20, // コースに置けるバナナの数（横一列バナナの 7 本も入る）
   BANANA_ROW_N: 7, // 横一列バナナの本数（道幅いっぱい。すき間はなく、よけるには芝生へ）
   BANANA_ROW_BACK: 6, // 自分の何 m 後ろに並べるか
   LOG_BACK: 14, // 倒木: 自分の何 m 後ろに倒れるか
