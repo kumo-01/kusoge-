@@ -29,28 +29,51 @@ export function nextRandom(s) {
 }
 
 /**
- * 順位に応じてアイテムを選ぶ。rank: 1 = 先頭, total: 台数
- * - 飼い主登場・ブーストは後ろの順位ほど出やすい
- * - フリスビー・犬小屋は 2 位以下だけ / ガードは最下位以外 / 豪雨は最下位だけ
- * - 2枚フリスビーは 2 位以下、2個犬小屋は後ろの順位ほど出やすい
- * - 横一列バナナ・倒木は（後ろの車の邪魔なので）前の順位ほど出やすい。最下位には出ない
+ * 順位ごとのアイテムの出やすさ（％）。ITEM_TABLE[台数][順位 - 1] = 下の並び順の 12 個
+ * 並び順: ホネ / バナナ / ブースト / ガード / フリスビー / 飼い主 / 豪雨 / 犬小屋 / 2枚フリスビー / 横一列バナナ / 2個犬小屋 / 倒木
  */
+const TOP = [8, 32, 19, 25, 0, 0, 0, 0, 0, 9, 0, 7];
+const LAST = [20, 3, 23, 0, 6, 22, 9, 9, 3, 0, 5, 0];
+export const ITEM_TABLE = {
+  2: [TOP, LAST],
+  3: [TOP, [14, 15, 21, 12, 8, 8, 0, 8, 3, 4, 3, 4], LAST],
+  4: [TOP, [11, 20, 20, 16, 6, 3, 0, 7, 3, 6, 3, 5], [17, 11, 22, 8, 8, 13, 0, 8, 3, 3, 4, 3], LAST],
+  5: [TOP, [10, 22, 20, 18, 6, 2, 0, 6, 3, 6, 2, 5], [14, 15, 21, 12, 8, 8, 0, 8, 3, 4, 3, 4], [18, 9, 23, 7, 9, 15, 0, 8, 3, 2, 4, 2], LAST],
+  6: [
+    TOP,
+    [9, 23, 19, 19, 5, 2, 0, 6, 2, 7, 2, 6],
+    [12, 18, 20, 15, 7, 5, 0, 7, 3, 5, 3, 5],
+    [16, 13, 22, 9, 8, 11, 0, 8, 3, 3, 4, 3],
+    [19, 8, 23, 5, 9, 16, 0, 9, 4, 1, 5, 1],
+    LAST,
+  ],
+  7: [
+    TOP,
+    [9, 24, 19, 20, 5, 1, 0, 5, 2, 7, 2, 6],
+    [11, 20, 20, 16, 6, 3, 0, 7, 3, 6, 3, 5],
+    [14, 15, 21, 12, 8, 8, 0, 8, 3, 4, 3, 4],
+    [17, 11, 22, 8, 8, 13, 0, 8, 3, 3, 4, 3],
+    [19, 7, 23, 5, 9, 17, 0, 9, 4, 1, 5, 1],
+    LAST,
+  ],
+};
+const TABLE_ORDER = [
+  ITEMS.BONE, ITEMS.BANANA, ITEMS.BOOST, ITEMS.GUARD, ITEMS.FRISBEE, ITEMS.OWNER,
+  ITEMS.RAIN, ITEMS.HOUSE, ITEMS.FRISBEE2, ITEMS.BANANA_ROW, ITEMS.HOUSE2, ITEMS.LOG,
+];
+
+/** 順位に応じたアイテムの重み（w[アイテム番号]）。rank: 1 = 先頭, total: 台数 */
 export function itemWeights(rank, total) {
-  const f = total > 1 ? (rank - 1) / (total - 1) : 0; // 0 = 先頭, 1 = 最下位
-  const last = rank === total && total > 1;
-  const w = [];
-  w[ITEMS.BONE] = 0.24;
-  w[ITEMS.BANANA] = 0.2;
-  w[ITEMS.BOOST] = 0.1 + 0.18 * f;
-  w[ITEMS.GUARD] = last ? 0 : 0.15;
-  w[ITEMS.FRISBEE] = rank >= 2 ? 0.14 : 0;
-  w[ITEMS.OWNER] = 0.32 * f * f;
-  w[ITEMS.RAIN] = last ? 0.14 : 0;
-  w[ITEMS.HOUSE] = rank >= 2 ? 0.05 + 0.1 * f : 0;
-  w[ITEMS.FRISBEE2] = rank >= 2 ? 0.05 : 0;
-  w[ITEMS.BANANA_ROW] = last ? 0 : 0.03 + 0.07 * (1 - f);
-  w[ITEMS.HOUSE2] = rank >= 2 ? 0.07 * f * f : 0;
-  w[ITEMS.LOG] = last ? 0 : 0.02 + 0.06 * (1 - f);
+  let row;
+  if (total <= 1) row = TOP;
+  else if (ITEM_TABLE[total]) row = ITEM_TABLE[total][Math.max(1, Math.min(total, rank)) - 1];
+  else {
+    // 表にない台数: 7 台の表の近い順位を使う
+    const f = (Math.max(1, Math.min(total, rank)) - 1) / (total - 1);
+    row = ITEM_TABLE[7][Math.round(f * 6)];
+  }
+  const w = new Array(ITEMS.COUNT).fill(0);
+  TABLE_ORDER.forEach((it, j) => (w[it] = row[j]));
   return w;
 }
 
@@ -356,9 +379,8 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
   // バナナ
   for (let i = s.bananas.length - 1; i >= 0; i--) {
     const bn = s.bananas[i];
-    bn.age += dt;
-    bn.life -= dt;
-    let remove = bn.life <= 0;
+    bn.age += dt; // バナナは時間では消えない（踏まれるか、ホネが当たるか、置ける数を超えたときだけ消える）
+    let remove = false;
     if (!remove) {
       for (const k of karts) {
         if (k.ow > 0) continue;

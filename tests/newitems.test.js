@@ -150,3 +150,35 @@ test('倒木: 近くにもう 1 本置くときは同じ側に倒れる（道が
     assert.equal(Math.sign(a.a + a.b), Math.sign(b.a + b.b), '同じ側');
   }
 });
+
+test('アイテム確率表: 各行は合計 100、1 位と最下位は台数によらず同じ', () => {
+  for (let total = 2; total <= 7; total++) {
+    for (let rank = 1; rank <= total; rank++) {
+      const w = itemWeights(rank, total);
+      const sum = w.reduce((a, b) => a + (b || 0), 0);
+      assert.ok(Math.abs(sum - 100) <= 1, `${total}台 ${rank}位 = ${sum}`);
+    }
+    assert.equal(itemWeights(1, total)[ITEMS.BANANA], 32);
+    assert.equal(itemWeights(total, total)[ITEMS.OWNER], 22);
+  }
+  assert.equal(itemWeights(4, 7)[ITEMS.BOOST], 21);
+});
+
+test('飼い主: 1 位になったら 0.5 秒ほどで終わる / バナナは時間では消えない', () => {
+  const sim = race();
+  const [a, b] = sim.s.karts;
+  const back = sim.prog[0] < sim.prog[1] ? a : b;
+  back.ow = 6;
+  // 1 位の車を後ろへ動かして、飼い主の車を 1 位にする
+  const front = back === a ? b : a;
+  front.lap = -1;
+  sim.step(DT, [0, 0]);
+  assert.ok(back.ow <= ITEMS.OWNER_LEAD_END + 1e-9, `1 位になったので短くなる (${back.ow})`);
+  for (let i = 0; i < 40; i++) sim.step(DT, [0, 0]);
+  assert.equal(back.ow, 0, '0.5 秒で終わる');
+  // バナナ: 誰も踏まなければずっと残る
+  const sim2 = race();
+  sim2.s.bananas.push({ id: 999, o: 0, x: 9999, z: 9999, life: ITEMS.BANANA_LIFE, age: 0 });
+  for (let i = 0; i < 60 * 70; i++) sim2.step(DT, [0, 0]);
+  assert.ok(sim2.s.bananas.some((bn) => bn.id === 999), '70 秒たっても残る');
+});

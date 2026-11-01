@@ -810,7 +810,7 @@ test('フリスビー: 前の相手を追尾して当てる。飛べる距離に
   k.item = ITEMS.FRISBEE;
   sim2.step(DT, [IN.ITEM, 0]);
   assert.equal(sim2.s.proj[0].t, -1);
-  for (let i = 0; i < 60 * 4; i++) sim2.step(DT, [0, 0]);
+  for (let i = 0; i < 60 * 8; i++) sim2.step(DT, [0, 0]);
   assert.equal(sim2.s.proj.filter((p) => p.f).length, 0, 'range limit');
 });
 

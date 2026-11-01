@@ -50,11 +50,11 @@ export const ITEMS = {
   BOX_RADIUS: 2.2,
   ROULETTE: 1.1, // アイテムが決まるまでのルーレット時間
   BONE_SPEED: 58,
-  BONE_LIFE: 2.6,
+  BONE_LIFE: 5, // ホネが飛んでいる時間（秒）
   BONE_BOUNCES: 2,
   BONE_HIT_R: 2.0,
   BONE_SPIN: 1.3,
-  BANANA_LIFE: 25,
+  BANANA_LIFE: 999, // 時間では消えない（表示用の値）
   BANANA_HIT_R: 1.7,
   BANANA_SPIN: 1.05,
   BANANA_MAX: 14, // コースに置けるバナナの数（横一列バナナの 7 本も入る）
@@ -68,11 +68,12 @@ export const ITEMS = {
   GUARD_TIME: 20, // ガードの持続（秒）。何かに当たると 1 回で消える
   FRISBEE_SPEED: 46, // 自分の速度に足す速さ
   FRISBEE_LATERAL: 22, // コースに沿って飛びながら横に寄る速さ（m/s）
-  FRISBEE_RANGE: 130, // 飛べる距離。これを超えると消える
+  FRISBEE_RANGE: 260, // 飛べる距離。これを超えると消える
   FRISBEE_BOUNCES: 1,
   INVULN_AFTER_SPIN: 1.1, // スピン後の無敵時間（連続でハメられないように）
   OWNER_TIME: 6, // 飼い主に引っ張ってもらえる時間（秒、最下位のとき）。その間は無敵で自動で走る
   OWNER_MIN: 1, // 同（1 位のとき）。順位が上がるほど短くなる
+  OWNER_LEAD_END: 0.5, // 飼い主モード中に 1 位になったら、この秒数で終わる
   OWNER_FACTOR: 1.14, // 飼い主モード中の最高速の倍率
   OWNER_SPIN: 1.4, // 飼い主にはね飛ばされた車のスピン時間
   HOUSE_DELAY: 2.2, // 犬小屋を使ってから落ちてくるまでの時間（落下地点は1位を追いかける）

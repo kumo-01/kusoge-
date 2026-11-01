@@ -88,6 +88,8 @@ export class RaceSim {
       if (k.ow > 0) {
         // 飼い主モード: 飼い主が引っ張って自動で走る（操作はできない）。ゴールしたら終わり
         k.ow = active && !k.fin ? Math.max(0, k.ow - dt) : 0;
+        // 1 位になったら少しで終わる（そのまま独走しないように）
+        if (k.ow > ITEMS.OWNER_LEAD_END && this.rankOf(k.i, this.prog) === 1) k.ow = ITEMS.OWNER_LEAD_END;
         if (k.ow > 0) {
           inp = ownerInput(this, k) | (inp & IN.TAP ? IN.TAP : 0);
           k.boost = Math.max(k.boost, 0.2);
@@ -479,7 +481,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
   if (Array.isArray(r.bananas)) {
     for (const b of r.bananas.slice(0, ITEMS.BANANA_MAX + 2)) {
       if (!b || typeof b !== 'object') continue;
-      s.bananas.push({ id: int(b.id), o: owner(b.o), x: num(b.x), z: num(b.z), life: num(b.life, 0, 0, 60), age: num(b.age, 0, 0, 60) });
+      s.bananas.push({ id: int(b.id), o: owner(b.o), x: num(b.x), z: num(b.z), life: num(b.life, 0, 0, 999), age: num(b.age, 0, 0, 6000) });
     }
   }
   if (Array.isArray(r.houses)) {
@@ -1026,7 +1028,7 @@ export function unpackNetBin(u8, prev = null) {
     if (!withBananas) {
       // 載っていない: 前に受け取ったバナナの、残り時間を進めて使う（バナナは動かない）
       const dt = Math.max(0, (snap.tick - (prev?.tick ?? snap.tick)) / 60);
-      if (prev?.bananas) snap.bananas = prev.bananas.map((b) => ({ ...b, life: b.life - dt, age: b.age + dt })).filter((b) => b.life > 0);
+      if (prev?.bananas) snap.bananas = prev.bananas.map((b) => ({ ...b, age: b.age + dt }));
       else snap.partial = true;
     }
     const nh = r.u8();
