@@ -22,6 +22,7 @@ export function mount(el, app) {
         h('div.hero-dog.bounce-b', { html: dogAvatar('corgi', 110) })),
       h('h1.logo', null, h('span.logo-sub', null, '2〜3人で遊ぶミニゲーム集'), 'わんわんパーティー'),
       h('p.lead', null, '招待URLを送るだけで、友だちとオンライン対戦！'),
+      h('p.app-version', null, typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'),
     );
   }
 

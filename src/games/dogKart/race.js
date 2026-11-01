@@ -5,7 +5,7 @@
 import { RACE, ITEMS, IN, RAIN, TIMING, FOOD, SCORE } from './constants.js';
 import { createKart, stepKart, collideKarts } from './physics.js';
 import { updateItems, useItem, spinKart } from './items.js';
-import { npcInput, ownerInput } from './npc.js';
+import { npcInput, ownerInput, ownerJump } from './npc.js';
 import { stepTiming, pickChances } from './timing.js';
 import { formatTime } from '../../core/util.js';
 
@@ -92,6 +92,7 @@ export class RaceSim {
         if (k.ow > ITEMS.OWNER_LEAD_END && this.rankOf(k.i, this.prog) === 1) k.ow = ITEMS.OWNER_LEAD_END;
         if (k.ow > 0) {
           inp = ownerInput(this, k) | (inp & IN.TAP ? IN.TAP : 0);
+          if (active) ownerJump(this, k); // 前の倒木は飛び越える
           k.boost = Math.max(k.boost, 0.2);
           k.slow = 0;
           k.wet = 0;
@@ -395,7 +396,7 @@ const int = (v, d = 0, lo = 0, hi = 1e9) => Math.round(num(v, d, lo, hi));
 function sanitizeKart(r, i, prev) {
   const k = { ...prev };
   if (!r || typeof r !== 'object') return k;
-  for (const f of ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'al', 'at', 'as', 'tn']) {
+  for (const f of ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th', 'spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'roll2', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'al', 'at', 'as', 'tn']) {
     k[f] = num(r[f], prev[f] ?? 0);
   }
   k.tw = num(r.tw, 0, 0, TIMING.WINDOW);
@@ -502,7 +503,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
 // 値は見た目に困らない細かさまで丸める（位置 1cm・向き 0.001rad）。タイミングのチャンス地点（tc）は試合の間変わらないので、完全な状態でだけ送る。
 const NET_HOT = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th'];
 const NET_HOT_DIGITS = [2, 2, 2, 2, 3, 2, 2, 2, 2, 2];
-const NET_COLD = ['spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'item2', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow', 'in'];
+const NET_COLD = ['spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'roll2', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'item2', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow', 'in'];
 const NET_COLD_DEFAULT = NET_COLD.map((f) => (f === 'spinDur' || f === 'ms' ? 1 : 0));
 const NET_COLD_DIGITS = NET_COLD.map((f) => (f === 'ft' || f === 'lapStart' || f === 'best' ? 3 : 2));
 const PHASES = ['countdown', 'racing', 'finished'];
@@ -592,7 +593,7 @@ export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'bloc
 const BIN_VERSION = 3;
 // 車の項目のうち、ふだんは 0 で、0 でないときだけ載せるもの（タイマー・はじかれ・高さなど。0 でない間は毎回変わる）。
 // よく 0 以外になるものを先に並べる（印は可変長なので、先頭 7 項目までなら 1 バイト）
-const BIN_DYN = ['kx', 'kz', 'gd', 'boost', 'roll', 'inv', 'spin', 'bump', 'y', 'vy', 'wrong', 'slow', 'grass', 'rc', 'bc', 'tw', 'tb', 'wet', 'ow'];
+const BIN_DYN = ['kx', 'kz', 'gd', 'boost', 'roll', 'roll2', 'inv', 'spin', 'bump', 'y', 'vy', 'wrong', 'slow', 'grass', 'rc', 'bc', 'tw', 'tb', 'wet', 'ow'];
 // めったに変わらない項目（チェックポイント・周回・ラップの時刻・アイテム・フード・最高速の倍率）。変わったときだけ載せる
 // （印は「印 × 2 + 1」を可変長で送る。0 は「この配信には載せていない」）
 const BIN_SLOW = ['cp', 'fd', 'ms', 'lap', 'item', 'item2', 'spinDur', 'fin', 'ft', 'lapStart', 'best'];

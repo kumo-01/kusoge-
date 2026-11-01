@@ -37,6 +37,29 @@ export function ownerInput(sim, k) {
 }
 
 /**
+ * 飼い主モード: 前に倒木があったら、飛び越えられるタイミングでジャンプする（倒木は高さ 1.2m より上なら当たらない）。
+ * 跳んだら true
+ */
+export function ownerJump(sim, k) {
+  const track = sim.track;
+  const logs = sim.s.logs;
+  if (!logs?.length || k.y > 0.05 || k.vy > 0 || k.sp < 8) return false;
+  const p = track.project(k.x, k.z);
+  const reach = KART.RADIUS + ITEMS.LOG_R + 1;
+  for (const lg of logs) {
+    const ds = track.wrapDS(lg.s - p.s);
+    if (p.lat < lg.a - reach || p.lat > lg.b + reach) continue;
+    // 跳んでから 1.2m を超えるまで約 0.12 秒、落ちてくるまで約 0.68 秒。その間に倒木の上を通るように
+    const t = (ds - reach) / k.sp;
+    if (t > 0.1 && t < 0.3) {
+      k.vy = ITEMS.OWNER_JUMP;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * NPC の今回の入力を決める
  * @param {import('./race.js').RaceSim} sim
  */

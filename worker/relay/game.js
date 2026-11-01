@@ -199,6 +199,7 @@ export class Game {
       const k = sim.s.karts[a.kart | 0];
       k.item = 0;
       k.item2 = 0;
+      k.roll2 = 0;
       k.roll = 1.1;
     }
   }

@@ -369,6 +369,13 @@ p {
   color: var(--ink-soft);
   letter-spacing: 0.1em;
 }
+.app-version {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  opacity: 0.8;
+  margin: 2px 0 0;
+  letter-spacing: 0.05em;
+}
 .lead {
   color: var(--ink-soft);
 }
@@ -1127,7 +1134,7 @@ body[data-screen='game'] .app-main {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: rgba(255, 210, 63, 0.9);
+  background: rgba(255, 255, 255, 0.35);
   border: 3px solid rgba(255, 255, 255, 0.9);
   display: flex;
   align-items: center;
@@ -1138,8 +1145,11 @@ body[data-screen='game'] .app-main {
   text-shadow: none;
   box-shadow: 0 3px 0 rgba(0, 0, 0, 0.15);
 }
-.hud-item2[hidden] {
-  display: none;
+.hud-item2.has-item {
+  background: rgba(255, 210, 63, 0.9);
+}
+.hud-item2.rolling {
+  background: rgba(255, 111, 145, 0.8);
 }
 .hud-item2.multi {
   font-size: 0.8rem;

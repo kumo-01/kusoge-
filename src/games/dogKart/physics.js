@@ -30,7 +30,8 @@ export function createKart(index, pos, boss = false, npc = index >= 2, style = i
     lap: 0,
     cp: 0,
     item: 0,
-    item2: 0, // 2 個目に持っているアイテム（1 個目を使うと前に出る）
+    item2: 0,
+    roll2: 0, // 2 つ目のルーレット（ルーレット中にもう 1 つ引いたとき） // 2 個目に持っているアイテム（1 個目を使うと前に出る）
     roll: 0, // アイテムルーレット残り時間
     rc: 0, // 復帰のクールダウン
     wrong: 0, // 逆走している時間

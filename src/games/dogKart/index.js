@@ -889,6 +889,7 @@ class DogKartGame {
         item: sk.item,
         item2: sk.item2 || 0,
         roll: sk.roll,
+        roll2: sk.roll2 || 0,
         wrong: sk.wrong,
         phase: s.phase,
         tw,

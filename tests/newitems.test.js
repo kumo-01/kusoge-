@@ -182,3 +182,56 @@ test('飼い主: 1 位になったら 0.5 秒ほどで終わる / バナナは�
   for (let i = 0; i < 60 * 70; i++) sim2.step(DT, [0, 0]);
   assert.ok(sim2.s.bananas.some((bn) => bn.id === 999), '70 秒たっても残る');
 });
+
+test('ルーレット中でも、もう 1 つ引ける（2 つ同時に回り、空いている枠に入る）', () => {
+  const sim = race();
+  const k = sim.s.karts[0];
+  Object.assign(k, { item: 0, item2: 0, roll: 0.5, roll2: 0 });
+  const bp = sim.boxPos[0];
+  sim.s.boxes[0] = 0;
+  Object.assign(k, { x: bp.x, z: bp.z, y: 0 });
+  sim.step(DT, [0, 0]);
+  assert.ok(k.roll2 > 0, '2 つ目のルーレットが回る');
+  // 3 つ目は引けない
+  const bp2 = sim.boxPos[1];
+  sim.s.boxes[1] = 0;
+  Object.assign(k, { x: bp2.x, z: bp2.z });
+  sim.step(DT, [0, 0]);
+  assert.equal(sim.s.boxes[1], 0, '3 つ目は取れない');
+  for (let i = 0; i < 90; i++) sim.step(DT, [0, 0]);
+  assert.ok(k.item > 0 && k.item2 > 0, '2 つとも入る');
+  assert.equal(k.roll, 0);
+  assert.equal(k.roll2, 0);
+  // 配信形式でも roll2 が届く
+  Object.assign(k, { item: 0, item2: 0, roll: 0.4, roll2: 0.9 });
+  const enc = new NetBinEncoder();
+  const d = unpackNetBin(enc.encode(sim.s), null);
+  assert.ok(Math.abs(d.snap.karts[0].roll2 - 0.9) < 0.02);
+});
+
+test('飼い主モード: 前の倒木はジャンプで飛び越える（ぶつからない）', () => {
+  let jumped = 0;
+  let blocked = 0;
+  for (const lat of [-3, 0, 3]) {
+    const sim = race();
+    const k = sim.s.karts[0];
+    const p = track.project(k.x, k.z);
+    // 40m 先に、道全体をふさぐ倒木を置く（自分の横位置を必ずふさぐ）
+    const s0 = p.s + 40;
+    const l1 = track.pointAt(s0, -track.wallDist);
+    const l2 = track.pointAt(s0, track.wallDist);
+    sim.s.logs.push({ id: 900, o: 1, s: s0, a: -track.wallDist, b: track.wallDist, x1: l1.x, z1: l1.z, x2: l2.x, z2: l2.z });
+    const st = track.pointAt(p.s, lat);
+    Object.assign(k, { x: st.x, z: st.z, h: st.h, sp: 36, ow: 6 });
+    let maxY = 0;
+    for (let i = 0; i < 90; i++) {
+      sim.step(DT, [0, 0]);
+      maxY = Math.max(maxY, k.y);
+      if (k.ow <= 0) k.ow = 6;
+    }
+    if (maxY > 1.2) jumped++;
+    if (track.wrapDS(track.project(k.x, k.z).s - s0) < 5) blocked++;
+  }
+  assert.equal(jumped, 3, '跳ぶ');
+  assert.equal(blocked, 0, '倒木の先へ進める');
+});

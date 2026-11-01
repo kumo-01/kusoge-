@@ -22,7 +22,7 @@ export class Hud {
     this.speedBar = h('div.hud-speed-bar-fill');
     this.itemIcon = h('div.hud-item-icon', null, '');
     this.itemName = h('div.hud-item-name', null, 'アイテムなし');
-    this.item2 = h('div.hud-item2', { hidden: true }, '');
+    this.item2 = h('div.hud-item2', null, '');
     this.itemSlot = h('div.hud-item', { 'data-ctl': '', onpointerdown: (e) => { e.preventDefault(); this.touch?.pressItem(); } }, this.item2, this.itemIcon, this.itemName, h('div.hud-item-key', null, 'Space'), h('div.hud-item-tap', null, 'タップ'));
     this.net = h('div.hud-net', null, '');
     this.center = h('div.hud-center');
@@ -197,30 +197,42 @@ export class Hud {
     this.speedBar.classList.toggle('boost', d.boost > 0);
     this.boostEdge.classList.toggle('on', d.boost > 0);
 
+    // 枠は 2 つ（大きい丸 = 1 個目、左上の小さな丸 = 2 個目）。ルーレットは空いている枠で回す
+    const ROLL_ICONS = ['🦴', '🍌', '⚡', '🛡️', '🥏', '🧑', '☔', '🏠'];
+    const rollIcon = (off) => ROLL_ICONS[(Math.floor(performance.now() / 90) + off) % ROLL_ICONS.length];
+    const rolls = (d.roll > 0 ? 1 : 0) + (d.roll2 > 0 ? 1 : 0);
     let icon = '';
     let name = 'アイテムなし';
     let multi = false;
-    // 2 個目: 1 個目を持ったままルーレット中なら、2 個目の枠でルーレットを回す
-    let icon2 = '';
-    if (d.item && d.roll > 0) icon2 = ['🦴', '🍌', '⚡', '🛡️', '🥏', '🧑', '☔', '🏠'][Math.floor(performance.now() / 90) % 8];
-    else if (d.item2 && ITEM_INFO[d.item2]) icon2 = ITEM_INFO[d.item2].icon;
-    this._set('icon2', this.item2, icon2);
-    this.item2.hidden = !icon2;
-    this.item2.classList.toggle('multi', !!(d.item2 && !(d.item && d.roll > 0) && ITEM_INFO[d.item2]?.multi));
+    let rolling1 = false;
     if (d.item && ITEM_INFO[d.item]) {
       icon = ITEM_INFO[d.item].icon;
       name = ITEM_INFO[d.item].name;
       multi = !!ITEM_INFO[d.item].multi;
-    } else if (d.roll > 0) {
-      const icons = ['🦴', '🍌', '⚡', '🛡️', '🥏', '🧑', '☔', '🏠'];
-      icon = icons[Math.floor(performance.now() / 90) % icons.length];
+    } else if (rolls > 0) {
+      icon = rollIcon(0);
       name = 'ルーレット中…';
+      rolling1 = true;
     }
+    let icon2 = '';
+    let multi2 = false;
+    let rolling2 = false;
+    if (d.item2 && ITEM_INFO[d.item2]) {
+      icon2 = ITEM_INFO[d.item2].icon;
+      multi2 = !!ITEM_INFO[d.item2].multi;
+    } else if ((d.item && rolls > 0) || rolls > 1) {
+      icon2 = rollIcon(3);
+      rolling2 = true;
+    }
+    this._set('icon2', this.item2, icon2);
+    this.item2.classList.toggle('multi', multi2);
+    this.item2.classList.toggle('has-item', !!d.item2);
+    this.item2.classList.toggle('rolling', rolling2);
     this._set('icon', this.itemIcon, icon);
     this.itemIcon.classList.toggle('multi', multi);
     this._set('iname', this.itemName, name);
     this.itemSlot.classList.toggle('has-item', !!d.item);
-    this.itemSlot.classList.toggle('rolling', !d.item && d.roll > 0);
+    this.itemSlot.classList.toggle('rolling', rolling1);
 
     this._set('net', this.net, d.netText);
     if (d.netTone !== this._last.tone) {
