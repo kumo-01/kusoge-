@@ -2101,21 +2101,6 @@ canvas {
   font-size: 0.85rem;
   padding: 4px 12px max(12px, env(safe-area-inset-bottom));
 }
-.ang-nudge {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-}
-.ang-nudge .btn {
-  min-width: 64px;
-  padding: 6px 10px;
-  font-variant-numeric: tabular-nums;
-}
-.g2d.ang:not(.is-play) .ang-nudge {
-  visibility: hidden;
-}
 .pb-detail {
   display: block;
   font-size: 0.72rem;

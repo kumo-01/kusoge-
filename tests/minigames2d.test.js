@@ -132,3 +132,9 @@ test('リズム: お題の間隔ぴったりは 100%、ずれるほど低い。B
   assert.equal(rhythmScore([], 120).acc, 0);
   assert.equal(rhythmScore(Array(7).fill(1000), 120).acc, 0); // 倍の間隔（半分のテンポ）
 });
+
+test('角度: お題は 0.1° 単位の小数も出る（5.0〜355.0°）', async () => {
+  const src = (await import('node:fs')).readFileSync(new URL('../src/games/angleDuel/index.js', import.meta.url), 'utf8');
+  assert.ok(/Math\.random\(\) \* 3501\) \/ 10/.test(src), 'お題は 0.1° 単位');
+  assert.ok(!/ang-nudge|ArrowUp/.test(src), '少しずつ動かすボタン・キーはない');
+});

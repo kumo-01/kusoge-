@@ -41,7 +41,7 @@ const recent = []; // ホスト: 最近のお題（連戦で似た角度が続�
 function pickTarget() {
   let a = 0;
   for (let k = 0; k < 50; k++) {
-    a = 5 + Math.floor(Math.random() * 351); // 5〜355°
+    a = 5 + Math.floor(Math.random() * 3501) / 10; // 5.0〜355.0°（0.1° 単位）
     if (recent.every((r) => angleError(r, a) >= 20)) break;
   }
   recent.push(a);
@@ -156,7 +156,7 @@ class AngleDuel extends HostedGame {
       gameId: 'angleDuel',
       winner: win >= 0 ? this.who(win).slot : null,
       title: solo ? `ずれ ${fmtDeg(best)}°！` : win >= 0 ? `${this.who(win).name}の勝ち！ずれ ${fmtDeg(best)}°` : `引き分け！ずれ ${fmtDeg(best)}°`,
-      course: `お題 ${s.target}°`,
+      course: `お題 ${fmtDeg(s.target)}°`,
       players,
       stats: [
         { label: '作った角度', values: s.ans.map((a) => `${fmtDeg(a)}°`) },
@@ -191,10 +191,8 @@ class AngleDuel extends HostedGame {
       timer: h('div.g2d-timer', null, h('div.g2d-timer-bar'), h('span.g2d-timer-num', null, '')),
       canvas: h('canvas.ang-canvas'),
       foot: h('div.ang-foot', { style: { color: me.col } },
-        h('div', null, `${me.icon} あなた（${me.name}）: 外周の丸をドラッグ、または円の中をタップ。下のボタン・矢印キーで 0.1° ずつ`),
-        h('div.ang-nudge', null,
-          [[-1, '↻ −1°'], [-0.1, '↻ −0.1°'], [0.1, '↺ +0.1°'], [1, '↺ +1°']].map(([d, label]) =>
-            h('button.btn.btn-small.btn-light', { type: 'button', onclick: () => this.nudge(d), 'aria-label': `${d > 0 ? '左回りに' : '右回りに'} ${Math.abs(d)}°` }, label)))),
+        // 角度を少しずつ動かすボタン・キーは置かない（押した回数を数えれば、お題の角度ぴったりにできてしまうので）
+        h('div', null, `${me.icon} あなた（${me.name}）: 外周の丸をドラッグ、または円の中をタップ（0.1° 単位）`)),
     };
     this.root.classList.add('ang'); // 「ad」で始まる名前は広告ブロッカーに隠されるので使わない
     // 左の列（横長で低い画面のとき）にまとめる部品は .g2d-side に入れる（ふつうの画面では、上下にばらして並ぶ）
@@ -218,23 +216,6 @@ class AngleDuel extends HostedGame {
     c.addEventListener('pointermove', this._onMove);
     c.addEventListener('pointerup', this._onUp);
     c.addEventListener('pointercancel', this._onUp);
-    // 矢印キー: ↑→ で左回りに 0.1°、↓← で右回りに 0.1°（Shift で 1°）
-    this._onKey = (e) => {
-      const d = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key];
-      if (!d || this.phase !== 'play') return;
-      e.preventDefault();
-      this.nudge(d * (e.shiftKey ? 1 : 0.1));
-    };
-    window.addEventListener('keydown', this._onKey);
-  }
-
-  /** つまみを d 度だけ動かす（反時計回りが +） */
-  nudge(d) {
-    if (this.phase !== 'play' || this.paused) return;
-    this.myA = norm(this.myA + d);
-    if (!this.touched) this.sound.play('click');
-    this.touched = true;
-    this._send(true);
   }
 
   unmount() {
@@ -243,7 +224,6 @@ class AngleDuel extends HostedGame {
     c.removeEventListener('pointermove', this._onMove);
     c.removeEventListener('pointerup', this._onUp);
     c.removeEventListener('pointercancel', this._onUp);
-    window.removeEventListener('keydown', this._onKey);
   }
 
   _aim(e) {
@@ -288,7 +268,7 @@ class AngleDuel extends HostedGame {
       this._lastPhase = ph;
     }
     // 見出し
-    this.el.prompt.textContent = `${s.target}° までもっていけ！`;
+    this.el.prompt.textContent = `${fmtDeg(s.target)}° までもっていけ！`;
     const remain = ph === 'ready' ? ANGLE.READY - t : ph === 'play' ? ANGLE.READY + s.limit - t : 0;
     const sec = Math.ceil(Math.max(0, remain));
     if (sec !== this._lastSec && (ph === 'ready' || (ph === 'play' && sec <= 3))) this.sound.play('beep');
@@ -314,7 +294,7 @@ class AngleDuel extends HostedGame {
       g.textBaseline = 'top';
       g.fillStyle = '#4a3426';
       g.font = '900 26px "M PLUS Rounded 1c", sans-serif';
-      g.fillText(`${s.target}° までもっていけ！`, w / 2, fy);
+      g.fillText(`${fmtDeg(s.target)}° までもっていけ！`, w / 2, fy);
       g.font = '800 16px "M PLUS Rounded 1c", sans-serif';
       g.fillStyle = ph === 'play' && remain < 3 ? '#e0344a' : '#7a6152';
       g.fillText(this.el.timer.querySelector('.g2d-timer-num').textContent, w / 2, fy + 34);
@@ -421,7 +401,7 @@ class AngleDuel extends HostedGame {
       const sweep = easeInOut(rt / 1.6);
       const cur = s.target * sweep;
       sector(cur, 'rgba(255,210,63,0.30)');
-      arm(cur, '#f0a500', 8, 13, `${Math.round(cur)}°`, R * 0.62);
+      arm(cur, '#f0a500', 8, 13, `${sweep >= 1 ? fmtDeg(cur) : Math.round(cur)}°`, R * 0.62);
       const errs = s.ans.map((a) => angleError(a, s.target));
       const best = Math.min(...errs);
       const labels = [];
@@ -472,7 +452,7 @@ class AngleDuel extends HostedGame {
       g.textBaseline = 'middle';
       g.fillStyle = '#4a3426';
       g.font = '900 22px "M PLUS Rounded 1c", sans-serif';
-      g.fillText(`お題 ${s.target}°`, cx, Math.max(16, cy - R - 40));
+      g.fillText(`お題 ${fmtDeg(s.target)}°`, cx, Math.max(16, cy - R - 40));
       if (rt > 1.9 + this.n * 0.45 + 0.3 && !this._fanfare) {
         this._fanfare = true;
         this.sound.play(errs[this.me] === best ? 'finish' : 'lose');
