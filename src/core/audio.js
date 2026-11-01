@@ -125,6 +125,19 @@ class Sound {
     }
   }
 
+  /** 太鼓（ウッドブロック）の音を delay 秒後に鳴らす。hi: 高い音（自分が押したとき・最初の拍） */
+  drum(delay = 0, hi = false) {
+    if (this.muted) return;
+    const ctx = this._ensure();
+    if (!ctx || ctx.state !== 'running' || delay < -0.05) return;
+    try {
+      this._tone({ type: 'triangle', from: hi ? 980 : 720, to: hi ? 620 : 420, dur: 0.09, vol: 0.32, delay: Math.max(0, delay), attack: 0.002 });
+      this._tone({ type: 'square', from: hi ? 1960 : 1440, dur: 0.02, vol: 0.06, delay: Math.max(0, delay), attack: 0.001 });
+    } catch {
+      /* noop */
+    }
+  }
+
   /** 効果音を鳴らす。失敗しても例外は外に出さない */
   play(name) {
     if (this.muted) return;

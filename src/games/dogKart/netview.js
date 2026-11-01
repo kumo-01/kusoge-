@@ -130,7 +130,7 @@ export class Predictor {
     for (const key of PHYS_KEYS) first[key] = k[key];
     for (let i = 1; i < this.hist.length; i++) {
       const e = this.hist[i];
-      stepFn(k, e.bits);
+      stepFn(k, e.bits, e.seq);
       for (const key of PHYS_KEYS) e[key] = k[key];
     }
     this.off.x += x0 - k.x;

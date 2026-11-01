@@ -4,10 +4,11 @@
 
 import { RACE, ITEMS, IN, RAIN, TIMING, FOOD, SCORE } from './constants.js';
 import { createKart, stepKart, collideKarts } from './physics.js';
-import { updateItems, useItem, spinKart } from './items.js';
+import { updateItems, useItem, spinKart, nextRandom } from './items.js';
 import { npcInput, ownerInput, ownerJump } from './npc.js';
 import { stepTiming, pickChances } from './timing.js';
 import { formatTime } from '../../core/util.js';
+import { MG, makePattern, mgTimes, mgScore, npcMgScore, mgBoost } from './minigame.js';
 
 export const KART_NAMES = ['柴犬', 'コーギー', 'プードル', 'パグ', 'ダックス', 'ハスキー'];
 export const BOSS_NAME = 'ドーベルマン';
@@ -24,6 +25,7 @@ export class RaceSim {
     // 人間の席（部屋の 0 = ホスト, 1・2 = ゲスト）。車の番号 i の人間は slots[i] の席
     const slots = Array.isArray(options.players) ? options.players.filter((v, i, a) => Number.isInteger(v) && v >= 0 && v < RACE.MAX_HUMANS && a.indexOf(v) === i).slice(0, RACE.MAX_HUMANS) : [];
     this.slots = slots.length >= 2 ? slots : [0, 1];
+    this.realHumans = slots.length === 1 ? 1 : this.slots.length; // 実際にいる人の数（ひとりモードでは 1。2 台目は誰も操作しない）
     this.humans = this.slots.length;
     this.boss = options.boss ? 1 : 0;
     const maxNormal = RACE.MAX_KARTS - 1 - this.humans; // 通常の NPC は 6 - 人間の数 台まで（ボスは別枠）
@@ -32,6 +34,7 @@ export class RaceSim {
     // NPC の見た目: 人間が使っていない犬を順に使う（ボスは専用）
     const pool = [1, 2, 3, 4, 5].filter((v) => !this.slots.includes(v));
     this.npcStyles = Array.from({ length: this.normalNpcs }, (_, i) => pool[i]).concat(this.boss ? [6] : []);
+    this.mgOn = !!options.mg; // レース中のミニゲーム（リズムを真似しろ！）
     this.prog = [];
     this.reset();
   }
@@ -59,8 +62,17 @@ export class RaceSim {
       rk: -1, // 豪雨を使った車
       houses: [], // 落ちてくる犬小屋
       logs: [], // 倒木（壁）。レースが終わるまで残る
+      mg: null, // 進行中のミニゲーム { t, pat, taps, sc }（minigame.js）
+      mgN: 0, // このレースで始まったミニゲームの数
+      mgAt: [], // ミニゲームが始まる、先頭の車の走行距離
     };
     this.s.tc = pickChances(this.s, t.length);
+    if (this.mgOn) {
+      // 1 回目は 1 周目の後半、2 回目は 2 周目の後半あたり。2 回のことも 1 回のこともある
+      const a = t.length * (0.5 + 0.35 * nextRandom(this.s));
+      const b = t.length * (1.4 + 0.45 * nextRandom(this.s));
+      this.s.mgAt = nextRandom(this.s) < 0.65 ? [a, b] : [nextRandom(this.s) < 0.5 ? a : b];
+    }
     t.logs = this.s.logs; // 壁の当たり判定（physics.collideWalls）が使う
   }
 
@@ -71,6 +83,11 @@ export class RaceSim {
     const track = this.track;
     track.logs = s.logs;
     s.tick++;
+    // ミニゲーム中は、レース（車・アイテム・レースの時計）を止めて、ミニゲームだけ進める
+    if (s.mg) {
+      this._stepMg(dt, inputs);
+      return;
+    }
     s.t += dt;
     if (s.phase === 'countdown' && s.t >= 0) {
       s.phase = 'racing';
@@ -172,6 +189,46 @@ export class RaceSim {
     updateItems(s, dt, track, this.boxPos, (i) => this.rankOf(i), ev);
 
     if (s.phase === 'finished') s.endT = Math.max(0, s.endT - dt);
+    if (active) this._maybeStartMg();
+  }
+
+  /** ミニゲームを始めるか（先頭の車が決めた距離を過ぎたら。人間が誰もゴールしていない間だけ） */
+  _maybeStartMg() {
+    const s = this.s;
+    if (!this.mgOn || s.mg || s.mgN >= s.mgAt.length || s.t < 5) return;
+    if (s.karts.some((k) => !k.npc && k.fin)) return;
+    const lead = Math.max(...s.karts.map((k) => this.progressOf(k)));
+    if (lead < s.mgAt[s.mgN]) return;
+    s.mgN++;
+    s.mg = { t: 0, pat: makePattern(s), taps: Array.from({ length: this.humans }, () => []), sc: null };
+    for (const k of s.karts) for (const f of MG.FREEZE_KEYS) k[f] = 0;
+    this.events.push({ t: 'mg', n: s.mgN });
+  }
+
+  /** ミニゲームを 1 tick 進める。真似の時間に押した時刻を記録し、終わったら採点、3・2・1 のあとブーストして再開 */
+  _stepMg(dt, inputs) {
+    const s = this.s;
+    const mg = s.mg;
+    const T = mgTimes(mg.pat);
+    const t0 = mg.t;
+    mg.t += dt;
+    if (mg.t >= T.playStart - 0.35 && mg.t < T.playEnd) {
+      for (let i = 0; i < this.humans; i++) if (inputs[i] & (IN.TAP | IN.ITEM) && mg.taps[i].length < 24) mg.taps[i].push(Math.round(mg.t * 1000) / 1000);
+    }
+    for (const k of s.karts) k.in = 0; // 止まっている（ほかの端末が車を先へ推定しないように、操作は無しにする）
+    if (t0 < T.playEnd && mg.t >= T.playEnd) {
+      mg.sc = s.karts.map((k) => (k.npc || k.i >= this.realHumans ? npcMgScore(s, !!k.boss) : mgScore(mg.taps[k.i], mg.pat)));
+      s.karts.forEach((k, i) => {
+        k.stats.mg = (k.stats.mg || 0) + mg.sc[i];
+        k.stats.mgN = (k.stats.mgN || 0) + 1;
+      });
+    }
+    if (mg.t >= T.end) {
+      const sc = mg.sc || s.karts.map(() => 0);
+      s.karts.forEach((k, i) => (k.boost = Math.max(k.boost, mgBoost(sc, i))));
+      s.mg = null;
+      this.events.push({ t: 'mgEnd' });
+    }
   }
 
   /** ドッグフードを拾う。持てる数（FOOD.MAX）まで。いっぱいのときは通り過ぎる（他の車が拾える） */
@@ -360,6 +417,7 @@ export class RaceSim {
       stat('くらった回数', (k) => `${k.stats.hitBy} 回`),
       stat('使ったアイテム', (k) => `${k.stats.items} 個`),
       stat('壁ドン', (k) => `${k.stats.walls} 回`),
+      ...(s.karts.some((k) => k.stats.mgN) ? [stat('🎵 リズムを真似しろ！', (k) => (k.stats.mgN ? `平均 ${Math.round(k.stats.mg / k.stats.mgN)}%（${k.stats.mgN} 回）` : '-'))] : []),
     ];
     if (total > this.humans) {
       const order = s.karts.map((k) => k.i).sort((x, y) => this.rankOf(x, prog) - this.rankOf(y, prog));
@@ -421,7 +479,7 @@ function sanitizeKart(r, i, prev) {
   // stats は定期配信では省略されることがある（そのときは前回の値を使う）
   const st = r.stats && typeof r.stats === 'object' ? r.stats : prev.stats || {};
   k.stats = {};
-  for (const f of ['bumps', 'hits', 'hitBy', 'walls', 'items', 'boosts', 'foods']) k.stats[f] = int(st[f], 0, 0, 1e6);
+  for (const f of ['bumps', 'hits', 'hitBy', 'walls', 'items', 'boosts', 'foods', 'mg', 'mgN']) k.stats[f] = int(st[f], 0, 0, 1e6);
   return k;
 }
 
@@ -442,6 +500,15 @@ function sanitizeFoods(r, prev) {
     return Array.from({ length: n }, (_, i) => (taken.has(i) ? 1 : 0));
   }
   return Array.from({ length: n }, (_, i) => num(Array.isArray(r.foods) ? r.foods[i] : 0, 0, 0, FOOD.RESPAWN));
+}
+
+/** ミニゲームの状態の検証（完全な状態は taps つき、定期配信は taps なし） */
+function sanitizeMg(m, nk) {
+  if (!m || typeof m !== 'object' || !Array.isArray(m.pat) || m.pat.length < 2) return null;
+  const pat = m.pat.slice(0, 12).map((v) => num(v, 0, 0, 20));
+  const taps = Array.from({ length: Math.min(RACE.MAX_HUMANS, nk) }, (_, i) => (Array.isArray(m.taps?.[i]) ? m.taps[i].slice(0, 24).map((v) => num(v, 0, 0, 120)) : []));
+  const sc = Array.isArray(m.sc) && m.sc.length ? Array.from({ length: nk }, (_, i) => int(m.sc[i], 0, 0, 100)) : null;
+  return { t: num(m.t, 0, 0, 120), pat, taps, sc };
 }
 
 export function sanitizeSnapshot(r, prev, boxCount) {
@@ -467,6 +534,9 @@ export function sanitizeSnapshot(r, prev, boxCount) {
     rk: Number.isInteger(r.rk) && r.rk >= 0 && r.rk < r.karts.length ? r.rk : -1,
     houses: [],
     logs: [],
+    mg: sanitizeMg(r.mg, r.karts.length),
+    mgN: int(r.mgN, prev.mgN ?? 0, 0, MG.MAX),
+    mgAt: Array.isArray(r.mgAt) ? r.mgAt.slice(0, MG.MAX).map((v) => num(v, 0, 0, 1e5)) : prev.mgAt || [],
   };
   if (Array.isArray(r.logs)) {
     for (const l of r.logs.slice(0, ITEMS.LOG_MAX)) {
@@ -544,6 +614,7 @@ export function packNet(s) {
     bn: s.bananas.map((b) => [b.id, b.o, q(b.x, 2), q(b.z, 2), q(b.life, 1), q(b.age, 1)]),
     hs: s.houses.map((h) => [h.id, h.o, h.t, q(h.x, 2), q(h.z, 2), q(h.age, 2)]),
     lg: s.logs.map((l) => [l.id, l.o, q(l.s, 2), q(l.a, 2), q(l.b, 2), q(l.x1, 2), q(l.z1, 2), q(l.x2, 2), q(l.z2, 2)]),
+    mg: s.mg ? [q(s.mg.t, 3), s.mg.pat, s.mg.sc || []] : 0,
   };
 }
 
@@ -581,6 +652,7 @@ export function unpackNet(p) {
     houses: Array.isArray(p.hs) ? p.hs.slice(0, 8).map((a) => row(a, ['id', 'o', 't', 'x', 'z', 'age'])) : [],
     bananas: Array.isArray(p.bn) ? p.bn.slice(0, ITEMS.BANANA_MAX + 2).map((a) => row(a, ['id', 'o', 'x', 'z', 'life', 'age'])) : [],
     logs: Array.isArray(p.lg) ? p.lg.slice(0, ITEMS.LOG_MAX).map((a) => row(a, ['id', 'o', 's', 'a', 'b', 'x1', 'z1', 'x2', 'z2'])) : [],
+    mg: Array.isArray(p.mg) ? { t: p.mg[0], pat: p.mg[1], sc: p.mg[2] } : null,
   };
 }
 
@@ -589,8 +661,8 @@ export function unpackNet(p) {
 // 位置は 2cm（16bit。コースの外まではみ出したときは 1cm・24bit）、向きは 1/65536 周、速さは 1cm/s。めったに変わらない項目は、既定値でないものだけ印つきで載せる。
 
 /** 演出イベントの種類（バイナリでは番号で送る） */
-export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house', 'log'];
-const BIN_VERSION = 3;
+export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house', 'log', 'mg', 'mgEnd'];
+const BIN_VERSION = 4;
 // 車の項目のうち、ふだんは 0 で、0 でないときだけ載せるもの（タイマー・はじかれ・高さなど。0 でない間は毎回変わる）。
 // よく 0 以外になるものを先に並べる（印は可変長なので、先頭 7 項目までなら 1 バイト）
 const BIN_DYN = ['kx', 'kz', 'gd', 'boost', 'roll', 'roll2', 'inv', 'spin', 'bump', 'y', 'vy', 'wrong', 'slow', 'grass', 'rc', 'bc', 'tw', 'tb', 'wet', 'ow'];
@@ -839,7 +911,7 @@ export function packNetBin(s, ev = [], only = null) {
   // ふだんは既定値の項目（決着後の残り時間・勝者・雨・順位の印）は、既定値でないときだけ載せる
   const extra = Math.round(s.endT * 100) !== 0 || s.winner !== -1 || Math.round(s.rain * 100) !== 0 || s.rk !== -1;
   const withLogs = !only || only.logs;
-  w.u8((withSets ? 1 : 0) | (withBananas ? 2 : 0) | (short ? 4 : 0) | (extra ? 8 : 0) | (withLogs ? 16 : 0));
+  w.u8((withSets ? 1 : 0) | (withBananas ? 2 : 0) | (short ? 4 : 0) | (extra ? 8 : 0) | (withLogs ? 16 : 0) | (s.mg ? 32 : 0));
   w.f32(s.t);
   if (extra) {
     w.i16(s.endT * 100);
@@ -950,6 +1022,15 @@ export function packNetBin(s, ev = [], only = null) {
     w.i8(e.q || 0);
     w.u8((e.grant ? 1 : 0) | (e.big ? 2 : 0));
     w.u8(e.n || 0);
+  }
+  // ミニゲーム（あるときだけ）: 時計・お手本の拍（ミリ秒）・点数（車ごと。採点前は 0 個）
+  if (s.mg) {
+    w.u16(s.mg.t * 100);
+    w.u8(s.mg.pat.length);
+    for (const b of s.mg.pat) w.u16(b * 1000);
+    const sc = s.mg.sc || [];
+    w.u8(sc.length);
+    for (const v of sc) w.u8(v);
   }
   return w.bytes();
 }
@@ -1066,6 +1147,15 @@ export function unpackNetBin(u8, prev = null) {
       e.big = !!(fl & 2);
       e.n = r.u8();
       if (e.t) ev.push(e);
+    }
+    snap.mg = null;
+    if (flags & 32) {
+      const t = r.u16() / 100;
+      const np2 = Math.min(r.u8(), 12);
+      const pat = Array.from({ length: np2 }, () => r.u16() / 1000);
+      const ns = Math.min(r.u8(), RACE.MAX_KARTS);
+      const sc = Array.from({ length: ns }, () => r.u8());
+      snap.mg = { t, pat, sc };
     }
     snap.proj = snap.proj.slice(0, 32);
     snap.bananas = snap.bananas.slice(0, ITEMS.BANANA_MAX + 2);

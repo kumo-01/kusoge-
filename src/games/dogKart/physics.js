@@ -53,7 +53,7 @@ export function createKart(index, pos, boss = false, npc = index >= 2, style = i
     gd: 0, // ガードの残り時間（0 なら無し）
     wet: 0, // 豪雨で遅くなっている残り時間
     ow: 0, // 飼い主モードの残り時間（0 なら無し。この間は無敵で自動で走る）
-    stats: { bumps: 0, hits: 0, hitBy: 0, walls: 0, items: 0, boosts: 0, foods: 0 },
+    stats: { bumps: 0, hits: 0, hitBy: 0, walls: 0, items: 0, boosts: 0, foods: 0, mg: 0, mgN: 0 },
   };
 }
 

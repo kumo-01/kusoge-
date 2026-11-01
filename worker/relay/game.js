@@ -191,6 +191,12 @@ export class Game {
       Object.assign(k, { x: p.x, z: p.z, h: p.h, sp: 26, kx: 0, kz: 0, lap: 2, cp: sim.track.checkpoints - 1 });
       k.stats.foods = 4;
       k.stats.bumps = 1;
+    } else if (op === 'mg') {
+      // すぐにミニゲームを始める
+      sim.mgOn = true;
+      sim.s.t = Math.max(sim.s.t, 6);
+      sim.s.mgAt = [0];
+      sim.s.mgN = 0;
     } else if (op === 'item') {
       sim.s.karts[a.kart | 0].item = a.item | 0;
       sim.s.karts[a.kart | 0].item2 = 0;
@@ -219,7 +225,7 @@ export class Game {
     const o = msg.options || {};
     const int = (v, d, lo, hi) => (Number.isInteger(v) ? Math.min(hi, Math.max(lo, v)) : d);
     try {
-      this.engine = new DogKartEngine({ course: int(o.course, 0, 0, 99), npcs: int(o.npcs, 0, 0, 9), boss: int(o.boss, 0, 0, 1), players });
+      this.engine = new DogKartEngine({ course: int(o.course, 0, 0, 99), npcs: int(o.npcs, 0, 0, 9), boss: int(o.boss, 0, 0, 1), mg: int(o.mg, 1, 0, 1), players });
     } catch (err) {
       return this.send(conn, { type: 'e_error', reason: 'engine-failed' });
     }

@@ -17,6 +17,7 @@ import { lerp, lerpAngle, angleDiff } from '../../core/util.js';
 import { spinAngleOf } from './kart.js';
 import { stepTiming } from './timing.js';
 import { keepAwake, getQualityPref } from '../../core/device.js';
+import { MG, mgTimes, mgPhase, mgBoost, mgRanks } from './minigame.js';
 
 const CAMERA_KEY = 'wanwan.kartCamera';
 
@@ -54,7 +55,7 @@ class DogKartGame {
     this.track = new Track(ctx.options?.course ?? 0);
     // auth: この端末が計算役か。ホストが計算するときだけ（サーバーが計算するときは、ホストも他の人と同じ「受け取る側」）
     this.auth = ctx.isHost && !ctx.serverSim;
-    const simOpts = { npcs: ctx.options?.npcs ?? 0, boss: ctx.options?.boss ?? 0, players: ctx.players };
+    const simOpts = { npcs: ctx.options?.npcs ?? 0, boss: ctx.options?.boss ?? 0, mg: ctx.options?.mg ?? 1, players: ctx.players };
     if (this.auth) {
       this.engine = new DogKartEngine({ ...simOpts, track: this.track });
       this.sim = this.engine.sim;
@@ -180,7 +181,9 @@ class DogKartGame {
         p.y = ks[i].y;
         p.h = ks[i].h;
       }
-      const ev = this.engine.step(dt, { 0: this._readInput() });
+      const bits = this._readInput();
+      const ev = this.engine.step(dt, { 0: bits });
+      if (this.sim.s.mg) this._mgTap(bits, this.sim.s.mg.t, this.sim.s.mg.pat);
       if (ev.length) this._handleEvents(ev);
       const result = this.engine.takeResult();
       if (result) this.ctx.finish(result);
@@ -196,6 +199,7 @@ class DogKartGame {
         return;
       }
       this._stepLocal(dt, bits);
+      if (this.mgWin) this._mgTap(bits, (this.seq - this.mgWin.a0) / 60, this.mgWin.pat);
       // サーバーの時間に遅れていたら（端末が止まっていた・とても重い）、同じ操作のまま先へ進めて追いつく。
       // 遅れたままだと、確定状態と照らし合わせる履歴がなくなり、自分の車が補正されずにずれてから瞬間移動する
       const lead = this.seq - ack;
@@ -260,7 +264,7 @@ class DogKartGame {
       const s = this.sim.s;
       const pk = this.pred.k;
       this.predPrev = { x: pk.x, z: pk.z, y: pk.y, h: pk.h };
-      this._predStep(pk, bits);
+      this._predStep(pk, bits, this.seq);
       this.pred.record(this.seq, bits);
       this.remote.step(this.track, this._predActive() && s.phase !== 'finished', dt);
     }
@@ -273,7 +277,14 @@ class DogKartGame {
   }
 
   /** 自分の車の予測を 1 tick 進める（毎 tick と、確定状態からの計算し直しで同じものを使う） */
-  _predStep(k, bits) {
+  _predStep(k, bits, seq = -1) {
+    // ミニゲーム中の tick は止まったまま（サーバーと同じ）。最後の tick のあとに、順位に応じたブーストで再開
+    const w = this.mgWin;
+    if (w && seq > w.a0 && seq <= w.end) {
+      for (const f of MG.FREEZE_KEYS) k[f] = 0;
+      if (seq === w.end && w.sc) k.boost = Math.max(k.boost, mgBoost(w.sc, this.me));
+      return;
+    }
     const s = this.sim.s;
     const run = this._predActive() && s.phase !== 'finished';
     // タイミングブーストのリングは自分の車の予測で出す（判定はサーバーが操作の順番どおりに行う）
@@ -404,8 +415,9 @@ class DogKartGame {
     }
     this.sim.s = s;
     this.track.logs = s.logs; // 自分の車の予測・ほかの車の推定も、倒木に当たる
+    this._syncMg(s);
     if (NET.PREDICTION) {
-      const r = this.pred.reconcile(s.karts[this.me], s.acks[this.me] || 0, this._predStepFn || (this._predStepFn = (k, b) => this._predStep(k, b)));
+      const r = this.pred.reconcile(s.karts[this.me], s.acks[this.me] || 0, this._predStepFn || (this._predStepFn = (k, b, sq) => this._predStep(k, b, sq)));
       const dg = this.diag;
       // 飼い主モード中（自動で走るので予測しない）と復帰（もともと瞬間移動）は、問題の数に入れない
       if (!(s.karts[this.me].ow > 0) && !this.remote.g[this.me]) {
@@ -793,8 +805,95 @@ class DogKartGame {
     });
   }
 
+  // ---- レース中のミニゲーム（リズムを真似しろ！） ----
+
+  /**
+   * 受け取る側: ミニゲームが自分の操作のどの seq からどの seq まで続くかを覚える（自分の車の予測を止めるため）。
+   * サーバーは「自分の操作 seq = ack を使った tick」でミニゲームの時計を mg.t まで進めているので、始まりは ack - mg.t × 60
+   */
+  _syncMg(s) {
+    const ack = s.acks[this.me] || 0;
+    if (s.mg) {
+      const key = s.mg.pat.join(',');
+      if (!this.mgWin || this.mgWin.key !== key) {
+        const a0 = ack - Math.round(s.mg.t * 60);
+        this.mgWin = { key, a0, end: a0 + Math.ceil(mgTimes(s.mg.pat).end * 60 - 1e-6), pat: s.mg.pat.slice(), sc: null };
+      }
+      if (s.mg.sc?.length) this.mgWin.sc = s.mg.sc.slice();
+    } else if (this.mgWin && ack > this.mgWin.end + 30) this.mgWin = null;
+  }
+
+  /** 真似の時間に押したら、自分の画面に印をつけて音を鳴らす（採点はサーバー。これは表示だけ） */
+  _mgTap(bits, t, pat) {
+    if (!(bits & (IN.TAP | IN.ITEM)) || this.paused) return;
+    const T = mgTimes(pat);
+    if (t < T.playStart - 0.35 || t >= T.playEnd) return;
+    const key = pat.join(',');
+    if (this._mgTapsKey !== key) {
+      this._mgTapsKey = key;
+      this._mgTaps = [];
+    }
+    if (this._mgTaps.length < 24) this._mgTaps.push(t);
+    this.sound.drum(0, true);
+  }
+
+  /** いまのミニゲームの表示用の状態（なければ null）。受け取る側は自分の操作の時計（seq）で進める */
+  _mgView(alpha) {
+    const s = this.sim.s;
+    if (this.auth) return s.mg ? { t: s.mg.t, pat: s.mg.pat, sc: s.mg.sc } : null;
+    const w = this.mgWin;
+    if (!w || this.seq > w.end) return null;
+    return { t: Math.max(0, (this.seq - w.a0 - 1 + Math.max(0, Math.min(1, alpha))) / 60), pat: w.pat, sc: w.sc };
+  }
+
+  /** ミニゲームの画面・音（毎フレーム） */
+  _renderMg(alpha) {
+    const v = this.paused ? null : this._mgView(alpha);
+    const was = this._mgState;
+    if (!v) {
+      if (was) {
+        this._mgState = null;
+        this.hud.setMg(null);
+        this.ctx.music?.setHold(false);
+        this.sound.play('go');
+        this.hud.flash('GO!', 'go', 1000);
+      }
+      return;
+    }
+    const key = v.pat.join(',');
+    if (!was || was.key !== key) {
+      this._mgState = { key, demo: false, res: false, cd: 0 };
+      this.ctx.music?.setHold(true); // ミニゲーム中は BGM を止める（リズムが聞こえるように）
+      this.sound.play('chance');
+    }
+    const ms = this._mgState;
+    const T = mgTimes(v.pat);
+    const ph = mgPhase(v);
+    // お手本: 始まる少し前に、全部の拍を音の時計で予約する（画面の描画に左右されず正確）
+    if (!ms.demo && v.t >= T.demo - 0.3) {
+      ms.demo = true;
+      v.pat.forEach((b, i) => this.sound.drum(T.demo + b - v.t, i === 0));
+    }
+    if (v.sc && !ms.res) {
+      ms.res = true;
+      const r = mgRanks(v.sc)[this.me];
+      this.sound.play(r === 1 ? 'perfect' : r <= 2 ? 'good' : 'miss');
+    }
+    if (ph === 'count') {
+      const n = Math.max(1, Math.ceil(T.end - v.t));
+      if (n !== ms.cd) {
+        ms.cd = n;
+        this.sound.play('beep');
+      }
+    }
+    const s = this.sim.s;
+    const names = s.karts.map((k) => kartName(k));
+    this.hud.setMg({ ph, t: v.t, T, pat: v.pat, taps: this._mgTapsKey === key ? this._mgTaps : [], sc: v.sc, names, me: this.me, npc: s.karts.map((k) => !!k.npc), boosts: v.sc ? v.sc.map((_, i) => mgBoost(v.sc, i)) : null, ranks: v.sc ? mgRanks(v.sc) : null });
+  }
+
   render(alpha, dt) {
     const s = this.sim.s;
+    this._renderMg(alpha);
     if (!this.auth && !this.paused && this.clockInit) this.clock += dt;
     const st = this._renderState(dt, alpha);
     let karts = st.karts;
@@ -912,6 +1011,7 @@ class DogKartGame {
   }
 
   destroy() {
+    if (this._mgState) this.ctx.music?.setHold(false);
     this.sound.setEngine(false);
     this.sound.setRain(0);
     this.ctx.container.removeEventListener('pointerdown', this._onPointer);

@@ -395,6 +395,8 @@ export function cpuDrawing(truth, view, level, rnd = Math.random, gauss = null) 
     return [cx + dx * cs - dy * sn + ox, cy + dx * sn + dy * cs + oy];
   };
   const total = lengthKm(chains, view);
+  const wv = Array.from({ length: 4 }, () => (2 * Math.PI) / (40 + rnd() * 50)); // うねりの波（km あたりの位相）
+  const ph = Array.from({ length: 4 }, () => rnd() * 6.3);
   const out = [];
   for (const ch of chains) {
     const len = lengthKm([ch], view);
@@ -403,21 +405,18 @@ export function cpuDrawing(truth, view, level, rnd = Math.random, gauss = null) 
     const simple = simplifyLine(ch, (c.simp * U) / k);
     let pts = resample([simple], 1.2, view);
     if (pts.length < 2) continue;
-    // 4) ゆっくりしたうねり（波長 40〜90km）と、手のふるえ（なめらかにしたもの）
-    const w1 = (2 * Math.PI * 1.2) / (40 + rnd() * 50);
-    const w2 = (2 * Math.PI * 1.2) / (15 + rnd() * 15);
-    const p1 = rnd() * 6.3;
-    const p2 = rnd() * 6.3;
-    let jit = 0;
-    pts = pts.map(([x, y], i) => {
-      const a = pts[Math.max(0, i - 1)];
-      const b = pts[Math.min(pts.length - 1, i + 1)];
-      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-      const nx = -(b[1] - a[1]) / L;
-      const ny = (b[0] - a[0]) / L;
-      jit = jit * 0.8 + g() * c.jit * U * 0.6;
-      const km = c.wob * U * (0.75 * Math.sin(i * w1 + p1) + 0.25 * Math.sin(i * w2 + p2)) + jit;
-      return warp([x + (nx * km) / k, y + (ny * km) / k]);
+    // 4) ゆっくりしたうねり: 場所だけで決まるなめらかなずれ（波長 40〜90km）。線の向きに頼らないので、角でも飛ばない
+    //    手のふるえは、なめらかにした小さなずれ
+    let jx = 0;
+    let jy = 0;
+    pts = pts.map(([x, y]) => {
+      jx = jx * 0.85 + g() * c.jit * U * 0.5;
+      jy = jy * 0.85 + g() * c.jit * U * 0.5;
+      const xk = x * k;
+      const yk = y * k;
+      const dx = c.wob * U * (0.7 * Math.sin(yk * wv[0] + ph[0]) + 0.3 * Math.sin(xk * wv[1] + ph[1])) + jx;
+      const dy = c.wob * U * (0.7 * Math.sin(xk * wv[2] + ph[2]) + 0.3 * Math.sin(yk * wv[3] + ph[3])) + jy;
+      return warp([x + dx / k, y + dy / k]);
     });
     // 5) 角を少し丸める（Chaikin を 2 回）
     for (let it = 0; it < 2; it++) {

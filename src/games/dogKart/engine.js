@@ -7,10 +7,10 @@ import { Track } from './track.js';
 import { RaceSim, packNet, NetBinEncoder } from './race.js';
 
 export class DogKartEngine {
-  /** @param {{ course?: number, npcs?: number, boss?: number, players?: number[], track?: Track }} options */
+  /** @param {{ course?: number, npcs?: number, boss?: number, mg?: number, players?: number[], track?: Track }} options */
   constructor(options = {}) {
     this.track = options.track || new Track(options.course ?? 0);
-    this.sim = new RaceSim(this.track, { npcs: options.npcs ?? 0, boss: options.boss ?? 0, players: options.players });
+    this.sim = new RaceSim(this.track, { npcs: options.npcs ?? 0, boss: options.boss ?? 0, players: options.players, mg: options.mg ?? 1 });
     this.gq = this._newQueues(); // 人（車の番号）ごとの入力キュー
     this.evSeq = 0;
     this.netEvents = [];

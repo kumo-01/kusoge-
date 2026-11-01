@@ -79,7 +79,7 @@ export const ITEMS = {
   OWNER_SPIN: 1.4, // 飼い主にはね飛ばされた車のスピン時間
   HOUSE_DELAY: 2.2, // 犬小屋を使ってから落ちてくるまでの時間（落下地点は1位を追いかける）
   HOUSE_STAY: 1.2, // 落ちたあと地面に残る時間
-  HOUSE_RADIUS: 9, // 落ちたとき巻き込まれる範囲
+  HOUSE_RADIUS: 13.5, // 落ちたとき巻き込まれる範囲（以前の 9m の 1.5 倍）
   HOUSE_SPIN: 1.7,
   HOUSE_MAX: 4,
 };

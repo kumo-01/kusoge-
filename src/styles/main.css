@@ -2691,3 +2691,140 @@ canvas {
 .connect-card.solo-card {
   margin-top: 14px;
 }
+
+/* ---- カート: レース中のミニゲーム「リズムを真似しろ！」 ---- */
+.hud-mg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(30, 20, 50, 0.35);
+  pointer-events: none;
+  z-index: 6;
+}
+.hud-mg[hidden] {
+  display: none;
+}
+.hud-mg-panel {
+  width: min(560px, 92vw);
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--ink);
+  border-radius: 22px;
+  padding: 14px 18px 16px;
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.15), 0 10px 30px rgba(0, 0, 0, 0.25);
+  text-align: center;
+  text-shadow: none;
+}
+.hud-mg-title {
+  font-size: clamp(1.1rem, 4.2vw, 1.6rem);
+  font-weight: 900;
+  color: var(--orange);
+}
+.hud-mg-sub {
+  font-size: 0.95rem;
+  font-weight: 800;
+  margin: 4px 0 10px;
+  color: var(--ink-soft);
+}
+.hud-mg[data-ph='play'] .hud-mg-sub {
+  color: #e2341d;
+}
+.hud-mg-track {
+  position: relative;
+  height: 56px;
+  border-radius: 999px;
+  background: #fff3df;
+  border: 3px solid #ffd9a0;
+}
+.hud-mg-track[hidden] {
+  display: none;
+}
+.hud-mg-dot {
+  position: absolute;
+  top: 9px;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  border-radius: 50%;
+  background: #e5d6c4;
+  transition: transform 0.12s, background 0.12s;
+}
+.hud-mg-dot.lit {
+  background: var(--orange);
+  transform: scale(1.15);
+  box-shadow: 0 0 12px rgba(255, 140, 40, 0.8);
+}
+.hud-mg[data-ph='play'] .hud-mg-dot.lit,
+.hud-mg[data-ph='wait'] .hud-mg-dot.lit {
+  background: #f5c48a;
+  box-shadow: none;
+  transform: none;
+}
+.hud-mg-cursor {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  margin-left: -1px;
+  background: #e2341d;
+  border-radius: 2px;
+}
+.hud-mg-cursor[hidden] {
+  display: none;
+}
+.hud-mg-taps {
+  position: absolute;
+  inset: 0;
+}
+.hud-mg-tap {
+  position: absolute;
+  bottom: 4px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: #3a8dde;
+  border: 2px solid #fff;
+}
+.hud-mg-list {
+  display: grid;
+  gap: 4px;
+}
+.hud-mg-row {
+  display: grid;
+  grid-template-columns: 3em 1fr 4em 5em;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: #f6efe6;
+  font-weight: 800;
+  font-size: 0.95rem;
+  text-align: left;
+}
+.hud-mg-row.me {
+  background: #ffe7a8;
+}
+.hud-mg-row .pct,
+.hud-mg-row .bst {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hud-mg-big {
+  font-size: clamp(2.6rem, 12vw, 5.5rem);
+  font-weight: 900;
+  color: #fff;
+  -webkit-text-stroke: 3px var(--orange);
+  text-shadow: 0 6px 0 rgba(0, 0, 0, 0.18);
+  min-height: 1.1em;
+  line-height: 1.1;
+}
+.is-phone .hud-mg-panel {
+  padding: 8px 12px 10px;
+}
+.is-phone .hud-mg-track {
+  height: 44px;
+}

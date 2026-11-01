@@ -55,6 +55,13 @@ export class Hud {
     this.wetBadge = h('div.hud-wet', { hidden: true }, '☔ ずぶぬれ… スピードダウン');
     this.thunderEl = h('div.hud-thunder');
     this.fallback = h('div.hud-fallback', { hidden: true }, '3D表示を開始できなかったため、簡易表示で遊んでいます');
+    // レース中のミニゲーム「リズムを真似しろ！」
+    this.mgTitle = h('div.hud-mg-title', null, '🎵 ミニゲーム！ リズムを真似しろ！');
+    this.mgSub = h('div.hud-mg-sub', null, '');
+    this.mgTrack = h('div.hud-mg-track');
+    this.mgList = h('div.hud-mg-list');
+    this.mgBig = h('div.hud-mg-big', null, '');
+    this.mgBox = h('div.hud-mg', { hidden: true }, h('div.hud-mg-panel', null, this.mgTitle, this.mgSub, this.mgTrack, this.mgList), this.mgBig);
 
     this.trBox = h('div.hud-tr', null, this.net, this.mapCanvas, this.camBtn, this.qualityBtn, this.fsBtn);
     this.root.append(
@@ -70,6 +77,7 @@ export class Hud {
       this.wetBadge,
       this.timing,
       this.cdBox,
+      this.mgBox,
       this.center,
       this.warn,
       this.fallback,
@@ -309,6 +317,82 @@ export class Hud {
   }
 
   /** 中央に大きなメッセージ */
+  /**
+   * ミニゲームの表示。d = null なら隠す。
+   * d: { ph, t, T: mgTimes, pat, taps: 自分が押した時刻, sc: 点数（車ごと）, names, me, npc, boosts, ranks }
+   */
+  setMg(d) {
+    this.mgBox.hidden = !d;
+    if (!d) {
+      this._mgKey = null;
+      return;
+    }
+    const { ph, t, T, pat } = d;
+    this.mgBox.dataset.ph = ph;
+    const key = pat.join(',');
+    const len = Math.max(0.5, T.len);
+    const pos = (x) => `${4 + (92 * Math.max(0, Math.min(len * 1.15, x))) / (len * 1.15)}%`;
+    if (this._mgKey !== key) {
+      // 拍の丸を並べ直す（お手本ごとに 1 回）
+      this._mgKey = key;
+      this.mgTrack.replaceChildren();
+      this._mgDots = pat.map((b) => {
+        const dot = h('div.hud-mg-dot', { style: { left: pos(b) } });
+        this.mgTrack.append(dot);
+        return dot;
+      });
+      this._mgCursor = h('div.hud-mg-cursor');
+      this._mgTapLayer = h('div.hud-mg-taps');
+      this.mgTrack.append(this._mgCursor, this._mgTapLayer);
+      this._mgTapN = -1;
+      this._mgListKey = '';
+    }
+    const sub = {
+      intro: 'お手本のリズムをよく聞いてね！',
+      demo: '♪ お手本',
+      wait: 'つぎは あなたの番…',
+      play: '真似しろ！（画面タップ / Enter / Space）',
+      result: '結果！ 上手いほど長く加速',
+      count: 'もうすぐ再スタート！',
+    }[ph];
+    this._set('mgsub', this.mgSub, sub);
+    // お手本の間は、鳴った拍が光り、カーソルが進む
+    const dt0 = t - T.demo;
+    this._mgDots.forEach((dot, i) => dot.classList.toggle('lit', ph !== 'intro' && (ph !== 'demo' || dt0 >= pat[i])));
+    const showCur = ph === 'demo';
+    this._mgCursor.hidden = !showCur;
+    if (showCur) this._mgCursor.style.left = pos(dt0);
+    // 自分が押した印（最初の 1 回をお手本の最初の拍にそろえて並べる）
+    const taps = d.taps || [];
+    if (taps.length !== this._mgTapN) {
+      this._mgTapN = taps.length;
+      this._mgTapLayer.replaceChildren(...taps.map((x) => h('div.hud-mg-tap', { style: { left: pos(x - taps[0] + pat[0]) } })));
+    }
+    // 結果（点数の高い順）とブーストの長さ
+    let list = '';
+    if (d.sc && (ph === 'result' || ph === 'count')) {
+      const order = d.sc.map((_, i) => i).sort((a, b) => d.ranks[a] - d.ranks[b]);
+      list = order.map((i) => `${d.ranks[i]}|${d.names[i]}${d.npc[i] ? '' : i === d.me ? '（あなた）' : ''}|${d.sc[i]}|${d.boosts[i].toFixed(1)}|${i === d.me ? 1 : 0}`).join(';');
+    }
+    if (list !== this._mgListKey) {
+      this._mgListKey = list;
+      this.mgList.replaceChildren(
+        ...(list
+          ? list.split(';').map((row) => {
+              const [r, name, sc, b, me] = row.split('|');
+              return h(`div.hud-mg-row${me === '1' ? '.me' : ''}`, null, h('b', null, `${r}位`), h('span', null, name), h('span.pct', null, `${sc}%`), h('span.bst', null, `⚡${b}秒`));
+            })
+          : []),
+      );
+    }
+    this.mgTrack.hidden = !!list;
+    // 大きな文字: 予告・真似しろ！・3 2 1
+    let big = '';
+    if (ph === 'play' && t < T.playStart + 0.8) big = '真似しろ！';
+    else if (ph === 'count') big = String(Math.max(1, Math.ceil(T.end - t)));
+    this._set('mgbig', this.mgBig, big);
+  }
+
   flash(text, cls = '', ms = 1300) {
     const el = h(`div.hud-flash.${cls || 'plain'}`, { style: { '--ms': `${ms / 1000}s` } }, text);
     this.center.append(el);
