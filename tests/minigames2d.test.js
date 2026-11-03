@@ -159,9 +159,9 @@ test('角度: お題は 0.1° 単位の小数も出る（5.0〜355.0°）', asyn
   assert.ok(!/ang-nudge|ArrowUp/.test(src), '少しずつ動かすボタン・キーはない');
 });
 
-test('県境バトルのお題: 北海道・沖縄県を除く 45 都府県から、毎回すべて同じ確率で選ぶ（前に出た県も除かない）', () => {
+test('県境バトルのお題: 45 都府県が一巡するまで、一度出た県は出ない（まだ出ていない県から同じ確率で選ぶ）', () => {
   assert.equal(DATA.prefs.filter((p) => p.borders.length).length, 45);
   const src = fs.readFileSync(new URL('../src/games/prefBattle/index.js', import.meta.url), 'utf8');
-  assert.ok(/return POOL\[Math\.min\(POOL\.length - 1, Math\.floor\(rnd\(\) \* POOL\.length\)\)\]/.test(src));
-  assert.ok(!/usedCodes/.test(src), '出た県を除く仕組みはない');
+  assert.ok(src.includes('let pool = POOL.filter((c) => !usedCodes.includes(c));'));
+  assert.ok(src.includes('usedCodes.length = 0;'), '全部出たら最初から');
 });

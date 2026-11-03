@@ -25,6 +25,7 @@ export const PREF = {
 const MAP_W = DATA.view.w;
 const MAP_H = DATA.view.h;
 const MAX_ZOOM = 60; // 日本全体が見える大きさの何倍まで拡大できるか
+const usedCodes = []; // ホスト: この部屋で出したお題（連戦で重ならないように）
 
 let tileMap = null; // 地図タイル（ゲームをまたいで読み込み済みのタイルを使い回す）
 function getTiles() {
@@ -45,11 +46,17 @@ function roundRect(g, R, r) {
 const prefOf = (code) => DATA.prefs.find((p) => p.code === code && p.borders.length) || DATA.prefs[10];
 
 /** お題になる都道府県（陸の県境があるもの。北海道・沖縄県は海に囲まれているので出ない） */
-export const POOL = DATA.prefs.filter((p) => p.borders.length).map((p) => p.code);
+const POOL = DATA.prefs.filter((p) => p.borders.length).map((p) => p.code);
 
-/** お題を選ぶ。北海道・沖縄県を除く 45 都府県から、毎回すべて同じ確率（1/45）で選ぶ（前に出た県も同じ確率） */
-export function pickCode(rnd = Math.random) {
-  return POOL[Math.min(POOL.length - 1, Math.floor(rnd() * POOL.length))];
+function pickCode() {
+  let pool = POOL.filter((c) => !usedCodes.includes(c));
+  if (!pool.length) {
+    usedCodes.length = 0;
+    pool = POOL;
+  }
+  const c = pool[Math.floor(Math.random() * pool.length)];
+  usedCodes.push(c);
+  return c;
 }
 
 class PrefBattle extends HostedGame {
