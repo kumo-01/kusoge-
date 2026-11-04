@@ -805,6 +805,11 @@ class DogKartGame {
     });
   }
 
+  /** ホストが計算するときの配信の間隔（tick）。ミニゲーム中は車が止まっているので 1/3 に減らす */
+  get netEvery() {
+    return this.sim?.s?.mg ? 6 : 2;
+  }
+
   // ---- レース中のミニゲーム（リズムを真似しろ！） ----
 
   /**
@@ -943,7 +948,8 @@ class DogKartGame {
       w.followSun(mine.x, mine.z);
       w.effects.update(dt, w.camera);
       w.updateAmbient(dt);
-      w.render();
+      // ミニゲーム中は景色が止まっているので、3D は 3 回に 1 回だけ描く（電池・発熱を抑える）
+      if (!this._mgState || (this._mgSkip = ((this._mgSkip | 0) + 1) % 3) === 0) w.render();
     }
 
     // HUD

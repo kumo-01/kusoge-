@@ -272,7 +272,8 @@ export class Game {
       this.engine.step(FIXED_DT);
       this._acc -= FIXED_DT;
       steps++;
-      if (++this._netTick % NET_EVERY === 0) due = true;
+      // ミニゲーム中は車が止まっているので、配信を 1/3 に減らす（通信量・サーバーの計算の節約）
+      if (++this._netTick % (this.engine.sim.s.mg ? NET_EVERY * 3 : NET_EVERY) === 0) due = true;
       const result = this.engine.takeResult();
       if (result) {
         this.pause();

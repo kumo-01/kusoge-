@@ -1342,13 +1342,14 @@ export class World {
     );
     const boxMat = this._track(new THREE.MeshToonMaterial({ map: qTex, transparent: true, opacity: 0.92 }));
     const boxGeo = this._track(new RoundedBoxGeometry(1.45, 1.45, 1.45, 2, 0.2));
-    this.boxes = this.boxPos.map((p) => {
-      const m = new THREE.Mesh(boxGeo, boxMat);
-      m.position.set(p.x, 1.6, p.z);
-      m.castShadow = true;
-      this.scene.add(m);
-      return m;
-    });
+    // 72 個を 1 回の描画で（1 個ずつのメッシュだと描画の呼び出しが 72 回になる）
+    this.boxMesh = new THREE.InstancedMesh(boxGeo, boxMat, this.boxPos.length);
+    this.boxMesh.castShadow = true;
+    this.boxMesh.frustumCulled = false;
+    this.boxMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.scene.add(this.boxMesh);
+    this._boxObj = new THREE.Object3D();
+    this._boxZero = new THREE.Matrix4().makeScale(0, 0, 0);
 
     // ドッグフード（道に落ちている粒。取られると消えて、しばらくするとまた出る）
     const foods = this.track.foods;
@@ -1543,16 +1544,23 @@ export class World {
   updateItems(items, dt) {
     this._t = (this._t || 0) + dt;
     const t = this._t;
-    items.boxes.forEach((timer, i) => {
-      const m = this.boxes[i];
-      if (!m) return;
-      m.visible = timer <= 0;
-      if (m.visible) {
-        m.rotation.y = t * 1.5 + i;
-        m.rotation.x = Math.sin(t + i) * 0.3;
-        m.position.y = 1.6 + Math.sin(t * 2.5 + i) * 0.25;
+    const bm = this.boxMesh;
+    if (bm) {
+      const o = this._boxObj;
+      const n = Math.min(items.boxes.length, this.boxPos.length);
+      for (let i = 0; i < n; i++) {
+        if (items.boxes[i] > 0) {
+          bm.setMatrixAt(i, this._boxZero);
+          continue;
+        }
+        const p = this.boxPos[i];
+        o.position.set(p.x, 1.6 + Math.sin(t * 2.5 + i) * 0.25, p.z);
+        o.rotation.set(Math.sin(t + i) * 0.3, t * 1.5 + i, 0);
+        o.updateMatrix();
+        bm.setMatrixAt(i, o.matrix);
       }
-    });
+      bm.instanceMatrix.needsUpdate = true;
+    }
     if (items.foods) this._updateFoods(items.foods, t);
     this._syncViews(items.proj.filter((p) => !p.f), this.projViews, 'bone', () => this._makeBone(), (v, p) => {
       v.position.set(p.x, 1.1, p.z);
