@@ -191,6 +191,28 @@ export function topbarInset(canvas) {
   return Math.max(0, t.bottom - c.top + 6);
 }
 
+let _safeProbe = null;
+/**
+ * キャンバスの下のほうで、実際には見えない高さ（CSS ピクセル）。
+ * スマホでは、画面の下のバー（ブラウザのツールバー・ホームバー）がキャンバスに重なることがある。大事な表示（円）はこの上に置く
+ */
+export function bottomInset(canvas) {
+  const c = canvas.getBoundingClientRect();
+  const vv = window.visualViewport;
+  const visBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+  let hidden = Math.max(0, c.bottom - Math.min(visBottom, window.innerHeight));
+  if (c.bottom >= window.innerHeight - 2) {
+    // 画面の下端まで届いているときは、ホームバーなどの分（safe-area）と少しの余白をあける
+    if (!_safeProbe) {
+      _safeProbe = document.createElement('div');
+      _safeProbe.style.cssText = 'position:fixed;left:0;bottom:0;width:0;height:env(safe-area-inset-bottom,0px);visibility:hidden;pointer-events:none';
+      document.body.append(_safeProbe);
+    }
+    hidden = Math.max(hidden, _safeProbe.getBoundingClientRect().height + 10);
+  }
+  return Math.min(c.height * 0.3, hidden);
+}
+
 /** 平均 0・標準偏差 1 の乱数（CPU のぶれ） */
 export function gauss() {
   let u = 0;

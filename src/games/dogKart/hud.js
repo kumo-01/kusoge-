@@ -4,9 +4,9 @@ import { ITEM_INFO } from './items.js';
 import { RACE, TIMING, FOOD } from './constants.js';
 import { TouchControls } from './touch.js';
 import { device } from '../../core/device.js';
+import { bubbleLayout } from './bubble.js';
 
-export const KART_COLORS = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#ffc93c', '#22b573', '#8a63ff', '#c0182b', '#ff7a2f', '#2ec4d6', '#a0e05a', '#b07a52', '#e0e4ee'];
-const BOSS_COLOR = '#2b2b3a';
+export const KART_COLORS = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#ffc93c', '#22b573', '#8a63ff', '#c0182b', '#ff7a2f', '#2ec4d6', '#a0e05a', '#b07a52', '#e0e4ee', '#ff5fa2', '#3fb8a0', '#4a5fd8'];
 
 export class Hud {
   /** @param {{ round?: number, races?: number }} series 連戦のとき、何戦目か */
@@ -64,9 +64,13 @@ export class Hud {
     this.mgBox = h('div.hud-mg', { hidden: true }, h('div.hud-mg-panel', null, this.mgTitle, this.mgSub, this.mgTrack, this.mgList), this.mgBig);
 
     this.trBox = h('div.hud-tr', null, this.net, this.mapCanvas, this.camBtn, this.qualityBtn, this.fsBtn);
+    // プレイヤー名の吹き出し（ほかの表示より下に重ねる）
+    this.bubbleLayer = h('div.hud-bubbles');
+    this._bubbles = new Map();
     this.root.append(
       this.speedLines,
       this.boostEdge,
+      this.bubbleLayer,
       h('div.hud-tl', null, h('div.hud-rank-wrap', null, this.rank, this.rankTotal), h('div.hud-lt', null, this.round, this.lap, this.time)),
       this.trBox,
       h('div.hud-bl', null, h('div.hud-speed', null, this.speed, h('span', null, 'わんkm/h')), h('div.hud-speed-bar', null, this.speedBar), this.food),
@@ -92,6 +96,45 @@ export class Hud {
     container.append(this.root);
     this._buildMapBase();
     this._mapTimer = 0;
+  }
+
+  /**
+   * 名前の吹き出しを更新する。list: [{ key, name, color, nx, ny, nz, me, scale }]（頭の上の点を画面に写した値）。W, H: 画面の大きさ
+   */
+  setBubbles(list, W, H) {
+    const seen = new Set();
+    for (const b of list) {
+      seen.add(b.key);
+      let v = this._bubbles.get(b.key);
+      if (!v) {
+        const text = h('span.hb-text');
+        const tail = h('span.hb-tail');
+        const el = h('div.hud-bubble', null, text, tail);
+        this.bubbleLayer.append(el);
+        v = { el, text, tail, name: null, color: null, w: 0, h: 0, last: '' };
+        this._bubbles.set(b.key, v);
+      }
+      if (v.name !== b.name || v.color !== b.color) {
+        v.name = b.name;
+        v.color = b.color;
+        v.text.textContent = b.name;
+        v.el.style.setProperty('--c', b.color);
+        v.el.classList.toggle('is-me', !!b.me);
+        v.w = v.el.offsetWidth || 60;
+        v.h = v.el.offsetHeight || 26;
+      }
+      const sc = b.scale ?? 1;
+      const L = bubbleLayout(b.nx, b.ny, b.nz, W, H, v.w * sc, v.h * sc);
+      const key = `${Math.round(L.x)},${Math.round(L.y)},${L.edge ? 1 : 0},${Math.round(L.a * 20)},${Math.round(sc * 20)}`;
+      v.el.hidden = false;
+      if (key === v.last) continue; // 動いていなければ書き換えない
+      v.last = key;
+      v.el.classList.toggle('is-edge', L.edge);
+      v.el.style.transform = `translate(${(L.x - v.w / 2).toFixed(1)}px, ${(L.y - v.h / 2).toFixed(1)}px) scale(${sc.toFixed(2)})`;
+      // しっぽ: 吹き出しの中心から見た位置（拡大縮小の前の大きさで）
+      v.tail.style.transform = `translate(${(v.w / 2 + L.tx / sc).toFixed(1)}px, ${(v.h / 2 + L.ty / sc).toFixed(1)}px) rotate(${(L.a - Math.PI / 2).toFixed(3)}rad)`;
+    }
+    for (const [key, v] of this._bubbles) if (!seen.has(key)) v.el.hidden = true;
   }
 
   setTouch(on) {

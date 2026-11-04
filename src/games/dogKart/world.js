@@ -1418,7 +1418,44 @@ export class World {
       doorMat: this._track(new THREE.MeshBasicMaterial({ color: 0x3a2412 })),
       markMat: this._track(new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide })),
     };
-    this._viewPool = { bone: [], banana: [], frisbee: [], house: [], log: [] };
+    // 爆弾: 黒い玉・導火線・火花。落ちる場所に赤い輪（爆発の範囲）
+    this.bombViews = new Map();
+    this._bombParts = {
+      ball: this._track(new THREE.SphereGeometry(0.85, 16, 12)),
+      cap: this._track(new THREE.CylinderGeometry(0.28, 0.32, 0.3, 10)),
+      fuse: this._track(new THREE.CylinderGeometry(0.06, 0.06, 0.6, 5)),
+      spark: this._track(new THREE.SphereGeometry(0.2, 8, 6)),
+      mark: this._track(new THREE.RingGeometry(0.9, 1, 32).rotateX(-Math.PI / 2)),
+      ballMat: this._track(new THREE.MeshToonMaterial({ color: 0x2b2b33 })),
+      capMat: this._track(new THREE.MeshToonMaterial({ color: 0x8a8f9c })),
+      fuseMat: this._track(new THREE.MeshToonMaterial({ color: 0xc9a46b })),
+      sparkMat: this._track(new THREE.MeshBasicMaterial({ color: 0xffd23f })),
+      markMat: this._track(new THREE.MeshBasicMaterial({ color: 0xff5a2a, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide })),
+    };
+    this._viewPool = { bone: [], banana: [], frisbee: [], house: [], log: [], bomb: [] };
+  }
+
+  _makeBomb() {
+    const p = this._bombParts;
+    const g = new THREE.Group();
+    const mark = new THREE.Mesh(p.mark, p.markMat);
+    mark.name = 'mark';
+    mark.position.y = 0.12;
+    const body = new THREE.Group();
+    body.name = 'body';
+    const ball = new THREE.Mesh(p.ball, p.ballMat);
+    const cap = new THREE.Mesh(p.cap, p.capMat);
+    cap.position.y = 0.85;
+    const fuse = new THREE.Mesh(p.fuse, p.fuseMat);
+    fuse.position.set(0.12, 1.2, 0);
+    fuse.rotation.z = -0.4;
+    const spark = new THREE.Mesh(p.spark, p.sparkMat);
+    spark.name = 'spark';
+    spark.position.set(0.25, 1.5, 0);
+    body.add(ball, cap, fuse, spark);
+    body.traverse((o) => (o.castShadow = true));
+    g.add(mark, body);
+    return g;
   }
 
   _makeHouse() {
@@ -1592,6 +1629,24 @@ export class World {
         const wide = 1 + 0.1 * Math.exp(-g * 8);
         home.scale.set(wide * out, (0.78 + 0.22 * squish) * out, wide * out);
       }
+    });
+    this._syncViews(items.bombs || [], this.bombViews, 'bomb', () => this._makeBomb(), (v, b) => {
+      // 投げてから落ちるまでは放物線、落ちたら地面で点滅。爆発が近いほど速く点滅して少しふくらむ
+      const fl = ITEMS.BOMB_FLIGHT;
+      const f = Math.min(1, b.age / fl);
+      const body = v.getObjectByName('body');
+      const mark = v.getObjectByName('mark');
+      v.position.set(b.sx + (b.x - b.sx) * f, 0, b.sz + (b.z - b.sz) * f);
+      body.position.y = 0.85 + Math.sin(f * Math.PI) * 6;
+      body.rotation.set(f < 1 ? b.age * 9 : 0, 0, 0);
+      const left = Math.max(0, ITEMS.BOMB_FUSE - b.age);
+      const blink = Math.sin(t * (left < 1 ? 40 : 16)) > 0;
+      body.scale.setScalar(1 + (left < 1 ? (1 - left) * 0.35 : 0));
+      v.getObjectByName('spark').visible = blink;
+      mark.visible = f >= 1;
+      mark.position.set(b.x - v.position.x, 0.12, b.z - v.position.z);
+      mark.scale.setScalar(ITEMS.BOMB_RADIUS);
+      mark.material.opacity = left < 1 && blink ? 0.95 : 0.55;
     });
     this._syncViews(items.logs || [], this.logViews, 'log', () => this._makeLog(), (v, lg) => {
       const R = ITEMS.LOG_R;
@@ -1798,12 +1853,26 @@ export class World {
     if (this.track.tunnels.length) this._tunTarget = this.track.inTunnel(this.track.project(x, z).s, 8) ? 1 : 0;
   }
 
+  /** 3D の点を画面に写す（-1〜1 が画面の中。z > 1 はカメラの後ろ）。直前に描いたときのカメラで計算する */
+  projectPoint(x, y, z) {
+    const v = this._pv || (this._pv = new THREE.Vector3());
+    return v.set(x, y, z).project(this.camera);
+  }
+
   /** 車の見た目を必要な台数だけ用意する（NPC の数はスナップショットで決まる） */
-  ensureKarts(styles) {
-    while (this.karts.length < styles.length) {
-      const k = new KartView(styles[this.karts.length]); // 見た目の番号（6 = ボス犬）
+  ensureKarts(styles, vehs = []) {
+    for (let i = 0; i < styles.length; i++) {
+      const veh = vehs[i] | 0;
+      const old = this.karts[i];
+      if (old && old.style === styles[i] && old.veh === veh) continue;
+      // まだない・見た目（犬の種類・乗り物）が変わった（完全な状態を受け取った直後など）ときは作り直す
+      if (old) {
+        this.scene.remove(old.group, old.blob);
+        old.dispose();
+      }
+      const k = new KartView(styles[i], veh); // 見た目の番号（6 = ボス犬）と乗り物
       this.scene.add(k.group, k.blob);
-      this.karts.push(k);
+      this.karts[i] = k;
     }
   }
 

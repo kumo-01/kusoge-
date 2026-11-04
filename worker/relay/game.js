@@ -225,7 +225,7 @@ export class Game {
     const o = msg.options || {};
     const int = (v, d, lo, hi) => (Number.isInteger(v) ? Math.min(hi, Math.max(lo, v)) : d);
     try {
-      this.engine = new DogKartEngine({ course: int(o.course, 0, 0, 99), npcs: int(o.npcs, 0, 0, 9), boss: int(o.boss, 0, 0, 1), mg: int(o.mg, 1, 0, 1), players });
+      this.engine = new DogKartEngine({ course: int(o.course, 0, 0, 99), npcs: int(o.npcs, 0, 0, 10), boss: int(o.boss, 0, 0, 1), mg: int(o.mg, 1, 0, 1), players });
     } catch (err) {
       return this.send(conn, { type: 'e_error', reason: 'engine-failed' });
     }

@@ -43,16 +43,23 @@ export function ownerInput(sim, k) {
 export function ownerJump(sim, k) {
   const track = sim.track;
   const logs = sim.s.logs;
-  if (!logs?.length || k.y > 0.05 || k.vy > 0 || k.sp < 8) return false;
+  if (!logs?.length || k.y > 0.05 || k.vy > 0) return false;
   const p = track.project(k.x, k.z);
   const reach = KART.RADIUS + ITEMS.LOG_R + 1;
   for (const lg of logs) {
     const ds = track.wrapDS(lg.s - p.s);
-    if (p.lat < lg.a - reach || p.lat > lg.b + reach) continue;
-    // 跳んでから 1.2m を超えるまで約 0.12 秒、落ちてくるまで約 0.68 秒。その間に倒木の上を通るように
-    const t = (ds - reach) / k.sp;
+    if (ds <= 0 || p.lat < lg.a - reach || p.lat > lg.b + reach) continue;
+    // 跳んでから 1.2m を超えるまで約 0.12 秒、落ちてくるまで約 0.68 秒。その間に倒木の上を通るように。
+    // 倒木のすぐ後ろ（もう間に合わない距離・止まっている）で使ったときも、その場で跳んで越える
+    const t = (ds - reach) / Math.max(1, k.sp);
+    const close = ds < reach + 1.5;
     if (t > 0.1 && t < 0.3) {
       k.vy = ITEMS.OWNER_JUMP;
+      return true;
+    }
+    if (close) {
+      // すぐ後ろ: 少し高く跳んで、空中で加速して越える
+      k.vy = ITEMS.OWNER_JUMP * 1.25;
       return true;
     }
   }
@@ -157,6 +164,19 @@ export function npcInput(sim, k, dt) {
     let use = false;
     if (k.item === ITEMS.BOOST) {
       use = bend < 0.5;
+    } else if (k.item === ITEMS.ROD) {
+      // 前に誰かがいれば釣る
+      let ahead = false;
+      for (const o of s.karts) if (o !== k && !(o.fin && !o.npc) && sim.prog[o.i] > sim.prog[k.i]) ahead = true;
+      use = ahead && nextRandom(s) < dt * 0.8;
+    } else if (k.item === ITEMS.BOMB) {
+      // 前の近くに誰かがいるとき（落ちた所に追いついてしまわないよう、少し前を走る相手）
+      for (const o of s.karts) {
+        if (o === k) continue;
+        const d = sim.prog[o.i] - sim.prog[k.i];
+        if (d > 18 && d < 50) use = true;
+      }
+      if (!use && nextRandom(s) < dt * 0.12) use = true;
     } else if (k.item === ITEMS.GUARD || k.item === ITEMS.OWNER || k.item === ITEMS.RAIN) {
       use = nextRandom(s) < dt * 0.8; // すぐ使う
     } else if (k.item === ITEMS.HOUSE || k.item === ITEMS.HOUSE2) {

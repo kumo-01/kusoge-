@@ -113,6 +113,8 @@ export class GameManager extends Emitter {
         this.running = false;
         setTimeout(() => this.emit('finish', result), 0);
       },
+      // 席ごとのプレイヤー名（準備画面で入力したもの。空なら未入力）。部屋の状態から毎回読む（途中で変わっても反映される）
+      getNames: () => (this.namesFn ? this.namesFn() : []),
       getNetInfo: () => ({ rtt: this.serverSim ? this.engine?.rtt ?? null : this.net.rtt, running: this.running, route: this.serverSim ? this.engine?.route || '' : '' }),
     };
     if (server) {

@@ -15,6 +15,8 @@ export const ITEM_INFO = {
   [ITEMS.BANANA_ROW]: { name: '横一列バナナ', icon: '🍌🍌🍌', multi: true },
   [ITEMS.HOUSE2]: { name: '2個犬小屋', icon: '🏠🏠', multi: true },
   [ITEMS.LOG]: { name: '倒木', icon: '🪵' },
+  [ITEMS.BOMB]: { name: '爆弾', icon: '💣' },
+  [ITEMS.ROD]: { name: '釣り竿', icon: '🎣' },
 };
 
 /** 2 回使えるアイテム → 1 回使ったあとに残るもの */
@@ -62,6 +64,16 @@ const TABLE_ORDER = [
   ITEMS.RAIN, ITEMS.HOUSE, ITEMS.FRISBEE2, ITEMS.BANANA_ROW, ITEMS.HOUSE2, ITEMS.LOG,
 ];
 
+/**
+ * 表のあとに足したアイテムの重み（表の 1 行は合計 100）。
+ * 爆弾: 1 位は少なめ、それ以外は同じくらい。釣り竿: 1 位は出ない（上に誰もいない）。少しだけ出にくく、下の順位ほど出やすい
+ */
+export function extraWeights(rank, total) {
+  if (total <= 1 || rank <= 1) return { bomb: 4, rod: 0 };
+  const f = (Math.min(total, rank) - 1) / (total - 1);
+  return { bomb: 6, rod: Math.round(1 + 4 * f) };
+}
+
 /** 順位に応じたアイテムの重み（w[アイテム番号]）。rank: 1 = 先頭, total: 台数 */
 export function itemWeights(rank, total) {
   let row;
@@ -74,6 +86,9 @@ export function itemWeights(rank, total) {
   }
   const w = new Array(ITEMS.COUNT).fill(0);
   TABLE_ORDER.forEach((it, j) => (w[it] = row[j]));
+  const ex = extraWeights(rank, total);
+  w[ITEMS.BOMB] = ex.bomb;
+  w[ITEMS.ROD] = ex.rod;
   return w;
 }
 
@@ -180,6 +195,72 @@ export function useItem(s, k, events, progs = null, callRain = null, track = nul
       const b = track.pointAt(ls, to);
       s.logs.push({ id: s.nextId++, o: k.i, s: ((ls % track.length) + track.length) % track.length, a: Math.min(from, to), b: Math.max(from, to), x1: a.x, z1: a.z, x2: b.x, z2: b.z });
       events.push({ t: 'log', k: k.i, x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 });
+    }
+  } else if (item === ITEMS.BOMB) {
+    // 前へ放り投げる。落ちた場所で、投げてから BOMB_FUSE 秒後に爆発
+    let lx = k.x + fx * (ITEMS.BOMB_DIST + Math.max(0, k.sp) * ITEMS.BOMB_FLIGHT);
+    let lz = k.z + fz * (ITEMS.BOMB_DIST + Math.max(0, k.sp) * ITEMS.BOMB_FLIGHT);
+    if (track) {
+      // 壁の外には落ちない
+      const q = track.project(lx, lz);
+      const lim = track.wallDist - 1.5;
+      if (Math.abs(q.lat) > lim) {
+        const np = track.pointAt(q.s, Math.sign(q.lat) * lim);
+        lx = np.x;
+        lz = np.z;
+      }
+    }
+    (s.bombs ||= []).push({ id: s.nextId++, o: k.i, sx: k.x + fx * 1.5, sz: k.z + fz * 1.5, x: lx, z: lz, age: 0 });
+    while (s.bombs.length > ITEMS.BOMB_MAX) s.bombs.shift();
+  } else if (item === ITEMS.ROD) {
+    // 1 つ上の順位の車（走行距離がすぐ上）を、自分のすぐ後ろへ釣り上げる。どんなに離れていても届く
+    let target = -1;
+    if (progs) {
+      let best = Infinity;
+      for (const o of s.karts) {
+        if (o === k || o.fin) continue;
+        const d = progs[o.i] - progs[k.i];
+        if (d > 0 && d < best) {
+          best = d;
+          target = o.i;
+        }
+      }
+    }
+    const tk = target >= 0 ? s.karts[target] : null;
+    if (!tk || !track) {
+      events.push({ t: 'poof', x: k.x, z: k.z });
+    } else if (tk.ow > 0 || tk.gd > 0) {
+      // 飼い主モード中は釣れない。ガードは 1 回防ぐ（ガードは割れる）
+      if (tk.gd > 0) {
+        tk.gd = 0;
+        tk.inv = Math.max(tk.inv, 0.8);
+      }
+      events.push({ t: 'block', k: tk.i, x: tk.x, z: tk.z });
+      events.push({ t: 'fish', k: k.i, v: tk.i, x: tk.x, z: tk.z, n: 0 });
+    } else {
+      const p = track.project(k.x, k.z);
+      const lim = track.roadHalf - 2;
+      const lat = Math.max(-lim, Math.min(lim, p.lat + (p.lat > 0 ? -2.5 : 2.5)));
+      const np = track.pointAt(p.s - ITEMS.ROD_BACK, lat);
+      tk.x = np.x;
+      tk.z = np.z;
+      tk.h = np.h;
+      tk.sp = Math.max(0, Math.min(tk.sp, k.sp) * 0.6);
+      tk.kx = 0;
+      tk.kz = 0;
+      tk.y = 1.6;
+      tk.vy = 3;
+      tk.boost = 0;
+      tk.slow = Math.max(tk.slow, 0.6);
+      tk.inv = Math.max(tk.inv, 1);
+      tk.bump = 0.5;
+      // 周回とチェックポイントは釣った人と同じに（追い越した分が無くなる）
+      tk.lap = k.lap;
+      tk.cp = k.cp;
+      tk.wrong = 0;
+      k.stats.hits++;
+      tk.stats.hitBy++;
+      events.push({ t: 'fish', k: k.i, v: tk.i, x: tk.x, z: tk.z, n: 1 });
     }
   } else if (item === ITEMS.GUARD) {
     k.gd = ITEMS.GUARD_TIME;
@@ -411,6 +492,31 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
       }
     }
     if (remove) s.bananas.splice(i, 1);
+  }
+
+  // 爆弾: 投げてから BOMB_FUSE 秒で、落ちた場所の周りの車を巻き込んで爆発
+  if (s.bombs) {
+    for (let i = s.bombs.length - 1; i >= 0; i--) {
+      const bm = s.bombs[i];
+      bm.age += dt;
+      if (bm.age < ITEMS.BOMB_FUSE) continue;
+      s.bombs.splice(i, 1);
+      let n = 0;
+      for (const k of karts) {
+        if ((k.x - bm.x) ** 2 + (k.z - bm.z) ** 2 > ITEMS.BOMB_RADIUS ** 2 || k.y > 4) continue;
+        if (k.fin && !k.npc) continue;
+        if (spinKart(k, ITEMS.BOMB_SPIN, true)) {
+          n++;
+          k.vy = Math.max(k.vy, 9); // 吹き飛ぶ
+          k.stats.hitBy++;
+          if (k.i !== bm.o && karts[bm.o]) karts[bm.o].stats.hits++;
+          events.push({ t: 'hit', k: k.i, by: bm.o, x: k.x, z: k.z });
+        } else if (!(k.fin) && k.ow <= 0) {
+          events.push({ t: 'block', k: k.i, x: k.x, z: k.z });
+        }
+      }
+      events.push({ t: 'boom', k: bm.o, x: bm.x, z: bm.z, n });
+    }
   }
 
   // 犬小屋: 狙った車（1 位）の上を追いかけて、時間になったら落ちる。近くの車も巻き込まれる

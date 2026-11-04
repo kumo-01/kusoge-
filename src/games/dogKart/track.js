@@ -489,9 +489,9 @@ export class Track {
   itemBoxes() {
     const out = [];
     for (const f of [0.1, 0.27, 0.43, 0.6, 0.77, 0.92]) {
-      // 横 1 列に 12 個（道幅いっぱいに並べる）
-      for (let j = 0; j < 12; j++) {
-        const lat = -10 + (20 * j) / 11;
+      // 横 1 列に 15 個（道幅いっぱいに並べる。箱どうしの間は 1.5m）
+      for (let j = 0; j < 15; j++) {
+        const lat = -10.5 + (21 * j) / 14;
         const p = this.pointAt(f * this.length, lat);
         out.push({ x: p.x, z: p.z });
       }

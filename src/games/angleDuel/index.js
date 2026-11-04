@@ -4,7 +4,7 @@
 // 計算はホスト（common2d.js）。ゲストは自分の角度をホストへ送り、ホストは時間切れで締め切って答え合わせを配る。
 
 import { h } from '../../core/util.js';
-import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut, gauss } from '../common2d.js';
+import { HostedGame, fitCanvas, topbarInset, bottomInset, easeOut, easeInOut, gauss } from '../common2d.js';
 
 export const ANGLE = {
   READY: 2.5, // お題を見せてから操作できるまで（秒）
@@ -300,7 +300,8 @@ class AngleDuel extends HostedGame {
       g.fillText(this.el.timer.querySelector('.g2d-timer-num').textContent, w / 2, fy + 34);
       top = Math.min(hh * 0.45, fy + 60);
     }
-    const ah = hh - top;
+    const bot = bottomInset(c); // 画面の下のバーなどに隠れる所は使わない
+    const ah = hh - top - bot;
     // 答え合わせではラベルを外側に並べるので、円を少し小さく
     const R = Math.max(30, Math.min(w / 2, ah / 2) - (ph === 'reveal' ? 64 : 22));
     const cx = w / 2;

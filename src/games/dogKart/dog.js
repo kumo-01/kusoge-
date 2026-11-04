@@ -35,6 +35,10 @@ const STYLE = {
   dachs: { fur: 0xb5622e, dark: 0x7a3b16, cream: 0xe0a070, inner: 0x7a3b16, ears: 'long', earSpread: 0.44, scarf: 0xffd23f, snout: true },
   // ボス犬
   doberman: { fur: 0x2d2d38, dark: 0x16161d, cream: 0xc9773a, inner: 0xc9773a, earH: 0.7, earW: 0.2, earSpread: 0.3, earTilt: 0.04, scarf: 0xff3b3b, snout: true },
+  // NPC を増やしたとき用
+  chihuahua: { fur: 0xe9c08a, dark: 0xb88a52, cream: 0xfff1d6, inner: 0xffb8b0, earH: 0.6, earW: 0.36, earSpread: 0.42, earTilt: 0.5, scarf: 0xff8fd0 },
+  beagle: { fur: 0xc98a4b, dark: 0x3b2f2a, cream: 0xffffff, inner: 0x8a5833, ears: 'long', earSpread: 0.44, scarf: 0x2ec4d6, snout: true },
+  golden: { fur: 0xf0c060, dark: 0xd49a32, cream: 0xffe7b0, inner: 0xd49a32, ears: 'floppy', earSpread: 0.44, scarf: 0x22b573, snout: true },
   husky: { fur: 0x8d97aa, dark: 0x5b6477, cream: 0xffffff, inner: 0xffd2d8, earH: 0.46, earW: 0.26, earSpread: 0.31, earTilt: 0.1, scarf: 0x8a63ff, mask: true },
 };
 

@@ -49,8 +49,22 @@ const PALETTE = {
   9: { main: 0xa0e05a, dark: 0x6fb12f, accent: 0x40305a, css: '#5f9a24', flag: 0x40305a }, // トイプードル
   10: { main: 0xb07a52, dark: 0x8a5833, accent: 0xffe0a0, css: '#8a5833', flag: 0xffe0a0 }, // ブルパグ
   11: { main: 0xe0e4ee, dark: 0x9aa2b5, accent: 0xff5c8a, css: '#7d8599', flag: 0xff5c8a }, // シベリアン
+  12: { main: 0xff5fa2, dark: 0xd63d80, accent: 0xfff1c9, css: '#d63d80', flag: 0xffffff }, // チワワ
+  13: { main: 0x3fb8a0, dark: 0x288a76, accent: 0xffd23f, css: '#288a76', flag: 0xffd23f }, // ビーグル
+  14: { main: 0x4a5fd8, dark: 0x3344a8, accent: 0xffe066, css: '#3344a8', flag: 0xffe066 }, // ゴールデン
 };
-const DOG_KINDS = ['shiba', 'corgi', 'poodle', 'pug', 'dachs', 'husky', 'doberman', 'shiba', 'corgi', 'poodle', 'pug', 'husky'];
+const DOG_KINDS = ['shiba', 'corgi', 'poodle', 'pug', 'dachs', 'husky', 'doberman', 'shiba', 'corgi', 'poodle', 'pug', 'husky', 'chihuahua', 'beagle', 'golden'];
+
+/**
+ * 乗り物ごとの配置（見た目だけ。速さ・当たり判定はどれも同じ）。
+ * dog: 犬の位置, flames: ブーストの炎, antenna: アンテナの根元, lean: 曲がるときの傾き（マイナスは内側へ傾く）
+ */
+const VEH = [
+  { dog: [0, 0.62, -0.45], flames: [[-0.45, 0.55, -1.9], [0.45, 0.55, -1.9]], antenna: [0.7, 1.0, -1.1], lean: 0.14 }, // カート
+  { dog: [0, 0.98, -0.42], flames: [[0, 0.62, -1.7]], antenna: [0, 1.15, -1.25], lean: -0.32 }, // バイク
+  { dog: [0, 0.98, 0.15], flames: [[-0.45, 0.4, -1.55], [0.45, 0.4, -1.55]], antenna: [0.75, 1.75, -1.25], lean: 0.08 }, // ショッピングカート（カゴに乗る）
+  { dog: [0, 0.9, -0.35], flames: [[-0.5, 0.45, -1.3], [0.5, 0.45, -1.3]], antenna: [0.45, 1.0, -0.95], lean: 0.1 }, // 三輪車
+];
 
 /** スピン中の見た目の回転角（状態から決まるのでホストとゲストで同じ） */
 export function spinAngleOf(r) {
@@ -58,8 +72,13 @@ export function spinAngleOf(r) {
 }
 
 export class KartView {
-  constructor(index) {
+  /** index: 見た目の番号（犬とカートの色）, veh: 乗り物（0 カート / 1 バイク / 2 ショッピングカート / 3 三輪車） */
+  constructor(index, veh = 0) {
     const pal = PALETTE[index] || PALETTE[0];
+    this.style = index;
+    this.veh = veh = VEH[veh] ? veh : 0;
+    const lay = VEH[veh];
+    this.lean = lay.lean;
     this.group = new THREE.Group();
     this.body = new THREE.Group(); // 傾き・跳ね用
     this.group.add(this.body);
@@ -95,61 +114,149 @@ export class KartView {
       statics.get(mat).push(g);
     };
 
-    // 車体
-    addS(once('g-chassis', () => new RoundedBoxGeometry(1.9, 0.55, 2.9, 3, 0.22)), main, [0, 0.55, 0]);
-    addS(once('g-nose', () => new RoundedBoxGeometry(1.5, 0.42, 0.9, 3, 0.18)), main, [0, 0.5, 1.55]);
-    addS(once('g-bumper', () => new RoundedBoxGeometry(1.7, 0.28, 0.32, 2, 0.12)), black, [0, 0.36, 2.0]);
-    addS(once('g-stripe', () => new THREE.BoxGeometry(0.4, 0.05, 2.6)), accent, [0, 0.84, 0.05]);
-    addS(once('g-sidepod', () => new RoundedBoxGeometry(0.35, 0.4, 1.8, 2, 0.14)), dark, [-1.02, 0.5, -0.1]);
-    addS(once('g-sidepod', () => null), dark, [1.02, 0.5, -0.1]);
-    // ボンネットの肉球エンブレム
-    const emblem = new THREE.Mesh(once('g-emblem', () => new THREE.CircleGeometry(0.32, 24)), new THREE.MeshBasicMaterial({ map: pawTexture(pal.css), transparent: true }));
-    emblem.rotation.x = -Math.PI / 2 + 0.25;
-    emblem.position.set(0, 0.73, 1.55);
-    this.body.add(emblem);
-    this._mats.push(emblem.material);
-    // シート
-    addS(once('g-seat', () => new RoundedBoxGeometry(1.1, 0.9, 0.3, 2, 0.12)), dark, [0, 1.1, -0.95], [-0.15, 0, 0]);
-    addS(once('g-cushion', () => new RoundedBoxGeometry(1.0, 0.2, 0.9, 2, 0.08)), dark, [0, 0.86, -0.45]);
-    // スポイラー
-    addS(once('g-post', () => new THREE.CylinderGeometry(0.05, 0.05, 0.5, 6)), black, [-0.55, 1.0, -1.35]);
-    addS(once('g-post', () => null), black, [0.55, 1.0, -1.35]);
-    addS(once('g-wing', () => new RoundedBoxGeometry(1.9, 0.1, 0.5, 2, 0.04)), accent, [0, 1.26, -1.4]);
-    // マフラー
-    for (const sx of [-0.45, 0.45]) addS(once('g-pipe', () => new THREE.CylinderGeometry(0.11, 0.13, 0.5, 10)), chrome, [sx, 0.55, -1.6], [Math.PI / 2, 0, 0]);
-    // ライト
-    for (const sx of [-0.5, 0.5]) addS(once('g-light', () => new THREE.SphereGeometry(0.14, 10, 8)), once('m-light', () => new THREE.MeshBasicMaterial({ color: 0xfff6b0 })), [sx, 0.6, 1.98]);
-    // ハンドル
-    addS(once('g-column', () => new THREE.CylinderGeometry(0.05, 0.05, 0.6, 6)), black, [0, 0.95, 0.55], [0.9, 0, 0]);
-    this.wheel = add(once('g-steer', () => new THREE.TorusGeometry(0.3, 0.06, 8, 18)), black, [0, 1.08, 0.33], [-0.65, 0, 0]);
-    add(once('g-hub', () => new THREE.CylinderGeometry(0.08, 0.08, 0.06, 8)), accent, [0, 0, 0], [Math.PI / 2, 0, 0], this.wheel);
-
-    // アンテナ（先端がぶらぶら揺れる）
-    this.antenna = new THREE.Group();
-    this.antenna.position.set(0.7, 1.0, -1.1);
-    this.body.add(this.antenna);
-    add(once('g-ant', () => new THREE.CylinderGeometry(0.025, 0.025, 1.3, 5)), black, [0, 0.65, 0], null, this.antenna);
-    add(once('g-ball', () => new THREE.SphereGeometry(0.14, 10, 8)), accent, [0, 1.35, 0], null, this.antenna);
-    this._ant = { x: 0, z: 0, vx: 0, vz: 0 };
-
-    // タイヤ
+    // ハンドル（カートは丸いハンドル。ほかは見た目だけの空のもの）
+    this.wheel = new THREE.Group();
+    this.body.add(this.wheel);
+    // タイヤ（ふつうは車に付ける。バイクは車体と一緒に傾くので車体に付ける）
     this.wheels = [];
     this.frontPivots = [];
     const tireGeo = once('g-tire', () => new THREE.CylinderGeometry(0.46, 0.46, 0.42, 16));
     const capGeo = once('g-cap', () => new THREE.CylinderGeometry(0.22, 0.22, 0.44, 12));
-    for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
+    const addWheel = (x, y, z, r, w, front, parent = this.group, spokes = accent) => {
       const pivot = new THREE.Group();
-      pivot.position.set(sx * 1.02, 0.46, sz * 1.02);
-      this.group.add(pivot);
+      pivot.position.set(x, y, z);
+      parent.add(pivot);
       const spin = new THREE.Group();
+      spin.scale.set(w / 0.42, r / 0.46, r / 0.46);
       pivot.add(spin);
       const tire = add(tireGeo, black, [0, 0, 0], [0, 0, Math.PI / 2], spin);
       add(capGeo, white, [0, 0, 0], [0, 0, Math.PI / 2], spin);
-      add(once('g-spoke', () => new THREE.BoxGeometry(0.46, 0.08, 0.5)), accent, [0, 0, 0], null, spin);
+      add(once('g-spoke', () => new THREE.BoxGeometry(0.46, 0.08, 0.5)), spokes, [0, 0, 0], null, spin);
       tire.receiveShadow = false;
       this.wheels.push(spin);
-      if (sz > 0) this.frontPivots.push(pivot);
+      if (front) this.frontPivots.push(pivot);
+      return pivot;
+    };
+    const tube = (len, r = 0.07) => once(`g-tube-${len}-${r}`, () => new THREE.CylinderGeometry(r, r, len, 6));
+    let emblemAt = null; // 肉球のエンブレム [位置, 向き]
+
+    if (veh === 0) {
+      // ---- カート ----
+      addS(once('g-chassis', () => new RoundedBoxGeometry(1.9, 0.55, 2.9, 3, 0.22)), main, [0, 0.55, 0]);
+      addS(once('g-nose', () => new RoundedBoxGeometry(1.5, 0.42, 0.9, 3, 0.18)), main, [0, 0.5, 1.55]);
+      addS(once('g-bumper', () => new RoundedBoxGeometry(1.7, 0.28, 0.32, 2, 0.12)), black, [0, 0.36, 2.0]);
+      addS(once('g-stripe', () => new THREE.BoxGeometry(0.4, 0.05, 2.6)), accent, [0, 0.84, 0.05]);
+      addS(once('g-sidepod', () => new RoundedBoxGeometry(0.35, 0.4, 1.8, 2, 0.14)), dark, [-1.02, 0.5, -0.1]);
+      addS(once('g-sidepod', () => null), dark, [1.02, 0.5, -0.1]);
+      emblemAt = [[0, 0.73, 1.55], [-Math.PI / 2 + 0.25, 0, 0]];
+      // シート
+      addS(once('g-seat', () => new RoundedBoxGeometry(1.1, 0.9, 0.3, 2, 0.12)), dark, [0, 1.1, -0.95], [-0.15, 0, 0]);
+      addS(once('g-cushion', () => new RoundedBoxGeometry(1.0, 0.2, 0.9, 2, 0.08)), dark, [0, 0.86, -0.45]);
+      // スポイラー
+      addS(once('g-post', () => new THREE.CylinderGeometry(0.05, 0.05, 0.5, 6)), black, [-0.55, 1.0, -1.35]);
+      addS(once('g-post', () => null), black, [0.55, 1.0, -1.35]);
+      addS(once('g-wing', () => new RoundedBoxGeometry(1.9, 0.1, 0.5, 2, 0.04)), accent, [0, 1.26, -1.4]);
+      // マフラー
+      for (const sx of [-0.45, 0.45]) addS(once('g-pipe', () => new THREE.CylinderGeometry(0.11, 0.13, 0.5, 10)), chrome, [sx, 0.55, -1.6], [Math.PI / 2, 0, 0]);
+      // ライト
+      for (const sx of [-0.5, 0.5]) addS(once('g-light', () => new THREE.SphereGeometry(0.14, 10, 8)), once('m-light', () => new THREE.MeshBasicMaterial({ color: 0xfff6b0 })), [sx, 0.6, 1.98]);
+      // ハンドル
+      addS(once('g-column', () => new THREE.CylinderGeometry(0.05, 0.05, 0.6, 6)), black, [0, 0.95, 0.55], [0.9, 0, 0]);
+      this.wheel.position.set(0, 1.08, 0.33);
+      this.wheel.rotation.set(-0.65, 0, 0);
+      add(once('g-steer', () => new THREE.TorusGeometry(0.3, 0.06, 8, 18)), black, [0, 0, 0], null, this.wheel);
+      add(once('g-hub', () => new THREE.CylinderGeometry(0.08, 0.08, 0.06, 8)), accent, [0, 0, 0], [Math.PI / 2, 0, 0], this.wheel);
+      for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) addWheel(sx * 1.02, 0.46, sz * 1.02, 0.46, 0.42, sz > 0);
+    } else if (veh === 1) {
+      // ---- バイク（スクーター風）: 前後に大きなタイヤ。曲がるときは内側へ傾く ----
+      addS(once('g-bk-body', () => new RoundedBoxGeometry(0.75, 0.55, 2.1, 3, 0.22)), main, [0, 0.72, -0.25]);
+      addS(once('g-bk-tank', () => new RoundedBoxGeometry(0.85, 0.5, 0.8, 3, 0.2)), main, [0, 1.0, 0.45], [0.25, 0, 0]);
+      addS(once('g-bk-stripe', () => new THREE.BoxGeometry(0.2, 0.05, 1.9)), accent, [0, 1.0, -0.3]);
+      addS(once('g-bk-seat', () => new RoundedBoxGeometry(0.62, 0.18, 1.0, 2, 0.08)), dark, [0, 1.06, -0.45]);
+      addS(once('g-bk-back', () => new RoundedBoxGeometry(0.62, 0.45, 0.16, 2, 0.06)), dark, [0, 1.3, -0.98], [-0.2, 0, 0]);
+      addS(once('g-bk-fender', () => new THREE.CylinderGeometry(0.62, 0.62, 0.4, 14, 1, true, -Math.PI / 2, Math.PI)), dark, [0, 0.62, -1.2], [0, 0, Math.PI / 2]);
+      addS(once('g-pipe', () => new THREE.CylinderGeometry(0.11, 0.13, 0.5, 10)), chrome, [0.38, 0.5, -1.3], [Math.PI / 2, 0, 0]);
+      addS(once('g-light', () => new THREE.SphereGeometry(0.14, 10, 8)), once('m-light', () => new THREE.MeshBasicMaterial({ color: 0xfff6b0 })), [0, 1.0, 1.42]);
+      emblemAt = [[0, 1.18, 0.62], [-Math.PI / 2 + 0.6, 0, 0]];
+      // 前輪（フォーク・ハンドルごと曲がる）
+      const fp = addWheel(0, 0.55, 1.15, 0.55, 0.28, true, this.body, accent);
+      const fork = new THREE.Group();
+      fp.add(fork);
+      for (const sx of [-0.2, 0.2]) add(tube(1.0, 0.05), chrome, [sx, 0.45, -0.12], [-0.25, 0, 0], fork);
+      add(once('g-bk-bar', () => new THREE.CylinderGeometry(0.05, 0.05, 1.2, 6)), black, [0, 0.98, -0.28], [0, 0, Math.PI / 2], fork);
+      for (const sx of [-0.6, 0.6]) add(once('g-bk-grip', () => new THREE.CylinderGeometry(0.08, 0.08, 0.2, 8)), accent, [sx, 0.98, -0.28], [0, 0, Math.PI / 2], fork);
+      addWheel(0, 0.55, -1.2, 0.55, 0.32, false, this.body, accent);
+    } else if (veh === 2) {
+      // ---- ショッピングカート: 金網のカゴに犬が乗る。後ろに持ち手、下に小さな車輪 ----
+      const wire = once('m-wire', () => new THREE.MeshStandardMaterial({ color: 0xd8dde6, metalness: 0.6, roughness: 0.35 }));
+      const W = 1.7; // カゴの幅
+      const L = 2.3; // カゴの長さ
+      const y0 = 0.78; // カゴの底
+      const H = 0.95; // カゴの高さ
+      // 底（板）と、縦・横の針金
+      addS(once('g-sc-floor', () => new THREE.BoxGeometry(W, 0.06, L)), wire, [0, y0, 0]);
+      for (let j = 0; j <= 6; j++) {
+        const z = -L / 2 + (L * j) / 6;
+        for (const sx of [-1, 1]) addS(tube(H, 0.03), wire, [(sx * W) / 2, y0 + H / 2, z]);
+      }
+      for (let j = 0; j <= 4; j++) {
+        const x = -W / 2 + (W * j) / 4;
+        for (const sz of [-1, 1]) addS(tube(H, 0.03), wire, [x, y0 + H / 2, (sz * L) / 2]);
+      }
+      for (const yy of [y0 + H * 0.5, y0 + H]) {
+        for (const sx of [-1, 1]) addS(tube(L, 0.035), wire, [(sx * W) / 2, yy, 0], [Math.PI / 2, 0, 0]);
+        for (const sz of [-1, 1]) addS(tube(W, 0.035), wire, [0, yy, (sz * L) / 2], [0, 0, Math.PI / 2]);
+      }
+      // ふち（色つきのプラスチック）と持ち手
+      for (const sx of [-1, 1]) addS(once('g-sc-rim', () => new RoundedBoxGeometry(0.12, 0.12, L + 0.1, 2, 0.05)), main, [(sx * W) / 2, y0 + H, 0]);
+      addS(once('g-sc-rimf', () => new RoundedBoxGeometry(W + 0.1, 0.12, 0.12, 2, 0.05)), main, [0, y0 + H, L / 2]);
+      for (const sx of [-0.7, 0.7]) addS(tube(0.7, 0.05), wire, [sx, y0 + H + 0.2, -L / 2 - 0.2], [-0.6, 0, 0]);
+      addS(once('g-sc-handle', () => new RoundedBoxGeometry(1.7, 0.16, 0.16, 2, 0.07)), main, [0, y0 + H + 0.42, -L / 2 - 0.42]);
+      // 下の台と脚
+      addS(once('g-sc-rack', () => new THREE.BoxGeometry(W - 0.3, 0.05, L - 0.4)), wire, [0, 0.3, -0.1]);
+      for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) addS(tube(0.6, 0.05), wire, [sx * (W / 2 - 0.12), 0.55, sz * (L / 2 - 0.15)]);
+      emblemAt = [[0, y0 + H * 0.5, L / 2 + 0.05], [0, 0, 0]];
+      for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) addWheel(sx * (W / 2 - 0.12), 0.24, sz * (L / 2 - 0.15), 0.24, 0.16, sz > 0, this.group, black);
+    } else {
+      // ---- 三輪車: 前に大きなタイヤとペダル、後ろに小さなタイヤ 2 つ ----
+      addS(tube(1.9, 0.09), main, [0, 0.72, 0.1], [Math.PI / 2 - 0.12, 0, 0]);
+      addS(tube(1.3, 0.08), main, [0, 0.42, -0.9], [0, 0, Math.PI / 2]);
+      addS(once('g-tr-deck', () => new RoundedBoxGeometry(1.1, 0.12, 0.5, 2, 0.05)), dark, [0, 0.5, -0.95]);
+      addS(once('g-tr-seat', () => new RoundedBoxGeometry(0.75, 0.2, 0.7, 2, 0.09)), dark, [0, 1.12, -0.4]);
+      addS(once('g-tr-back', () => new RoundedBoxGeometry(0.7, 0.5, 0.14, 2, 0.06)), dark, [0, 1.35, -0.78], [-0.2, 0, 0]);
+      addS(tube(0.55, 0.07), main, [0, 0.85, -0.4]);
+      addS(once('g-tr-bell', () => new THREE.SphereGeometry(0.13, 10, 8)), chrome, [0.32, 1.42, 0.95]);
+      emblemAt = [[0, 0.98, 1.02], [-0.2, 0, 0]];
+      const fp = addWheel(0, 0.68, 1.15, 0.68, 0.24, true, this.group, accent);
+      const fork = new THREE.Group();
+      fp.add(fork);
+      for (const sx of [-0.18, 0.18]) add(tube(0.9, 0.05), chrome, [sx, 0.42, -0.06], [-0.15, 0, 0], fork);
+      add(once('g-bk-bar', () => new THREE.CylinderGeometry(0.05, 0.05, 1.2, 6)), chrome, [0, 0.82, -0.2], [0, 0, Math.PI / 2], fork);
+      for (const sx of [-0.6, 0.6]) {
+        add(once('g-bk-grip', () => new THREE.CylinderGeometry(0.08, 0.08, 0.2, 8)), accent, [sx, 0.82, -0.2], [0, 0, Math.PI / 2], fork);
+        add(once('g-tr-ribbon', () => new THREE.BoxGeometry(0.05, 0.4, 0.12).translate(0, -0.2, 0)), once('m-ribbon', () => toon(0xff8fd0)), [sx * 1.18, 0.82, -0.2], null, fork);
+      }
+      // ペダル（前輪と一緒に回る）
+      const spinFront = this.wheels[this.wheels.length - 1];
+      for (const sx of [-1, 1]) add(once('g-tr-pedal', () => new THREE.BoxGeometry(0.1, 0.07, 0.3)), black, [sx * 0.28, 0.33 * sx, 0], null, spinFront);
+      for (const sx of [-1, 1]) addWheel(sx * 0.62, 0.36, -0.9, 0.36, 0.2, false);
     }
+    if (emblemAt) {
+      // 肉球のエンブレム
+      const emblem = new THREE.Mesh(once('g-emblem', () => new THREE.CircleGeometry(0.32, 24)), new THREE.MeshBasicMaterial({ map: pawTexture(pal.css), transparent: true }));
+      emblem.position.set(...emblemAt[0]);
+      emblem.rotation.set(...emblemAt[1]);
+      this.body.add(emblem);
+      this._mats.push(emblem.material);
+    }
+
+    // アンテナ（先端がぶらぶら揺れる）
+    this.antenna = new THREE.Group();
+    this.antenna.position.set(...lay.antenna);
+    this.body.add(this.antenna);
+    add(once('g-ant', () => new THREE.CylinderGeometry(0.025, 0.025, 1.3, 5)), black, [0, 0.65, 0], null, this.antenna);
+    add(once('g-ball', () => new THREE.SphereGeometry(0.14, 10, 8)), accent, [0, 1.35, 0], null, this.antenna);
+    this._ant = { x: 0, z: 0, vx: 0, vz: 0 };
 
     this._geos = [];
     for (const [mat, list] of statics) {
@@ -166,9 +273,9 @@ export class KartView {
     const flameMat = new THREE.MeshBasicMaterial({ color: 0xffa31a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
     const coreMat = new THREE.MeshBasicMaterial({ color: 0xfff2a8, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
     this._mats.push(flameMat, coreMat);
-    for (const sx of [-0.45, 0.45]) {
+    for (const fp of lay.flames) {
       const f = new THREE.Group();
-      f.position.set(sx, 0.55, -1.9);
+      f.position.set(...fp);
       const outer = new THREE.Mesh(once('g-flame', () => new THREE.ConeGeometry(0.22, 1.2, 10).rotateX(-Math.PI / 2).translate(0, 0, -0.5)), flameMat);
       const core = new THREE.Mesh(once('g-flame2', () => new THREE.ConeGeometry(0.11, 0.7, 8).rotateX(-Math.PI / 2).translate(0, 0, -0.3)), coreMat);
       f.add(outer, core);
@@ -180,7 +287,7 @@ export class KartView {
     // 無敵中（復帰・スピン後）の点滅用に見た目をまとめて扱う
     // 犬
     this.dog = buildDog(DOG_KINDS[index] || 'shiba');
-    this.dog.group.position.set(0, 0.62, -0.45);
+    this.dog.group.position.set(...lay.dog);
     this.dog.group.scale.setScalar(0.92);
     this.body.add(this.dog.group);
     if (index === 6) this.group.scale.setScalar(1.12); // ボス犬は少し大きい
@@ -326,7 +433,7 @@ export class KartView {
     const bump = r.bump > 0 ? Math.sin(t * 45) * r.bump * 0.25 : 0;
     this.body.position.y = rumble + Math.abs(bump) * 0.4;
     // 曲がると外側へ傾く・加速で沈む（後ろが下がる）
-    this.body.rotation.z = -r.st * spRatio * 0.14 + bump;
+    this.body.rotation.z = -r.st * spRatio * this.lean + bump;
     this.body.rotation.x = -r.th * 0.05 * (r.th > 0 ? 1 - spRatio * 0.6 : 1) + (r.boost > 0 ? -0.06 : 0) + bump * 0.5;
     // 着地のつぶれ
     const squash = r.vy < -2 && r.y < 0.4 ? 0.9 : 1;

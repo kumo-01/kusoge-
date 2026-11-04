@@ -16,7 +16,7 @@ import { relayBase } from './relay.js';
 import { HostNetwork, GuestNetwork, LocalNetwork, describePeerError } from './network.js';
 import { GameManager } from './gameManager.js';
 import { getGame, defaultOptions, validOptions, resolveMatchOptions } from '../games/registry.js';
-import { sanitizeRoomState, sanitizeResult, REJECT_REASONS, MAX_PLAYERS } from './protocol.js';
+import { sanitizeRoomState, sanitizeResult, REJECT_REASONS, MAX_PLAYERS, cleanName } from './protocol.js';
 import { clearGuestSession } from './reconnect.js';
 
 /** ゲームを始められなかった理由を、画面に出す文にする（原因ごとに言い分ける） */
@@ -30,6 +30,23 @@ function startFailText(err) {
 
 /** 席の呼び名（トーストなどに使う） */
 export const PLAYER_LABEL = ['ホスト', 'ゲスト1', 'ゲスト2'];
+
+const NAME_KEY = 'wanwan.name';
+/** この端末に保存した自分の名前（なければ空） */
+export function loadMyName() {
+  try {
+    return cleanName(localStorage.getItem(NAME_KEY) || '');
+  } catch {
+    return '';
+  }
+}
+function saveMyName(name) {
+  try {
+    localStorage.setItem(NAME_KEY, name);
+  } catch {
+    /* 保存できなくても、この部屋の中では使える */
+  }
+}
 
 export const ROOM_CONFIG = {
   SYNC_RETRY_MS: 4000, // 状態を送ってから ACK が来ないとき、送り直すまでの時間
@@ -51,7 +68,7 @@ export class HostRoom extends Emitter {
     this.state = {
       rev: 0,
       screen: 'lobby',
-      players: Array.from({ length: MAX_PLAYERS }, (_, i) => ({ link: i === 0 ? 'connected' : 'none', ready: false })),
+      players: Array.from({ length: MAX_PLAYERS }, (_, i) => ({ link: i === 0 ? 'connected' : 'none', ready: false, name: i === 0 ? loadMyName() : '' })),
       gameId: null,
       options: {},
       match: null,
@@ -76,6 +93,7 @@ export class HostRoom extends Emitter {
     this.closed = false;
     this.net = solo ? new LocalNetwork() : new HostNetwork({ getRoomState: () => this.publicState() });
     this.gm = new GameManager({ role: 'host', slot: 0, net: this.net, input, sound, music, layer });
+    this.gm.namesFn = () => this.state.players.map((p) => p.name || '');
     this._onVisibility = () => this._visibilityChanged();
     document.addEventListener('visibilitychange', this._onVisibility);
   }
@@ -192,6 +210,7 @@ export class HostRoom extends Emitter {
     if (next === 'waiting') this._toast(`${PLAYER_LABEL[slot]}との通信が切れました。再接続を待っています…`);
     me.link = next;
     me.ready = false;
+    if (next === 'none') me.name = ''; // 退出した人の名前は消す
     if (s.screen === 'ready') this._resetReady();
     this._acks.delete(slot);
     // 参加者がいなくなったら一時停止（戻ってくるのを待つか、ホストがゲームを中止する）
@@ -205,6 +224,13 @@ export class HostRoom extends Emitter {
       case 'ready_change':
         if (s.screen === 'ready') this._setReady(slot, msg.ready);
         break;
+      case 'set_name': {
+        const name = cleanName(msg.name);
+        if (s.players[slot].name === name) return;
+        s.players[slot].name = name;
+        this._changed();
+        break;
+      }
       case 'resume_ack': {
         const m = s.match;
         if (!m || msg.matchId !== m.matchId || msg.gen !== m.gen || !m.players.includes(slot)) return;
@@ -337,6 +363,15 @@ export class HostRoom extends Emitter {
 
   setReady(value) {
     if (this.state.screen === 'ready') this._setReady(0, value);
+  }
+
+  /** 自分の名前を変える（端末にも保存する） */
+  setName(name) {
+    const n = cleanName(name);
+    saveMyName(n);
+    if (this.state.players[0].name === n) return;
+    this.state.players[0].name = n;
+    this._changed();
   }
 
   async _beginMatch() {
@@ -645,6 +680,7 @@ export class GuestRoom extends Emitter {
     this._queue = Promise.resolve();
     this.net = new GuestNetwork({ roomId: invite.room, inviteKey: invite.key, token });
     this.gm = new GameManager({ role: 'guest', net: this.net, input, sound, music, layer });
+    this.gm.namesFn = () => (this.state?.players || []).map((p) => p.name || '');
 
     this.net.on('state', (st) => {
       this.linkState = st;
@@ -660,6 +696,8 @@ export class GuestRoom extends Emitter {
       this._toast(this.joinedOnce || msg.rejoin ? '部屋に戻りました！' : '部屋に参加しました！');
       this.joinedOnce = true;
       this._enqueue({ type: 'room_state', room: msg.room });
+      const myName = loadMyName();
+      if (myName) this.net.send({ type: 'set_name', name: myName }); // 保存してある名前をホストに知らせる
     });
     this.net.on('message', (msg) => this._enqueue(msg));
     this.net.on('binary', (buf) => this.gm.handleBinary(buf)); // ホストからの位置の定期配信（P2P はバイナリの枠）
@@ -820,6 +858,13 @@ export class GuestRoom extends Emitter {
   get isSynced() {
     const m = this.state?.match;
     return !!m && !!this.synced && this.synced.matchId === m.matchId && this.synced.gen === m.gen;
+  }
+
+  /** 自分の名前を変える（端末にも保存して、ホストに知らせる） */
+  setName(name) {
+    const n = cleanName(name);
+    saveMyName(n);
+    this.net.send({ type: 'set_name', name: n });
   }
 
   setReady(value) {

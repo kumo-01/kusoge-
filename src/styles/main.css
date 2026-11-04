@@ -1422,6 +1422,53 @@ body[data-screen='game'] .toasts {
   color: var(--ink-soft);
   text-shadow: none;
 }
+/* プレイヤー名の吹き出し */
+.hud-bubbles {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.hud-bubble {
+  --c: #ff8a3d;
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 3px 10px 4px;
+  border-radius: 12px;
+  background: #fff;
+  border: 3px solid var(--c);
+  color: #4a3426;
+  font-size: 0.85rem;
+  font-weight: 900;
+  line-height: 1.15;
+  white-space: nowrap;
+  text-shadow: none;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.18);
+  will-change: transform;
+}
+.hud-bubble.is-me {
+  opacity: 0.82;
+  font-size: 0.75rem;
+}
+.hud-bubble.is-edge {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.55), 0 2px 0 rgba(0, 0, 0, 0.18);
+}
+.hb-tail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+.hb-tail::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: -12px;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 12px solid var(--c);
+}
 .hud-speedlines {
   position: absolute;
   inset: 0;
@@ -1487,6 +1534,159 @@ body[data-screen='game'] .toasts {
 .chip:disabled {
   opacity: 0.45;
   cursor: default;
+}
+.option-row + .option-row {
+  margin-top: 12px;
+}
+.option-row.is-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.option-row.is-toggle .option-label {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+/* スライダー */
+.opt-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.opt-range {
+  --fill: 0%;
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+.opt-range:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.opt-range::-webkit-slider-runnable-track {
+  height: 12px;
+  border-radius: 999px;
+  border: 3px solid #f1e6d8;
+  background: linear-gradient(90deg, var(--orange) var(--fill), var(--cream) var(--fill));
+}
+.opt-range::-moz-range-track {
+  height: 12px;
+  border-radius: 999px;
+  border: 3px solid #f1e6d8;
+  background: linear-gradient(90deg, var(--orange) var(--fill), var(--cream) var(--fill));
+}
+.opt-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  margin-top: -11px;
+  border-radius: 50%;
+  background: #fff;
+  border: 4px solid var(--orange-d);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.15);
+}
+.opt-range::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  border: 4px solid var(--orange-d);
+}
+.opt-range:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+.opt-value {
+  min-width: 4.8em;
+  text-align: center;
+  font-weight: 900;
+  font-size: 0.95rem;
+  color: var(--orange-d);
+  white-space: nowrap;
+}
+.opt-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  padding: 0 4px;
+  margin-right: calc(4.8em + 12px);
+}
+/* トグル */
+.opt-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.opt-toggle-row .opt-value {
+  min-width: 4.2em;
+  text-align: left;
+}
+.opt-toggle {
+  position: relative;
+  width: 58px;
+  height: 32px;
+  border-radius: 999px;
+  border: 3px solid #f1e6d8;
+  background: #e6dccf;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.18s, border-color 0.18s;
+}
+.opt-toggle.on {
+  background: var(--orange);
+  border-color: var(--orange-d);
+}
+.opt-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.opt-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.15);
+  transition: transform 0.18s;
+}
+.opt-toggle.on .opt-knob {
+  transform: translateX(26px);
+}
+/* 名前 */
+.name-card {
+  width: 100%;
+  padding: 12px 18px;
+}
+.name-input {
+  width: 100%;
+  font: inherit;
+  font-weight: 800;
+  font-size: 1rem;
+  padding: 0.5em 0.9em;
+  border-radius: 14px;
+  border: 3px solid #f1e6d8;
+  background: var(--cream);
+  color: var(--ink);
+  box-sizing: border-box;
+}
+.name-input:focus {
+  outline: none;
+  border-color: var(--orange);
 }
 .btn-pair {
   display: inline-flex;

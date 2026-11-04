@@ -64,6 +64,7 @@ const SCHEMAS = {
   join_request: { v: int(0, 1000), key: str(64), token: opt(str(64)) },
   join_accepted: { token: str(64), room: obj, rejoin: bool, fast: opt(str(32)), slot: int(1, MAX_PLAYERS - 1) },
   join_rejected: { reason: str(32) },
+  set_name: { name: str(40) }, // guest→host 自分の名前（準備画面で入力。部屋の状態で全員に配られる）
   room_state: { room: obj },
   ready_change: { ready: bool },
   game_start: { gameId: id, snapshot: obj, server: opt(obj), ...MATCH }, // server: サーバー計算の試合のとき { gid, ticket }（snapshot は空）
@@ -101,7 +102,7 @@ const SCHEMAS = {
 };
 
 export const FROM_GUEST = new Set([
-  'join_request', 'ready_change', 'player_input', 'resume_ack', 'game_msg',
+  'join_request', 'ready_change', 'set_name', 'player_input', 'resume_ack', 'game_msg',
   'leave', 'bye', 'ping', 'pong', 'presence',
 ]);
 /** サーバー計算の通信（worker/relay/game.js ⇔ src/core/engineClient.js） */
@@ -150,6 +151,17 @@ export function decode(raw, allowed) {
   return msg;
 }
 
+/** プレイヤー名の最大文字数 */
+export const NAME_MAX = 10;
+
+/** プレイヤー名を整える（制御文字・前後の空白を除き、長さを制限する。不正なら空文字） */
+export function cleanName(v) {
+  if (typeof v !== 'string') return '';
+  // eslint-disable-next-line no-control-regex
+  const t = v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim();
+  return Array.from(t).slice(0, NAME_MAX).join('');
+}
+
 // ---- 部屋の状態（ゲスト側で受信時に検証する） ----
 const SCREENS = ['lobby', 'home', 'select', 'ready', 'game', 'result'];
 const GUEST_LINK = ['none', 'connected', 'waiting', 'syncing'];
@@ -188,7 +200,7 @@ export function sanitizeRoomState(r) {
   for (let i = 0; i < MAX_PLAYERS; i++) {
     const p = r.players[i];
     if (!obj(p) || !oneOf(...GUEST_LINK)(p.link)) return null;
-    players.push({ link: i === 0 ? 'connected' : p.link, ready: p.ready === true });
+    players.push({ link: i === 0 ? 'connected' : p.link, ready: p.ready === true, name: cleanName(p.name) });
   }
   const room = {
     rev: r.rev,

@@ -300,8 +300,8 @@ test('アイテムは 2 個まで: 2 個持っている車・ルーレット中�
   assert.equal(a.item2, 0);
 });
 
-test('アイテムボックスは 6 か所に横 12 列', () => {
-  assert.equal(new RaceSim(track).boxPos.length, 72);
+test('アイテムボックスは 6 か所に横 15 列', () => {
+  assert.equal(new RaceSim(track).boxPos.length, 90);
 });
 
 test('NPC 2 台入りのレース: NPC が自分で走って周回し、人間がゴールすると決着する', () => {
@@ -397,11 +397,11 @@ test('全コース: NPC 4 台（6 台）でレースが決着し、NPC も周回
   });
 });
 
-test('NPC の数は 0〜7 台に制限される（人間 3 人 + NPC 7 台 + ボスで 11 台）', () => {
-  assert.equal(new RaceSim(track, { npcs: 9 }).s.karts.length, 9);
-  const big = new RaceSim(track, { players: [0, 1, 2], npcs: 7, boss: 1 });
-  assert.equal(big.s.karts.length, 11);
-  assert.equal(new Set(big.s.karts.map((k) => k.style)).size, 11, '見た目はすべてちがう');
+test('NPC の数は 0〜10 台に制限される（人間 3 人 + NPC 10 台 + ボスで 14 台）', () => {
+  assert.equal(new RaceSim(track, { npcs: 12 }).s.karts.length, 12);
+  const big = new RaceSim(track, { players: [0, 1, 2], npcs: 10, boss: 1 });
+  assert.equal(big.s.karts.length, 14);
+  assert.equal(new Set(big.s.karts.map((k) => k.style)).size, 14, '見た目はすべてちがう');
   assert.equal(new RaceSim(track, { npcs: -1 }).s.karts.length, 2);
 });
 
@@ -1028,7 +1028,8 @@ test('コース設定: ランダムは使っていないコースから選ぶ。
   const def = getGame('dogKart');
   const course = def.options.find((o) => o.key === 'course');
   assert.equal(course.choices.filter((c) => !c.random).length, COURSES.length);
-  assert.deepEqual(def.options.find((o) => o.key === 'races').choices.map((c) => c.value), [1, 2, 3, 4, 6]);
+  assert.deepEqual(def.options.find((o) => o.key === 'races').choices.map((c) => c.value), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(def.options.find((o) => o.key === 'npcs').choices.map((c) => c.value), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   const random = course.choices.find((c) => c.random).value;
   const used = [];
   for (let i = 0; i < COURSES.length; i++) {
@@ -1039,7 +1040,7 @@ test('コース設定: ランダムは使っていないコースから選ぶ。
   }
   assert.equal(resolveMatchOptions(def, { course: 4 }, {}).course, 4, '固定のコースはそのまま');
   assert.equal(resolveMatchOptions(def, { course: 4, races: 4, boss: 0 }).boss, 0);
-  assert.equal(validOptions(def, { races: 5 }).races, 1, '不正な値は初期値に戻る');
+  assert.equal(validOptions(def, { races: 7 }).races, 1, '不正な値は初期値に戻る');
   assert.equal(validOptions(def, {}).boss, 1);
 });
 
@@ -1060,18 +1061,18 @@ test('部屋の状態: 連戦の途中経過とレースごとの設定を検証
   assert.deepEqual(m.match.players, [0, 2], 'players: 席の範囲外・重複は捨てる');
 });
 
-test('3 人対戦: 人間が 3 人・NPC は 7 台まで・見た目は席に対応・入力は人ごと', () => {
-  const sim = new RaceSim(track, { players: [0, 1, 2], npcs: 9, boss: 1 });
+test('3 人対戦: 人間が 3 人・NPC は 10 台まで・見た目は席に対応・入力は人ごと', () => {
+  const sim = new RaceSim(track, { players: [0, 1, 2], npcs: 12, boss: 1 });
   assert.equal(sim.humans, 3);
-  assert.equal(sim.s.karts.length, 3 + 7 + 1, '3 人 + 通常の NPC 7 台 + ボス');
-  assert.deepEqual(sim.s.karts.map((k) => k.npc), [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]);
-  assert.deepEqual(sim.s.karts.map((k) => k.style), [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 6], 'styles: seats first, then free dogs, boss last');
+  assert.equal(sim.s.karts.length, 3 + 10 + 1, '3 人 + 通常の NPC 10 台 + ボス');
+  assert.deepEqual(sim.s.karts.map((k) => k.npc), [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+  assert.deepEqual(sim.s.karts.map((k) => k.style), [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 6], 'styles: seats first, then free dogs, boss last');
   assert.equal(sim.s.acks.length, 3);
   // 2 人 + NPC 4 台（今までどおり）
   const two = new RaceSim(track, { npcs: 9 });
   assert.equal(two.humans, 2);
-  assert.equal(two.s.karts.length, 9);
-  assert.deepEqual(two.s.karts.map((k) => k.style), [0, 1, 2, 3, 4, 5, 7, 8, 9]);
+  assert.equal(two.s.karts.length, 11);
+  assert.deepEqual(two.s.karts.map((k) => k.style), [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11]);
   // 席 0 と 2 だけ（1 は空き）: 車 1 は席 2 の人。NPC には空いている犬が回る
   const gap = new RaceSim(track, { players: [0, 2], npcs: 2 });
   assert.deepEqual(gap.slots, [0, 2]);

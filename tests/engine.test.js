@@ -99,14 +99,19 @@ test('エンジン: 演出イベントは id つきで、3 回の配信にわた
 
 test('エンジン: 決着すると結果を 1 度だけ返す（人数分・席つき）', () => {
   const e = started({ npcs: 0 });
+  // 3 人のときは 2 人目がゴールした時点で決着（勝ちは 1 人目）
   const k = e.sim.s.karts[2];
+  const k1 = e.sim.s.karts[1];
   const p = e.track.pointAt(e.track.length - 12, 0);
+  const p1 = e.track.pointAt(e.track.length - 40, 5);
   for (const o of e.sim.s.karts) o.sp = 0;
   Object.assign(k, { x: p.x, z: p.z, h: p.h, sp: 26, kx: 0, kz: 0, lap: 2, cp: e.track.checkpoints - 1 });
+  Object.assign(k1, { x: p1.x, z: p1.z, h: p1.h, sp: 26, kx: 0, kz: 0, lap: 2, cp: e.track.checkpoints - 1 });
   let result = null;
   let results = 0;
   for (let i = 0; i < 60 * 30; i++) {
     e.receiveInput(2, i + 1, [IN.UP]);
+    e.receiveInput(1, i + 1, [IN.UP]);
     e.step(DT);
     const r = e.takeResult();
     if (r) {

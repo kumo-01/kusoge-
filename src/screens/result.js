@@ -16,7 +16,8 @@ export function mount(el, app) {
     const players = r?.players || []; // 結果に載っている人（席の番号つき）
     const me = room.slot;
     const cpu = new Set(r?.cpu || []); // ひとりモードの CPU の席
-    const nameOf = (slot) => `${PLAYERS[slot].name}${cpu.has(slot) ? '（CPU）' : ''}`;
+    const nick = (slot) => (cpu.has(slot) ? '' : s.players?.[slot]?.name || ''); // 準備画面で入れた名前
+    const nameOf = (slot) => nick(slot) || `${PLAYERS[slot].name}${cpu.has(slot) ? '（CPU）' : ''}`;
     // 連戦の最終結果は合計ポイントで勝敗を決める（途中経過・1 レースだけのときは、そのレースの勝者）
     let winner = r?.winner ?? null;
     if (se?.final) {
@@ -35,7 +36,7 @@ export function mount(el, app) {
         winner === p.slot ? h('div.crown', null, '👑') : null,
         h('div.avatar', { html: dogAvatar(pl.kind, 96) }),
         p.slot === me ? h('span.me-badge.inline', null, 'あなた') : null,
-        h('div.player-name', null, cpu.has(p.slot) ? `🤖 ${pl.name}（CPU）` : `${pl.name}（${pl.role}）`),
+        h('div.player-name', null, cpu.has(p.slot) ? `🤖 ${pl.name}（CPU）` : nick(p.slot) ? `${nick(p.slot)}（${pl.name}）` : `${pl.name}（${pl.role}）`),
         h('div.result-headline', null, se ? (se.final ? `${se.scores[p.slot]} pt` : p.headline) : p.headline),
         h('div.small', null, se ? (se.final ? `${se.total}戦の合計ポイント` : `${r?.points?.[i] ?? 0} pt 獲得（合計 ${se.scores[p.slot]} pt）`) : p.detail));
     };

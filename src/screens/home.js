@@ -11,7 +11,7 @@ export function mount(el, app) {
     const cards = [];
     for (let i = 0; i < MAX_PLAYERS; i++) {
       if (i > 0) cards.push(h('div.vs-badge', null, 'VS'));
-      cards.push(playerCard(i, { me: i === room.slot, status: linkFor(app, i) }));
+      cards.push(playerCard(i, { me: i === room.slot, status: linkFor(app, i), nick: room.state?.players?.[i]?.name || '' }));
     }
     el.replaceChildren(
       h(

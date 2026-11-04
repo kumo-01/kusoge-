@@ -81,7 +81,7 @@ export function statusPill(state, extra) {
 }
 
 /** プレイヤーカード。slot: 席（0 = ホスト, 1・2 = ゲスト）。colorWord: 色のあとにつける言葉（カートのゲームなら「のカート」） */
-export function playerCard(slot, { me = false, status = 'connected', ready = null, extra = null, colorWord = '' } = {}) {
+export function playerCard(slot, { me = false, status = 'connected', ready = null, extra = null, colorWord = '', nick = '' } = {}) {
   const p = PLAYERS[slot];
   const empty = status === 'none';
   return h(
@@ -89,8 +89,8 @@ export function playerCard(slot, { me = false, status = 'connected', ready = nul
     null,
     me ? h('span.me-badge', null, 'あなた') : null,
     h('div.avatar', { html: dogAvatar(p.kind, 88) }),
-    h('div.player-name', null, p.name),
-    h('div.player-role', null, `${p.role}・${p.colorName}${colorWord}`),
+    h('div.player-name', null, nick && !empty ? nick : p.name),
+    h('div.player-role', null, `${nick && !empty ? `${p.name}・` : ''}${p.role}・${p.colorName}${colorWord}`),
     statusPill(status),
     ready === null || empty ? null : h(`div.ready-badge${ready ? '.on' : ''}`, null, ready ? '✔ 準備OK' : '準備中…'),
     extra,

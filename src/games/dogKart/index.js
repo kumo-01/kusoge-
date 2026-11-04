@@ -11,7 +11,7 @@ import { Predictor, RemoteKarts } from './netview.js';
 import { stepKart } from './physics.js';
 import { World } from './world.js';
 import { ChaseCamera } from './camera.js';
-import { Hud } from './hud.js';
+import { Hud, KART_COLORS } from './hud.js';
 import { RACE, NET, IN, ITEMS, KART, RAIN, FOOD } from './constants.js';
 import { lerp, lerpAngle, angleDiff } from '../../core/util.js';
 import { spinAngleOf } from './kart.js';
@@ -510,6 +510,13 @@ class DogKartGame {
           } else if (e.item === ITEMS.LOG) {
             snd.play('throw');
             if (e.k === me) this.hud.flash('🪵 後ろに倒木！', 'good', 1300);
+          } else if (e.item === ITEMS.BOMB) {
+            snd.play('throw');
+            fx?.text('ポイッ!', k.x, 3.5, k.z, 3.2);
+            if (e.k === me) this.hud.flash('💣 爆弾を投げた！ 3秒後にドカン', 'good', 1400);
+          } else if (e.item === ITEMS.ROD) {
+            snd.play('throw');
+            fx?.text('それっ!', k.x, 3.5, k.z, 3.2);
           } else if (e.item === ITEMS.GUARD) {
             snd.play('itemReady');
             fx?.ring(k.x, 0.8, k.z, 0x7fd0ff, 5);
@@ -540,6 +547,36 @@ class DogKartGame {
           fx?.text('メキメキ…ドーン!', e.x, 4.5, e.z, 4.5);
           this.cam?.addShake(0.35);
           break;
+        case 'boom':
+          // 爆弾の爆発
+          snd.play('bigBump');
+          snd.play('hit');
+          fx?.puff(e.x, 1.2, e.z, { color: 0x555555, n: 18, size: 2, spread: 6 });
+          fx?.sparks(e.x, 1.2, e.z, 30, 0xffa31a);
+          fx?.ring(e.x, 0.5, e.z, 0xff7a2f, ITEMS.BOMB_RADIUS);
+          fx?.text('ドッカーン!', e.x, 5, e.z, 5.5);
+          {
+            const mk = kartPos(me);
+            const d = mk ? Math.hypot(mk.x - e.x, mk.z - e.z) : 999;
+            this.cam?.addShake(d < ITEMS.BOMB_RADIUS ? 1.1 : d < 40 ? 0.5 : 0.15);
+          }
+          if (e.k === me && e.n > 0) this.hud.flash(`💣 ${e.n}台を巻き込んだ！`, 'good', 1300);
+          break;
+        case 'fish': {
+          // 釣り竿: 1 つ上の順位の車を、使った人のすぐ後ろへ釣り上げた
+          const v = kartPos(e.v);
+          if (e.n) {
+            snd.play('slip');
+            fx?.puff(e.x, 1.5, e.z, { color: 0x8ec5ff, n: 12, size: 1.2, spread: 3 });
+            fx?.text('つれた〜!', e.x, 4.5, e.z, 4.5);
+            if (e.k === me) this.hud.flash(`🎣 ${v ? kartName(v) : ''}を釣り上げた！`, 'good', 1500);
+            if (e.v === me) {
+              this.hud.flash('🎣 釣られた〜！ 後ろへ戻された', 'bad', 1600);
+              this.cam?.addShake(0.7);
+            }
+          } else if (e.k === me) this.hud.flash('🎣 防がれた…', 'bad', 1100);
+          break;
+        }
         case 'house':
           snd.play('hit');
           fx?.puff(e.x, 1, e.z, { n: 14, size: 1.6, spread: 5 });
@@ -608,9 +645,17 @@ class DogKartGame {
           if (e.k === me) {
             snd.play('finish');
             this.hud.flash('🏁 ゴール！！', 'goal', 3500);
-          } else if (e.k < 2) {
-            snd.play('lose');
-            this.hud.flash('あいてが先にゴール…', 'bad', 3500);
+          } else if (!k.npc) {
+            // 人間がゴール（3 人のときは 2 人目のゴールで終わる）
+            const first = this.sim.s.winner === e.k;
+            const myFin = !!kartPos(me)?.fin;
+            if (first && !myFin) {
+              snd.play('lose');
+              const more = this.sim.finishNeed > 1 ? ' あと1人ゴールで終了！' : '';
+              this.hud.flash(`あいてが先にゴール…${more}`, 'bad', 3500);
+            } else {
+              this.hud.flash(`${kartName(k)}がゴール！`, 'plain', 1500);
+            }
           } else {
             this.hud.flash(`${kartName(kartPos(e.k))}がゴール！`, 'plain', 1500);
           }
@@ -765,7 +810,39 @@ class DogKartGame {
       const q = prevHouse.get(p.id);
       return q ? { ...p, x: lerp(q.x, p.x, f), z: lerp(q.z, p.z, f) } : p;
     });
-    return { karts, items: { boxes: s.boxes, proj, bananas, houses, foods: s.foods, logs: s.logs || [] } };
+    // 爆弾は動かない（投げてから落ちるまでの見た目は、投げてからの時間で決まる）。時間だけ補間する
+    const prevBomb = new Map((a.s.bombs || []).map((p) => [p.id, p]));
+    const bombs = ((present ? s.bombs : n.s.bombs) || []).map((p) => {
+      const q = prevBomb.get(p.id);
+      return q && !present ? { ...p, age: lerp(q.age, p.age, f) } : p;
+    });
+    return { karts, items: { boxes: s.boxes, proj, bananas, houses, bombs, foods: s.foods, logs: s.logs || [] } };
+  }
+
+  /** プレイヤー名の吹き出し（人間だけ。画面の中なら頭の上、外なら画面のはしに） */
+  _updateBubbles(karts, firstPerson) {
+    const w = this.world;
+    const el = w.renderer.domElement;
+    const W = el.clientWidth;
+    const H = el.clientHeight;
+    if (!W || !H) return;
+    const names = this.ctx.getNames?.() || [];
+    const list = [];
+    const n = Math.min(this.sim.realHumans ?? this.sim.humans, karts.length);
+    const me = karts[this.me];
+    for (let i = 0; i < n; i++) {
+      const k = karts[i];
+      const sk = this.sim.s.karts[i];
+      if (!k || !sk || (i === this.me && firstPerson)) continue;
+      const slot = this.ctx.players?.[i] ?? i;
+      const name = names[slot] || kartName(sk);
+      const p = w.projectPoint(k.x, (k.y || 0) + 3.3, k.z);
+      // 遠くの人の吹き出しは少し小さく
+      const d = me ? Math.hypot(k.x - me.x, k.z - me.z) : 0;
+      const scale = i === this.me ? 0.9 : Math.max(0.75, Math.min(1, 60 / Math.max(1, d)));
+      list.push({ key: i, name, color: KART_COLORS[sk.style ?? i] || '#ff8a3d', nx: p.x, ny: p.y, nz: p.z, me: i === this.me, scale });
+    }
+    this.hud.setBubbles(list, W, H);
   }
 
   /** 車ごとの追加演出（ドリフトの火花・着地の土煙・ブースト煙など） */
@@ -931,9 +1008,10 @@ class DogKartGame {
     if (this.world) {
       const w = this.world;
       const winner = s.winner;
-      w.ensureKarts(karts.map((k) => (k.boss ? 6 : k.style ?? 0)));
+      w.ensureKarts(karts.map((k) => (k.boss ? 6 : k.style ?? 0)), s.karts.map((k) => k.veh | 0));
       karts.forEach((k, i) => {
-        const mood = winner < 0 ? 0 : k.npc ? (k.fin ? 1 : 0) : winner === i ? 1 : -1;
+        // 気分: 勝った人は喜ぶ。負けた人はレースが終わってからしょんぼり（3 人のときは 2 人目がゴールするまで続く）
+        const mood = winner < 0 ? 0 : k.npc ? (k.fin ? 1 : 0) : winner === i ? 1 : k.fin ? 0 : s.phase === 'finished' ? -1 : 0;
         w.karts[i].setFirstPerson(firstPerson && i === this.me);
         w.karts[i].own = i === this.me;
         w.karts[i].update(k, dt, mood);
@@ -950,6 +1028,7 @@ class DogKartGame {
       w.updateAmbient(dt);
       // ミニゲーム中は景色が止まっているので、3D は 3 回に 1 回だけ描く（電池・発熱を抑える）
       if (!this._mgState || (this._mgSkip = ((this._mgSkip | 0) + 1) % 3) === 0) w.render();
+      this._updateBubbles(karts, firstPerson);
     }
 
     // HUD
