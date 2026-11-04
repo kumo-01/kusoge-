@@ -43,8 +43,14 @@ const PALETTE = {
   4: { main: 0x22b573, dark: 0x168a55, accent: 0xffd23f, css: '#168a55', flag: 0xffd23f }, // NPC ダックス
   5: { main: 0x8a63ff, dark: 0x6340d6, accent: 0xb8f2ff, css: '#6340d6', flag: 0xffffff }, // NPC ハスキー
   6: { main: 0x2b2b3a, dark: 0x14141c, accent: 0xff3b3b, css: '#c0182b', flag: 0xff3b3b }, // ボス犬 ドーベルマン
+  // NPC を増やしたとき用（犬の種類は同じで、カートの色がちがう）
+  7: { main: 0xff7a2f, dark: 0xd4561a, accent: 0xfff1c9, css: '#d4561a', flag: 0xffffff }, // 豆柴
+  8: { main: 0x2ec4d6, dark: 0x1a95a6, accent: 0xffffff, css: '#1a95a6', flag: 0xffffff }, // ちびコーギー
+  9: { main: 0xa0e05a, dark: 0x6fb12f, accent: 0x40305a, css: '#5f9a24', flag: 0x40305a }, // トイプードル
+  10: { main: 0xb07a52, dark: 0x8a5833, accent: 0xffe0a0, css: '#8a5833', flag: 0xffe0a0 }, // ブルパグ
+  11: { main: 0xe0e4ee, dark: 0x9aa2b5, accent: 0xff5c8a, css: '#7d8599', flag: 0xff5c8a }, // シベリアン
 };
-const DOG_KINDS = ['shiba', 'corgi', 'poodle', 'pug', 'dachs', 'husky', 'doberman'];
+const DOG_KINDS = ['shiba', 'corgi', 'poodle', 'pug', 'dachs', 'husky', 'doberman', 'shiba', 'corgi', 'poodle', 'pug', 'husky'];
 
 /** スピン中の見た目の回転角（状態から決まるのでホストとゲストで同じ） */
 export function spinAngleOf(r) {

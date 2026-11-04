@@ -5,7 +5,7 @@ import { RACE, TIMING, FOOD } from './constants.js';
 import { TouchControls } from './touch.js';
 import { device } from '../../core/device.js';
 
-export const KART_COLORS = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#ffc93c', '#22b573', '#8a63ff'];
+export const KART_COLORS = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#ffc93c', '#22b573', '#8a63ff', '#c0182b', '#ff7a2f', '#2ec4d6', '#a0e05a', '#b07a52', '#e0e4ee'];
 const BOSS_COLOR = '#2b2b3a';
 
 export class Hud {

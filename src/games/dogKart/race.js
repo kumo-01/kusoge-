@@ -10,7 +10,7 @@ import { stepTiming, pickChances } from './timing.js';
 import { formatTime } from '../../core/util.js';
 import { MG, makePattern, mgTimes, mgScore, npcMgScore, mgBoost } from './minigame.js';
 
-export const KART_NAMES = ['柴犬', 'コーギー', 'プードル', 'パグ', 'ダックス', 'ハスキー'];
+export const KART_NAMES = ['柴犬', 'コーギー', 'プードル', 'パグ', 'ダックス', 'ハスキー', 'ドーベルマン', '豆柴', 'ちびコーギー', 'トイプードル', 'ブルパグ', 'シベリアン'];
 export const BOSS_NAME = 'ドーベルマン';
 
 /** 車の名前（ボス犬は台数に関係なく専用の名前） */
@@ -28,11 +28,11 @@ export class RaceSim {
     this.realHumans = slots.length === 1 ? 1 : this.slots.length; // 実際にいる人の数（ひとりモードでは 1。2 台目は誰も操作しない）
     this.humans = this.slots.length;
     this.boss = options.boss ? 1 : 0;
-    const maxNormal = RACE.MAX_KARTS - 1 - this.humans; // 通常の NPC は 6 - 人間の数 台まで（ボスは別枠）
+    const maxNormal = Math.min(RACE.MAX_NPCS, RACE.MAX_KARTS - 1 - this.humans); // 通常の NPC は 7 台まで（ボスは別枠）
     this.normalNpcs = Math.max(0, Math.min(maxNormal, options.npcs | 0));
     this.npcs = this.normalNpcs + this.boss;
     // NPC の見た目: 人間が使っていない犬を順に使う（ボスは専用）
-    const pool = [1, 2, 3, 4, 5].filter((v) => !this.slots.includes(v));
+    const pool = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11].filter((v) => !this.slots.includes(v));
     this.npcStyles = Array.from({ length: this.normalNpcs }, (_, i) => pool[i]).concat(this.boss ? [6] : []);
     this.mgOn = !!options.mg; // レース中のミニゲーム（リズムを真似しろ！）
     this.prog = [];
@@ -464,7 +464,7 @@ function sanitizeKart(r, i, prev) {
   k.spinDur = Math.max(0.1, k.spinDur);
   k.i = i;
   k.npc = r.npc === 1 || r.npc === 0 ? r.npc : prev.npc ? 1 : 0; // 人間か NPC かは、完全な状態でだけ届く（定期配信の間は変わらない）
-  k.style = int(r.style, prev.style ?? i, 0, 6);
+  k.style = int(r.style, prev.style ?? i, 0, 11);
   k.boss = r.boss === 1 || r.boss === 0 ? r.boss : prev.boss ? 1 : 0;
   k.grass = r.grass ? 1 : 0;
   k.fin = r.fin ? 1 : 0;

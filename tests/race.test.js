@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Track, COURSES } from '../src/games/dogKart/track.js';
+import { packNetBin, unpackNetBin } from "../src/games/dogKart/race.js";
 import { RaceSim, sanitizeSnapshot, packNet, unpackNet, kartName } from '../src/games/dogKart/race.js';
 import { maxSpeedOf as maxSpeedFor } from '../src/games/dogKart/physics.js';
 import { spinKart, itemWeights, chooseItem } from '../src/games/dogKart/items.js';
@@ -329,7 +330,7 @@ test('NPC 2 台入りのレース: NPC が自分で走って周回し、人間�
   assert.equal(other.s.karts[3].npc, 1);
 });
 
-test('全コース: 閉じていて離れた区間が十分離れ、内側が lat < 0、7 台のスタート位置が道路上', () => {
+test('全コース: 閉じていて離れた区間が十分離れ、内側が lat < 0、11 台のスタート位置が道路上', () => {
   assert.equal(COURSES.length, 10);
   COURSES.forEach((c, ci) => {
     const t = new Track(ci);
@@ -360,7 +361,7 @@ test('全コース: 閉じていて離れた区間が十分離れ、内側が la
       area += t.x[i] * t.z[k] - t.x[k] * t.z[i];
     }
     assert.ok(area > 0, `${c.name} orientation`);
-    const starts = Array.from({ length: 7 }, (_, i) => t.startPos(i));
+    const starts = Array.from({ length: 11 }, (_, i) => t.startPos(i));
     for (const [i, p] of starts.entries()) {
       assert.ok(Math.abs(t.project(p.x, p.z).lat) < t.roadHalf - 2, `${c.name} start ${i} on road`);
       for (let j = 0; j < i; j++) assert.ok(Math.hypot(p.x - starts[j].x, p.z - starts[j].z) > KART.RADIUS * 2.5, `${c.name} start ${i}/${j} overlap`);
@@ -396,8 +397,11 @@ test('全コース: NPC 4 台（6 台）でレースが決着し、NPC も周回
   });
 });
 
-test('NPC の数は 0〜4 台に制限される', () => {
-  assert.equal(new RaceSim(track, { npcs: 9 }).s.karts.length, 6);
+test('NPC の数は 0〜7 台に制限される（人間 3 人 + NPC 7 台 + ボスで 11 台）', () => {
+  assert.equal(new RaceSim(track, { npcs: 9 }).s.karts.length, 9);
+  const big = new RaceSim(track, { players: [0, 1, 2], npcs: 7, boss: 1 });
+  assert.equal(big.s.karts.length, 11);
+  assert.equal(new Set(big.s.karts.map((k) => k.style)).size, 11, '見た目はすべてちがう');
   assert.equal(new RaceSim(track, { npcs: -1 }).s.karts.length, 2);
 });
 
@@ -1056,18 +1060,18 @@ test('部屋の状態: 連戦の途中経過とレースごとの設定を検証
   assert.deepEqual(m.match.players, [0, 2], 'players: 席の範囲外・重複は捨てる');
 });
 
-test('3 人対戦: 人間が 3 人・NPC は 6 - 人間の数 台まで・見た目は席に対応・入力は人ごと', () => {
+test('3 人対戦: 人間が 3 人・NPC は 7 台まで・見た目は席に対応・入力は人ごと', () => {
   const sim = new RaceSim(track, { players: [0, 1, 2], npcs: 9, boss: 1 });
   assert.equal(sim.humans, 3);
-  assert.equal(sim.s.karts.length, 3 + 3 + 1, '3 人 + 通常の NPC 3 台 + ボス');
-  assert.deepEqual(sim.s.karts.map((k) => k.npc), [0, 0, 0, 1, 1, 1, 1]);
-  assert.deepEqual(sim.s.karts.map((k) => k.style), [0, 1, 2, 3, 4, 5, 6], 'styles: seats first, then free dogs, boss last');
+  assert.equal(sim.s.karts.length, 3 + 7 + 1, '3 人 + 通常の NPC 7 台 + ボス');
+  assert.deepEqual(sim.s.karts.map((k) => k.npc), [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]);
+  assert.deepEqual(sim.s.karts.map((k) => k.style), [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 6], 'styles: seats first, then free dogs, boss last');
   assert.equal(sim.s.acks.length, 3);
   // 2 人 + NPC 4 台（今までどおり）
   const two = new RaceSim(track, { npcs: 9 });
   assert.equal(two.humans, 2);
-  assert.equal(two.s.karts.length, 6);
-  assert.deepEqual(two.s.karts.map((k) => k.style), [0, 1, 2, 3, 4, 5]);
+  assert.equal(two.s.karts.length, 9);
+  assert.deepEqual(two.s.karts.map((k) => k.style), [0, 1, 2, 3, 4, 5, 7, 8, 9]);
   // 席 0 と 2 だけ（1 は空き）: 車 1 は席 2 の人。NPC には空いている犬が回る
   const gap = new RaceSim(track, { players: [0, 2], npcs: 2 });
   assert.deepEqual(gap.slots, [0, 2]);
@@ -1145,4 +1149,17 @@ test('飼い主の時間は順位が低いほど長い（1 位は約 1 秒、最
   assert.ok(Math.abs(t[4] - ITEMS.OWNER_TIME) < 1e-9, `最下位 ${t[4]}`);
   for (let i = 1; i < 5; i++) assert.ok(t[i] > t[i - 1], '順位が下がるほど長い');
   assert.equal(ownerTime(karts, karts[2], null), ITEMS.OWNER_TIME);
+});
+
+test('NPC 7 台 + ボス + 人間 3 人（11 台）でもレースが決着し、配信形式で復元できる', () => {
+  const sim = new RaceSim(track, { players: [0, 1, 2], npcs: 7, boss: 1 });
+  while (sim.s.phase === 'countdown') sim.step(DT, [0, 0, 0]);
+  for (let i = 0; i < 60 * 480 && sim.s.phase !== 'finished'; i++) {
+    const [a, b, c] = sim.s.karts;
+    sim.step(DT, [bot(a, 3), bot(b, -3), bot(c, 0)]);
+    sim.drainEvents();
+  }
+  assert.equal(sim.s.phase, 'finished');
+  const snap = unpackNetBin(packNetBin(sim.s), null).snap;
+  assert.equal(snap.karts.length, 11);
 });
