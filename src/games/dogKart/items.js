@@ -197,7 +197,7 @@ export function useItem(s, k, events, progs = null, callRain = null, track = nul
       events.push({ t: 'log', k: k.i, x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 });
     }
   } else if (item === ITEMS.BOMB) {
-    // 前へ放り投げる。落ちた場所で、投げてから BOMB_FUSE 秒後に爆発
+    // 前へ放り投げる。落ちた場所で、投げてから 2〜3 秒（ランダム）で爆発
     let lx = k.x + fx * (ITEMS.BOMB_DIST + Math.max(0, k.sp) * ITEMS.BOMB_FLIGHT);
     let lz = k.z + fz * (ITEMS.BOMB_DIST + Math.max(0, k.sp) * ITEMS.BOMB_FLIGHT);
     if (track) {
@@ -210,38 +210,40 @@ export function useItem(s, k, events, progs = null, callRain = null, track = nul
         lz = np.z;
       }
     }
-    (s.bombs ||= []).push({ id: s.nextId++, o: k.i, sx: k.x + fx * 1.5, sz: k.z + fz * 1.5, x: lx, z: lz, age: 0 });
+    (s.bombs ||= []).push({ id: s.nextId++, o: k.i, sx: k.x + fx * 1.5, sz: k.z + fz * 1.5, x: lx, z: lz, age: 0, fu: Math.round((ITEMS.BOMB_FUSE_MIN + (ITEMS.BOMB_FUSE - ITEMS.BOMB_FUSE_MIN) * nextRandom(s)) * 100) / 100 });
     while (s.bombs.length > ITEMS.BOMB_MAX) s.bombs.shift();
   } else if (item === ITEMS.ROD) {
-    // 1 つ上の順位の車（走行距離がすぐ上）を、自分のすぐ後ろへ釣り上げる。どんなに離れていても届く
-    let target = -1;
-    if (progs) {
-      let best = Infinity;
+    // コース上で自分のいちばん近く前にいる車を、自分のすぐ後ろへ釣り上げる。どんなに離れていても届く。
+    // 飼い主モードの車は釣れないので、その 1 つ先の車を釣る。周回数は変えない（場所だけ動かす）
+    let tk = null;
+    if (track) {
+      const L = track.length;
+      const me = track.project(k.x, k.z).s;
+      const ahead = [];
       for (const o of s.karts) {
         if (o === k || o.fin) continue;
-        const d = progs[o.i] - progs[k.i];
-        if (d > 0 && d < best) {
-          best = d;
-          target = o.i;
-        }
+        const d = (((track.project(o.x, o.z).s - me) % L) + L) % L;
+        if (d > 0.01) ahead.push([d, o]);
       }
+      ahead.sort((a, b) => a[0] - b[0] || a[1].i - b[1].i);
+      tk = ahead.find(([, o]) => !(o.ow > 0))?.[1] || null;
     }
-    const tk = target >= 0 ? s.karts[target] : null;
-    if (!tk || !track) {
+    if (!tk) {
       events.push({ t: 'poof', x: k.x, z: k.z });
-    } else if (tk.ow > 0 || tk.gd > 0) {
-      // 飼い主モード中は釣れない。ガードは 1 回防ぐ（ガードは割れる）
-      if (tk.gd > 0) {
-        tk.gd = 0;
-        tk.inv = Math.max(tk.inv, 0.8);
-      }
+    } else if (tk.gd > 0) {
+      // ガードは 1 回防ぐ（ガードは割れる）
+      tk.gd = 0;
+      tk.inv = Math.max(tk.inv, 0.8);
       events.push({ t: 'block', k: tk.i, x: tk.x, z: tk.z });
       events.push({ t: 'fish', k: k.i, v: tk.i, x: tk.x, z: tk.z, n: 0 });
     } else {
+      const L = track.length;
+      const oldS = (((track.project(tk.x, tk.z).s) % L) + L) % L;
       const p = track.project(k.x, k.z);
       const lim = track.roadHalf - 2;
       const lat = Math.max(-lim, Math.min(lim, p.lat + (p.lat > 0 ? -2.5 : 2.5)));
-      const np = track.pointAt(p.s - ITEMS.ROD_BACK, lat);
+      const ns = p.s - ITEMS.ROD_BACK;
+      const np = track.pointAt(ns, lat);
       tk.x = np.x;
       tk.z = np.z;
       tk.h = np.h;
@@ -254,10 +256,15 @@ export function useItem(s, k, events, progs = null, callRain = null, track = nul
       tk.slow = Math.max(tk.slow, 0.6);
       tk.inv = Math.max(tk.inv, 1);
       tk.bump = 0.5;
-      // 周回とチェックポイントは釣った人と同じに（追い越した分が無くなる）
-      tk.lap = k.lap;
-      tk.cp = k.cp;
       tk.wrong = 0;
+      // 周回数は変えない。チェックポイントだけ新しい場所に合わせる（戻った分はもう一度走る）。
+      // スタートラインを後ろへまたいだときは、もう一度ラインを越えたときに周回が元に戻るように 1 つ減らしておく
+      const newS = ((ns % L) + L) % L;
+      const N = track.checkpoints;
+      if (!(tk.lap === 0 && tk.cp === 0)) {
+        if (newS > oldS && tk.lap > 0) tk.lap--;
+        tk.cp = Math.min(N - 1, Math.floor((newS / L) * N));
+      }
       k.stats.hits++;
       tk.stats.hitBy++;
       events.push({ t: 'fish', k: k.i, v: tk.i, x: tk.x, z: tk.z, n: 1 });
@@ -494,12 +501,12 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
     if (remove) s.bananas.splice(i, 1);
   }
 
-  // 爆弾: 投げてから BOMB_FUSE 秒で、落ちた場所の周りの車を巻き込んで爆発
+  // 爆弾: 投げてから決まった時間（2〜3 秒）で、落ちた場所の周りの車を巻き込んで爆発
   if (s.bombs) {
     for (let i = s.bombs.length - 1; i >= 0; i--) {
       const bm = s.bombs[i];
       bm.age += dt;
-      if (bm.age < ITEMS.BOMB_FUSE) continue;
+      if (bm.age < (bm.fu || ITEMS.BOMB_FUSE)) continue;
       s.bombs.splice(i, 1);
       let n = 0;
       for (const k of karts) {

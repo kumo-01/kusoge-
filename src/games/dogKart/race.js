@@ -603,7 +603,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
   if (Array.isArray(r.bombs)) {
     for (const b of r.bombs.slice(0, ITEMS.BOMB_MAX + 2)) {
       if (!b || typeof b !== 'object') continue;
-      s.bombs.push({ id: int(b.id), o: owner(b.o), sx: num(b.sx), sz: num(b.sz), x: num(b.x), z: num(b.z), age: num(b.age, 0, 0, 20) });
+      s.bombs.push({ id: int(b.id), o: owner(b.o), sx: num(b.sx), sz: num(b.sz), x: num(b.x), z: num(b.z), age: num(b.age, 0, 0, 20), fu: num(b.fu, ITEMS.BOMB_FUSE, ITEMS.BOMB_FUSE_MIN, ITEMS.BOMB_FUSE) });
     }
   }
   return s;
@@ -656,7 +656,7 @@ export function packNet(s) {
     bn: s.bananas.map((b) => [b.id, b.o, q(b.x, 2), q(b.z, 2), q(b.life, 1), q(b.age, 1)]),
     hs: s.houses.map((h) => [h.id, h.o, h.t, q(h.x, 2), q(h.z, 2), q(h.age, 2)]),
     lg: s.logs.map((l) => [l.id, l.o, q(l.s, 2), q(l.a, 2), q(l.b, 2), q(l.x1, 2), q(l.z1, 2), q(l.x2, 2), q(l.z2, 2)]),
-    bm: (s.bombs || []).map((b) => [b.id, b.o, q(b.sx, 2), q(b.sz, 2), q(b.x, 2), q(b.z, 2), q(b.age, 2)]),
+    bm: (s.bombs || []).map((b) => [b.id, b.o, q(b.sx, 2), q(b.sz, 2), q(b.x, 2), q(b.z, 2), q(b.age, 2), q(b.fu, 2)]),
     mg: s.mg ? [q(s.mg.t, 3), s.mg.pat, s.mg.sc || []] : 0,
   };
 }
@@ -695,7 +695,7 @@ export function unpackNet(p) {
     houses: Array.isArray(p.hs) ? p.hs.slice(0, 8).map((a) => row(a, ['id', 'o', 't', 'x', 'z', 'age'])) : [],
     bananas: Array.isArray(p.bn) ? p.bn.slice(0, ITEMS.BANANA_MAX + 2).map((a) => row(a, ['id', 'o', 'x', 'z', 'life', 'age'])) : [],
     logs: Array.isArray(p.lg) ? p.lg.slice(0, ITEMS.LOG_MAX).map((a) => row(a, ['id', 'o', 's', 'a', 'b', 'x1', 'z1', 'x2', 'z2'])) : [],
-    bombs: Array.isArray(p.bm) ? p.bm.slice(0, ITEMS.BOMB_MAX + 2).map((a) => row(a, ['id', 'o', 'sx', 'sz', 'x', 'z', 'age'])) : [],
+    bombs: Array.isArray(p.bm) ? p.bm.slice(0, ITEMS.BOMB_MAX + 2).map((a) => row(a, ['id', 'o', 'sx', 'sz', 'x', 'z', 'age', 'fu'])) : [],
     mg: Array.isArray(p.mg) ? { t: p.mg[0], pat: p.mg[1], sc: p.mg[2] } : null,
   };
 }
@@ -706,7 +706,7 @@ export function unpackNet(p) {
 
 /** 演出イベントの種類（バイナリでは番号で送る） */
 export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house', 'log', 'mg', 'mgEnd', 'boom', 'fish'];
-const BIN_VERSION = 5;
+const BIN_VERSION = 6;
 // 車の項目のうち、ふだんは 0 で、0 でないときだけ載せるもの（タイマー・はじかれ・高さなど。0 でない間は毎回変わる）。
 // よく 0 以外になるものを先に並べる（印は可変長なので、先頭 7 項目までなら 1 バイト）
 const BIN_DYN = ['kx', 'kz', 'gd', 'boost', 'roll', 'roll2', 'inv', 'spin', 'bump', 'y', 'vy', 'wrong', 'slow', 'grass', 'rc', 'bc', 'tw', 'tb', 'wet', 'ow'];
@@ -1087,6 +1087,7 @@ export function packNetBin(s, ev = [], only = null) {
       w.i24(b.x * 100);
       w.i24(b.z * 100);
       w.u16(b.age * 100);
+      w.u16((b.fu || ITEMS.BOMB_FUSE) * 100);
     }
   }
   return w.bytes();
@@ -1217,7 +1218,7 @@ export function unpackNetBin(u8, prev = null) {
     snap.bombs = [];
     if (flags & 64) {
       const nb = Math.min(r.u8(), ITEMS.BOMB_MAX + 2);
-      for (let i = 0; i < nb; i++) snap.bombs.push({ id: r.uv(), o: r.u8(), sx: r.i24() / 100, sz: r.i24() / 100, x: r.i24() / 100, z: r.i24() / 100, age: r.u16() / 100 });
+      for (let i = 0; i < nb; i++) snap.bombs.push({ id: r.uv(), o: r.u8(), sx: r.i24() / 100, sz: r.i24() / 100, x: r.i24() / 100, z: r.i24() / 100, age: r.u16() / 100, fu: r.u16() / 100 });
     }
     snap.proj = snap.proj.slice(0, 32);
     snap.bananas = snap.bananas.slice(0, ITEMS.BANANA_MAX + 2);

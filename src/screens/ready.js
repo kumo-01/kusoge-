@@ -169,6 +169,24 @@ export function mount(el, app) {
         const ends = h('div.opt-ends', null, h('span', null, opt.choices[0].label), h('span', null, opt.choices[opt.choices.length - 1].label));
         return h('div.opt-slider', null, h('div.opt-slider-row', null, range, val), ends);
       }
+      if (opt.ui === 'gallery') {
+        // 写真を並べて選ぶ（写真の左上に名前）。写真のない選択肢（ランダム）は絵文字の札
+        return h('div.opt-gallery', null,
+          opt.choices.map((c) => {
+            const on = s.options?.[opt.key] === c.value;
+            const [icon, ...rest] = c.label.split(' ');
+            return h(`button.opt-tile${on ? '.on' : ''}${c.img ? '' : '.no-img'}`, {
+              type: 'button',
+              disabled: !isHost && !on,
+              'aria-pressed': on ? 'true' : 'false',
+              title: c.label,
+              onclick: isHost && !on ? () => set(opt, c.value) : null,
+            },
+            c.img ? h('img', { src: c.img, alt: '', loading: 'lazy', decoding: 'async', draggable: 'false' }) : h('span.opt-tile-big', null, icon),
+            h('span.opt-tile-name', null, c.img ? c.label : rest.join(' ') || c.label),
+            on ? h('span.opt-tile-check', null, '✔') : null);
+          }));
+      }
       if (opt.ui === 'toggle') {
         // トグル: 押すたびに切り替わる（選択肢の 1 つ目が「オン」）
         const on = idx === 0;

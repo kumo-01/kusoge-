@@ -86,13 +86,14 @@ export const ITEMS = {
   HOUSE_RADIUS: 13.5, // 落ちたとき巻き込まれる範囲（以前の 9m の 1.5 倍）
   HOUSE_SPIN: 1.7,
   HOUSE_MAX: 4,
-  BOMB_FUSE: 3, // 投げてから爆発するまで（秒）
+  BOMB_FUSE: 3, // 投げてから爆発するまで（秒）の最大
+  BOMB_FUSE_MIN: 2, // 同じく最小（投げるたびに 2〜3 秒のどれか）
   BOMB_FLIGHT: 0.75, // 投げてから地面に落ちるまで（秒）
   BOMB_DIST: 26, // 前に何 m 投げるか（自分の速さの分は別に足す）
   BOMB_RADIUS: 10, // 爆発に巻き込まれる範囲（m）
   BOMB_SPIN: 1.6,
   BOMB_MAX: 6,
-  ROD_BACK: 7, // 釣った車を、自分の何 m 後ろに置くか
+  ROD_BACK: 5, // 釣った車を、自分の何 m 後ろに置くか
 };
 
 export const NET = {

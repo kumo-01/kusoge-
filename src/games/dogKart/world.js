@@ -1639,7 +1639,7 @@ export class World {
       v.position.set(b.sx + (b.x - b.sx) * f, 0, b.sz + (b.z - b.sz) * f);
       body.position.y = 0.85 + Math.sin(f * Math.PI) * 6;
       body.rotation.set(f < 1 ? b.age * 9 : 0, 0, 0);
-      const left = Math.max(0, ITEMS.BOMB_FUSE - b.age);
+      const left = Math.max(0, (b.fu || ITEMS.BOMB_FUSE) - b.age);
       const blink = Math.sin(t * (left < 1 ? 40 : 16)) > 0;
       body.scale.setScalar(1 + (left < 1 ? (1 - left) * 0.35 : 0));
       v.getObjectByName('spark').visible = blink;

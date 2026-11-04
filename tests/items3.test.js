@@ -20,7 +20,7 @@ const put = (k, s, lat, extra = {}) => {
   Object.assign(k, { x: p.x, z: p.z, h: p.h, sp: 0, kx: 0, kz: 0, ...extra });
 };
 
-test('爆弾: 前に投げて、投げてから 3 秒後に落ちた場所で爆発。近くの車を巻き込み、遠くの車は無事', () => {
+test('爆弾: 前に投げて、投げてから 2〜3 秒後に落ちた場所で爆発。近くの車を巻き込み、遠くの車は無事', () => {
   const sim = race({ npcs: 2 });
   const [a, b, c, d] = sim.s.karts;
   put(a, 100, 0);
@@ -51,26 +51,52 @@ test('爆弾: 前に投げて、投げてから 3 秒後に落ちた場所で爆
   assert.equal(sim.s.bombs.length, 0);
 });
 
-test('釣り竿: 1 つ上の順位の車を、どんなに離れていても自分のすぐ後ろへ。周回も合わせる', () => {
+test('釣り竿: コース上でいちばん近く前の車を、どんなに離れていても自分の 5m 後ろへ。周回数は変えない', () => {
   const sim = race({ npcs: 2 });
   const [a, b, c, d] = sim.s.karts;
-  // 順位: d（ずっと前）> c（1 つ上）> a（使う人）> b
-  put(a, 200, 0, { lap: 0, cp: 1 });
-  put(b, 100, 0, { lap: 0, cp: 0 });
-  put(c, track.length * 0.9, 0, { lap: 0, cp: track.checkpoints - 2 });
-  put(d, 50, 0, { lap: 1, cp: 0 });
+  // a（使う人）の前: c が 300m 先（1 周多い）、d が 600m 先。b は後ろ
+  put(a, 200, 0, { lap: 1, cp: 0 });
+  put(b, 100, 0, { lap: 1, cp: 0 });
+  put(c, 500, 0, { lap: 2, cp: 1 });
+  put(d, 800, 0, { lap: 1, cp: 2 });
   sim.step(DT, [0, 0]);
   a.item = ITEMS.ROD;
   sim.step(DT, [IN.ITEM, 0]);
   const ev = sim.drainEvents().find((e) => e.t === 'fish');
-  assert.ok(ev && ev.n === 1 && ev.v === c.i, '1 つ上（c）を釣る');
-  const sa = track.project(a.x, a.z).s;
-  const sc = track.project(c.x, c.z).s;
-  const ds = track.wrapDS(sa - sc);
-  assert.ok(ds > 3 && ds < 12, `すぐ後ろ (${ds})`);
-  assert.equal(c.lap, a.lap);
-  assert.ok(sim.progressOf(c) < sim.progressOf(a), '順位が入れ替わる');
-  assert.equal(sim.rankOf(a.i) < sim.rankOf(c.i), true);
+  assert.ok(ev && ev.n === 1 && ev.v === c.i, 'いちばん近く前（c）を釣る');
+  const ds = track.wrapDS(track.project(a.x, a.z).s - track.project(c.x, c.z).s);
+  assert.ok(ds > 3 && ds < 7, `5m 後ろ (${ds})`);
+  assert.equal(c.lap, 2, '周回数は変わらない');
+  assert.ok(c.cp <= a.cp + 1);
+});
+
+test('釣り竿: 飼い主モードの車は飛ばして、その 1 つ先の車を釣る', () => {
+  const sim = race({ npcs: 1 });
+  const [a, b, c] = sim.s.karts;
+  put(a, 200, 0);
+  put(b, 300, 0, { ow: 5 });
+  put(c, 700, 0);
+  sim.step(DT, [0, 0]);
+  b.ow = 5;
+  a.item = ITEMS.ROD;
+  sim.step(DT, [IN.ITEM, 0]);
+  const ev = sim.drainEvents().find((e) => e.t === 'fish');
+  assert.equal(ev.v, c.i);
+  assert.ok(track.project(c.x, c.z).s < 200);
+});
+
+test('爆弾: 爆発までの時間は投げるたびに 2〜3 秒', () => {
+  const fus = new Set();
+  for (let n = 0; n < 12; n++) {
+    const sim = race();
+    sim.s.rng = n * 7919 + 1;
+    sim.s.karts[0].item = ITEMS.BOMB;
+    sim.step(DT, [IN.ITEM, 0]);
+    const fu = sim.s.bombs[0].fu;
+    assert.ok(fu >= 2 && fu <= 3, String(fu));
+    fus.add(Math.round(fu * 10));
+  }
+  assert.ok(fus.size >= 4, 'ばらつく');
 });
 
 test('釣り竿: ガードで防げる・飼い主モードは釣れない', () => {

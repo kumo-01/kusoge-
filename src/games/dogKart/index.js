@@ -513,7 +513,7 @@ class DogKartGame {
           } else if (e.item === ITEMS.BOMB) {
             snd.play('throw');
             fx?.text('ポイッ!', k.x, 3.5, k.z, 3.2);
-            if (e.k === me) this.hud.flash('💣 爆弾を投げた！ 3秒後にドカン', 'good', 1400);
+            if (e.k === me) this.hud.flash('💣 爆弾を投げた！ 2〜3秒後にドカン', 'good', 1400);
           } else if (e.item === ITEMS.ROD) {
             snd.play('throw');
             fx?.text('それっ!', k.x, 3.5, k.z, 3.2);
