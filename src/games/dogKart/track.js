@@ -489,7 +489,9 @@ export class Track {
   itemBoxes() {
     const out = [];
     for (const f of [0.1, 0.27, 0.43, 0.6, 0.77, 0.92]) {
-      for (const lat of [-8, -4, 0, 4, 8]) {
+      // 横 1 列に 12 個（道幅いっぱいに並べる）
+      for (let j = 0; j < 12; j++) {
+        const lat = -10 + (20 * j) / 11;
         const p = this.pointAt(f * this.length, lat);
         out.push({ x: p.x, z: p.z });
       }

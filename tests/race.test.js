@@ -300,8 +300,8 @@ test('アイテムは 2 個まで: 2 個持っている車・ルーレット中�
   assert.equal(a.item2, 0);
 });
 
-test('アイテムボックスは 6 か所に横 5 列', () => {
-  assert.equal(new RaceSim(track).boxPos.length, 30);
+test('アイテムボックスは 6 か所に横 12 列', () => {
+  assert.equal(new RaceSim(track).boxPos.length, 72);
 });
 
 test('NPC 2 台入りのレース: NPC が自分で走って周回し、人間がゴールすると決着する', () => {

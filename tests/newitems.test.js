@@ -183,30 +183,25 @@ test('飼い主: 1 位になったら 0.5 秒ほどで終わる / バナナは�
   assert.ok(sim2.s.bananas.some((bn) => bn.id === 999), '70 秒たっても残る');
 });
 
-test('ルーレット中でも、もう 1 つ引ける（2 つ同時に回り、空いている枠に入る）', () => {
+test('ルーレット中はボックスを取れない（すり抜けて、箱も残る）。止まったあとなら 2 個目を取れる', () => {
   const sim = race();
   const k = sim.s.karts[0];
   Object.assign(k, { item: 0, item2: 0, roll: 0.5, roll2: 0 });
   const bp = sim.boxPos[0];
   sim.s.boxes[0] = 0;
-  Object.assign(k, { x: bp.x, z: bp.z, y: 0 });
+  Object.assign(k, { x: bp.x, z: bp.z, y: 0, sp: 0 });
   sim.step(DT, [0, 0]);
-  assert.ok(k.roll2 > 0, '2 つ目のルーレットが回る');
-  // 3 つ目は引けない
-  const bp2 = sim.boxPos[1];
-  sim.s.boxes[1] = 0;
-  Object.assign(k, { x: bp2.x, z: bp2.z });
+  assert.equal(k.roll2, 0, '2 つ目のルーレットは回らない');
+  assert.equal(sim.s.boxes[0], 0, '箱は残る');
+  const away = track.pointAt(track.project(bp.x, bp.z).s + 60, 0);
+  Object.assign(k, { x: away.x, z: away.z });
+  for (let i = 0; i < 40; i++) sim.step(DT, [0, 0]);
+  assert.ok(k.item > 0 && !(k.roll > 0), '1 つ目が止まった');
+  Object.assign(k, { x: bp.x, z: bp.z, sp: 0 });
   sim.step(DT, [0, 0]);
-  assert.equal(sim.s.boxes[1], 0, '3 つ目は取れない');
-  for (let i = 0; i < 90; i++) sim.step(DT, [0, 0]);
-  assert.ok(k.item > 0 && k.item2 > 0, '2 つとも入る');
-  assert.equal(k.roll, 0);
-  assert.equal(k.roll2, 0);
-  // 配信形式でも roll2 が届く
-  Object.assign(k, { item: 0, item2: 0, roll: 0.4, roll2: 0.9 });
-  const enc = new NetBinEncoder();
-  const d = unpackNetBin(enc.encode(sim.s), null);
-  assert.ok(Math.abs(d.snap.karts[0].roll2 - 0.9) < 0.02);
+  assert.ok(k.roll > 0 && sim.s.boxes[0] > 0, '止まったあとなら取れる');
+  for (let i = 0; i < 80; i++) sim.step(DT, [0, 0]);
+  assert.ok(k.item2 > 0, '2 個目に入る');
 });
 
 test('飼い主モード: 前の倒木はジャンプで飛び越える（ぶつからない）', () => {

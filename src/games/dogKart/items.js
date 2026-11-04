@@ -265,8 +265,8 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
     }
     const p = boxPos[b];
     for (const k of karts) {
-      // アイテムは 2 個まで（持っている数 + ルーレット中の数）。ルーレット中でも、もう 1 つ引ける
-      if ((k.item ? 1 : 0) + (k.item2 ? 1 : 0) + (k.roll > 0 ? 1 : 0) + (k.roll2 > 0 ? 1 : 0) >= 2 || (k.fin && !k.npc)) continue;
+      // アイテムは 2 個まで。ルーレットが回っている間は、ほかのボックスは取れない（すり抜ける）
+      if (k.roll > 0 || k.roll2 > 0 || (k.item ? 1 : 0) + (k.item2 ? 1 : 0) >= 2 || (k.fin && !k.npc)) continue; // ルーレット中は取れない
       const dx = k.x - p.x;
       const dz = k.z - p.z;
       if (dx * dx + dz * dz < (ITEMS.BOX_RADIUS + KART.RADIUS) ** 2 && k.y < 2) {

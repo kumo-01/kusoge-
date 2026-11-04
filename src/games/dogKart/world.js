@@ -1341,7 +1341,7 @@ export class World {
       }),
     );
     const boxMat = this._track(new THREE.MeshToonMaterial({ map: qTex, transparent: true, opacity: 0.92 }));
-    const boxGeo = this._track(new RoundedBoxGeometry(1.8, 1.8, 1.8, 2, 0.25));
+    const boxGeo = this._track(new RoundedBoxGeometry(1.45, 1.45, 1.45, 2, 0.2));
     this.boxes = this.boxPos.map((p) => {
       const m = new THREE.Mesh(boxGeo, boxMat);
       m.position.set(p.x, 1.6, p.z);
