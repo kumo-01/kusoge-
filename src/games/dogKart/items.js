@@ -139,9 +139,32 @@ export function ownerTime(karts, k, progs) {
 }
 
 /** progs: 全車の走行距離（フリスビー・犬小屋の狙いを決める）。callRain: 豪雨を降らせる処理。track: 横一列バナナ・倒木を置く場所を決める */
+/**
+ * 釣り竿で釣る相手。順位が自分より上の車（周回遅れの車は釣らない）のうち、コース上でいちばん近く前にいる車。
+ * 飼い主モードの車は飛ばして、その 1 つ先。いなければ null（1 位のときなど）
+ */
+export function rodTarget(s, k, progs, track) {
+  if (!track || !progs) return null;
+  const L = track.length;
+  const me = track.project(k.x, k.z).s;
+  const ahead = [];
+  for (const o of s.karts) {
+    if (o === k || o.fin || o.fs > 0 || !(progs[o.i] > progs[k.i])) continue;
+    const d = (((track.project(o.x, o.z).s - me) % L) + L) % L;
+    ahead.push([d, o]);
+  }
+  ahead.sort((a, b) => a[0] - b[0] || a[1].i - b[1].i);
+  return ahead.find(([, o]) => !(o.ow > 0))?.[1] || null;
+}
+
 export function useItem(s, k, events, progs = null, callRain = null, track = null) {
   if (!k.item) return; // ルーレット中でも、すでに持っているアイテムは使える
   const held = k.item;
+  // 釣り竿: 前（順位が上）に釣れる相手がいないとき（1 位など）は使えない。アイテムは持ったまま
+  if (held === ITEMS.ROD && !rodTarget(s, k, progs, track)) {
+    events.push({ t: 'rodNo', k: k.i });
+    return;
+  }
   // 2 回使えるものは、1 回目は普通のものとして使い、もう 1 つ残る
   const item = held === ITEMS.FRISBEE2 ? ITEMS.FRISBEE : held === ITEMS.HOUSE2 ? ITEMS.HOUSE : held;
   k.item = SECOND[held] || 0;
@@ -213,21 +236,10 @@ export function useItem(s, k, events, progs = null, callRain = null, track = nul
     (s.bombs ||= []).push({ id: s.nextId++, o: k.i, sx: k.x + fx * 1.5, sz: k.z + fz * 1.5, x: lx, z: lz, age: 0, fu: Math.round((ITEMS.BOMB_FUSE_MIN + (ITEMS.BOMB_FUSE - ITEMS.BOMB_FUSE_MIN) * nextRandom(s)) * 100) / 100 });
     while (s.bombs.length > ITEMS.BOMB_MAX) s.bombs.shift();
   } else if (item === ITEMS.ROD) {
-    // コース上で自分のいちばん近く前にいる車を、自分のすぐ後ろへ釣り上げる。どんなに離れていても届く。
+    // 順位が上の車のうち、コース上で自分のいちばん近く前にいる車を、自分のすぐ後ろへ釣り上げる。どんなに離れていても届く。
     // 飼い主モードの車は釣れないので、その 1 つ先の車を釣る。周回数は変えない（場所だけ動かす）
-    let tk = null;
-    if (track) {
-      const L = track.length;
-      const me = track.project(k.x, k.z).s;
-      const ahead = [];
-      for (const o of s.karts) {
-        if (o === k || o.fin || o.fs > 0) continue;
-        const d = (((track.project(o.x, o.z).s - me) % L) + L) % L;
-        if (d > 0.01) ahead.push([d, o]);
-      }
-      ahead.sort((a, b) => a[0] - b[0] || a[1].i - b[1].i);
-      tk = ahead.find(([, o]) => !(o.ow > 0))?.[1] || null;
-    }
+    // 順位が上の車だけが相手（周回遅れの車を前にいるからと釣って、周回差をつけてしまわないように）
+    const tk = rodTarget(s, k, progs, track);
     if (!tk) {
       events.push({ t: 'poof', x: k.x, z: k.z });
     } else if (tk.gd > 0) {

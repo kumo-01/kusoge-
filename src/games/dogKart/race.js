@@ -714,7 +714,7 @@ export function unpackNet(p) {
 // 位置は 2cm（16bit。コースの外まではみ出したときは 1cm・24bit）、向きは 1/65536 周、速さは 1cm/s。めったに変わらない項目は、既定値でないものだけ印つきで載せる。
 
 /** 演出イベントの種類（バイナリでは番号で送る） */
-export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house', 'log', 'mg', 'mgEnd', 'boom', 'fish'];
+export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house', 'log', 'mg', 'mgEnd', 'boom', 'fish', 'rodNo'];
 const BIN_VERSION = 7;
 // 車の項目のうち、ふだんは 0 で、0 でないときだけ載せるもの（タイマー・はじかれ・高さなど。0 でない間は毎回変わる）。
 // よく 0 以外になるものを先に並べる（印は可変長なので、先頭 7 項目までなら 1 バイト）

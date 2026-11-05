@@ -87,6 +87,30 @@ test('釣り竿: コース上でいちばん近く前の車を、どんなに離
   assert.ok(c.cp <= a.cp + 1);
 });
 
+test('釣り竿: 1 位のときは使えず（アイテムは残る）、前にいても周回遅れの車は釣らない', () => {
+  const sim = race({ npcs: 1 });
+  const [a, b, c] = sim.s.karts;
+  // a が 1 位（2 周目）。b・c は周回遅れで、コース上では a のすぐ前にいる
+  put(a, 200, 0, { lap: 1, cp: 0 });
+  put(b, 260, 0, { lap: 0, cp: 0 });
+  put(c, 400, 0, { lap: 0, cp: 1 });
+  sim.step(DT, [0, 0]);
+  sim.drainEvents();
+  a.item = ITEMS.ROD;
+  sim.step(DT, [IN.ITEM, 0]);
+  const ev = sim.drainEvents();
+  assert.ok(ev.some((e) => e.t === 'rodNo' && e.k === a.i), '使えない');
+  assert.ok(!ev.some((e) => e.t === 'fish'));
+  assert.equal(a.item, ITEMS.ROD, 'アイテムは持ったまま');
+  assert.equal(b.fs, 0);
+  assert.equal(c.fs, 0);
+  // 最下位の b が使うと、順位が上の車（a・c）のうち、コース上でいちばん近く前の c を釣る
+  b.item = ITEMS.ROD;
+  sim.step(DT, [0, IN.ITEM]);
+  const ev2 = sim.drainEvents().find((e) => e.t === 'fish');
+  assert.equal(ev2?.v, c.i);
+});
+
 test('釣り竿: 飼い主モードの車は飛ばして、その 1 つ先の車を釣る', () => {
   const sim = race({ npcs: 1 });
   const [a, b, c] = sim.s.karts;

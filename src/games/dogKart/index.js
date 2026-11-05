@@ -547,6 +547,13 @@ class DogKartGame {
           fx?.text('メキメキ…ドーン!', e.x, 4.5, e.z, 4.5);
           this.cam?.addShake(0.35);
           break;
+        case 'rodNo':
+          // 釣り竿を使おうとしたが、前（順位が上）に釣れる相手がいない
+          if (e.k === me) {
+            snd.play('miss');
+            this.hud.flash(this.sim.rankOf(me) === 1 ? '🎣 1位のときは釣り竿を使えない！' : '🎣 釣れる相手がいない…', 'bad', 1300);
+          }
+          break;
         case 'boom':
           // 爆弾の爆発
           snd.play('bigBump');
