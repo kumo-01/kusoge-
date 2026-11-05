@@ -374,6 +374,7 @@ test('全コース: NPC 4 台（6 台）でレースが決着し、NPC も周回
   COURSES.forEach((c, ci) => {
     const t = new Track(ci);
     const sim = new RaceSim(t, { npcs: 4 });
+    sim.s.rng = 12345 + ci; // アイテムの出かた・NPC の動きを毎回同じに（たまたま妨害が重なって時間切れ、を防ぐ）
     assert.equal(sim.s.karts.length, 6);
     const npcLaps = [0, 0, 0, 0, 0, 0];
     // ボットの人間も、前の倒木はよける（ふさがれていない側へ）
@@ -973,6 +974,7 @@ test('ボス犬: 台数に関係なく最後の NPC、専用の名前、ふつ�
   assert.equal(new RaceSim(track, { npcs: 0, boss: 1 }).s.karts.length, 3);
   // 人間のボットと並んで走ると、ボス犬はふつうの NPC を引き離す
   const race = new RaceSim(track, { npcs: 2, boss: 1 });
+  race.s.rng = 4242; // 毎回同じに（たまたま妨害が重なってボスが遅れる、を防ぐ）
   for (let i = 0; i < 60 * 150; i++) {
     const [a, b] = race.s.karts;
     race.step(DT, [bot(a, 4), bot(b, -4)]);
