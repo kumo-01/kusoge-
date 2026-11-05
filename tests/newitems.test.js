@@ -156,7 +156,7 @@ test('アイテム確率表: 各行は合計 100、1 位と最下位は台数に
     for (let rank = 1; rank <= total; rank++) {
       const w = itemWeights(rank, total);
       // 表の 12 個は合計 100（爆弾・釣り竿はそのあとに足した分）
-      const sum = w.reduce((a, b, i) => a + (i === ITEMS.BOMB || i === ITEMS.ROD ? 0 : b || 0), 0);
+      const sum = w.reduce((a, b, i) => a + (i >= ITEMS.BOMB ? 0 : b || 0), 0);
       assert.ok(Math.abs(sum - 100) <= 1, `${total}台 ${rank}位 = ${sum}`);
       assert.equal(w[ITEMS.ROD] > 0, rank > 1, '釣り竿は 1 位では出ない');
       if (rank > 1) assert.ok(w[ITEMS.ROD] <= 5 && w[ITEMS.ROD] <= w[ITEMS.FRISBEE] + 5, '釣り竿は少し出にくい');

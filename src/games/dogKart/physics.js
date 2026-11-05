@@ -62,12 +62,19 @@ export function createKart(index, pos, boss = false, npc = index >= 2, style = i
     flb: 0,
     fsp: 0,
     fo: 0,
+    gi: 0, // 巨大化の残り時間
+    sq: 0, // つぶされている残り時間（巨大化した車に触れた）
+    rv: 0, // 逆走爺: 操作が逆になっている残り時間
+    wk: 0, // 免許返納: 車を取り上げられて歩いている残り時間
     stats: { bumps: 0, hits: 0, hitBy: 0, walls: 0, items: 0, boosts: 0, foods: 0, mg: 0, mgN: 0 },
   };
 }
 
 /** 物理に関わる数値フィールド（予測の誤差補正で使う） */
-export const PHYS_KEYS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'spin', 'boost', 'slow', 'inv', 'rc', 'wet', 'fs', 'fT', 'fa', 'fb', 'fla', 'flb', 'fsp', 'fo'];
+export const PHYS_KEYS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'spin', 'boost', 'slow', 'inv', 'rc', 'wet', 'fs', 'fT', 'fa', 'fb', 'fla', 'flb', 'fsp', 'fo', 'gi', 'sq', 'rv', 'wk'];
+
+/** 車の当たり判定の半径（巨大化中は大きい） */
+export const kartRadius = (k) => KART.RADIUS * (k.gi > 0 ? ITEMS.GIANT_SCALE : 1);
 
 /**
  * 釣られて引き寄せられている車を 1 ステップ進める（操作は効かない）。コースに沿って後ろへ、弧を描いて飛ぶ。
@@ -109,6 +116,7 @@ export function stepFished(k, dt, track) {
 export function maxSpeedOf(k) {
   let m = (k.boost > 0 ? KART.BOOST_SPEED : KART.MAX_SPEED) * (k.ms || 1) * (1 + (k.fd || 0) * FOOD.SPEED);
   if (k.ow > 0) return m * ITEMS.OWNER_FACTOR;
+  if (k.wk > 0) return Math.min(m, ITEMS.WALK_SPEED); // 免許返納: 歩いている
   if (k.slow > 0) m *= KART.SLOW_FACTOR;
   if (k.wet > 0) m *= RAIN.FACTOR;
   if (k.grass && k.boost <= 0) m *= KART.GRASS_FACTOR;
@@ -142,6 +150,10 @@ export function setVelocity(k, vx, vz) {
  */
 export function stepKart(k, input, dt, track, active, holdSteer = false) {
   if (k.fs > 0) return stepFished(k, dt, track);
+  if (k.rv > 0) {
+    // 逆走爺: 左右とアクセル・ブレーキが逆になる
+    input = (input & ~IN.HELD) | (input & IN.UP ? IN.DOWN : 0) | (input & IN.DOWN ? IN.UP : 0) | (input & IN.LEFT ? IN.RIGHT : 0) | (input & IN.RIGHT ? IN.LEFT : 0);
+  }
   // ゴールした人間は操作終了。NPC はゴール後も走り続ける（コース上で止まって邪魔にならないように）
   const control = active && k.spin <= 0 && (!k.fin || k.npc);
   const up = control && input & IN.UP;
@@ -208,6 +220,10 @@ export function stepKart(k, input, dt, track, active, holdSteer = false) {
   k.rc = Math.max(0, k.rc - dt);
   k.bc = Math.max(0, k.bc - dt);
   k.wet = Math.max(0, k.wet - dt);
+  k.gi = Math.max(0, k.gi - dt);
+  k.sq = Math.max(0, k.sq - dt);
+  k.rv = Math.max(0, k.rv - dt);
+  k.wk = Math.max(0, k.wk - dt);
 
   return collideWalls(k, track);
 }
@@ -218,7 +234,7 @@ export function collideWalls(k, track) {
   const p = track.project(k.x, k.z);
   const lat = p.lat;
   k.grass = Math.abs(lat) > track.roadHalf ? 1 : 0;
-  const limit = track.wallDist - KART.RADIUS;
+  const limit = track.wallDist - kartRadius(k);
   if (Math.abs(lat) <= limit) return logHit;
   const sgn = lat > 0 ? 1 : -1;
   const nx = p.nx * sgn; // 外向き
@@ -248,7 +264,7 @@ export function collideWalls(k, track) {
 export function collideLogs(k, logs) {
   if (!logs?.length || k.y > 1.2) return 0;
   let hit = 0;
-  const R = KART.RADIUS + ITEMS.LOG_R;
+  const R = kartRadius(k) + ITEMS.LOG_R;
   for (const lg of logs) {
     const dx = lg.x2 - lg.x1;
     const dz = lg.z2 - lg.z1;
@@ -295,7 +311,7 @@ export function collideKarts(a, b) {
   let dx = b.x - a.x;
   let dz = b.z - a.z;
   let d = Math.hypot(dx, dz);
-  const minD = KART.RADIUS * 2;
+  const minD = kartRadius(a) + kartRadius(b);
   if (d >= minD) return null;
   if (d < 1e-4) {
     dx = 1;

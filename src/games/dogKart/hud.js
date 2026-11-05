@@ -291,7 +291,17 @@ export class Hud {
       this.net.className = `hud-net tone-${d.netTone}`;
     }
     this.warn.hidden = !(d.wrong > 1);
-    this.wetBadge.hidden = !(d.wet > 0);
+    // 自分の車の状態（いちばん大事なもの 1 つ）: 免許返納 > 逆走爺 > 巨大化 > ずぶぬれ
+    const st = d.wk > 0 ? ['🪪 免許返納… 車を取り上げられて歩いてる！', 'lic'] : d.rv > 0 ? ['👴 逆走爺！ 操作が逆になってる！', 'rev'] : d.gi > 0 ? ['💪 巨大化！ ぶつかって相手をつぶせ！', 'giant'] : d.wet > 0 ? ['☔ ずぶぬれ… スピードダウン', 'wet'] : null;
+    const key = st ? st[1] : '';
+    if (key !== this._last.badge) {
+      this._last.badge = key;
+      this.wetBadge.hidden = !st;
+      if (st) {
+        this.wetBadge.textContent = st[0];
+        this.wetBadge.className = `hud-wet is-${st[1]}`;
+      }
+    }
 
     // タイミングブーストのリング: 残り WINDOW → SWEET で大きさ 2.6 → 1（的と同じ）、その後さらに縮む
     const tw = d.tw || 0;

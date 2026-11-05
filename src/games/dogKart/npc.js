@@ -177,7 +177,11 @@ export function npcInput(sim, k, dt) {
         if (d > 18 && d < 50) use = true;
       }
       if (!use && nextRandom(s) < dt * 0.12) use = true;
-    } else if (k.item === ITEMS.GUARD || k.item === ITEMS.OWNER || k.item === ITEMS.RAIN) {
+    } else if (k.item === ITEMS.GIANT) {
+      // 近くに誰かいるときに大きくなる
+      for (const o of s.karts) if (o !== k && Math.abs(sim.prog[o.i] - sim.prog[k.i]) < 30) use = true;
+      if (!use && nextRandom(s) < dt * 0.15) use = true;
+    } else if (k.item === ITEMS.GUARD || k.item === ITEMS.OWNER || k.item === ITEMS.RAIN || k.item === ITEMS.REVERSE || k.item === ITEMS.LICENSE) {
       use = nextRandom(s) < dt * 0.8; // すぐ使う
     } else if (k.item === ITEMS.HOUSE || k.item === ITEMS.HOUSE2) {
       // 自分より前に誰かがいるときに使う（先頭の自分には当てられない）

@@ -157,7 +157,30 @@ export class RaceSim {
         const b = ks[j];
         if (a.fs > 0 || b.fs > 0) continue; // 釣られて飛んでいる車はぶつからない
         const hit = collideKarts(a, b);
-        if (!hit || hit.rel <= 3) continue;
+        if (!hit) continue;
+        if (a.gi > 0 !== b.gi > 0 && !(a.ow > 0) && !(b.ow > 0)) {
+          // 巨大化した車に触れた車はつぶされて遅くなる（スピンはしない。ガードで 1 回防げる）
+          const big = a.gi > 0 ? a : b;
+          const other = a.gi > 0 ? b : a;
+          if (other.sq <= 0 && other.bc <= 0) {
+            other.bc = 0.35;
+            if (other.gd > 0) {
+              other.gd = 0;
+              other.inv = Math.max(other.inv, 0.8);
+              ev.push({ t: 'block', k: other.i, x: other.x, z: other.z });
+            } else {
+              other.sq = ITEMS.SQUASH_TIME;
+              other.sp *= ITEMS.SQUASH_SPEED;
+              other.slow = Math.max(other.slow, ITEMS.SQUASH_TIME);
+              other.boost = 0;
+              big.stats.hits++;
+              other.stats.hitBy++;
+              ev.push({ t: 'squash', k: other.i, by: big.i, x: other.x, z: other.z });
+            }
+          }
+          continue;
+        }
+        if (hit.rel <= 3) continue;
         if (a.ow > 0 !== b.ow > 0) {
           // 飼い主モードの車に触れた車ははね飛ばされる
           const ownerK = a.ow > 0 ? a : b;
@@ -516,6 +539,10 @@ function sanitizeKart(r, i, prev) {
   for (const f of ['fla', 'flb']) k[f] = num(r[f], 0, -50, 50);
   k.fsp = num(r.fsp, 0, 0, 100);
   k.fo = int(r.fo, 0, 0, RACE.MAX_KARTS - 1);
+  k.gi = num(r.gi, 0, 0, ITEMS.GIANT_TIME);
+  k.sq = num(r.sq, 0, 0, ITEMS.SQUASH_TIME);
+  k.rv = num(r.rv, 0, 0, ITEMS.REVERSE_TIME);
+  k.wk = num(r.wk, 0, 0, ITEMS.LICENSE_TIME);
   k.gd = num(r.gd, 0, 0, ITEMS.GUARD_TIME);
   k.fd = int(r.fd, 0, 0, FOOD.MAX);
   k.in = int(r.in, 0, 0, IN.HELD);
@@ -624,7 +651,7 @@ export function sanitizeSnapshot(r, prev, boxCount) {
 // 値は見た目に困らない細かさまで丸める（位置 1cm・向き 0.001rad）。タイミングのチャンス地点（tc）は試合の間変わらないので、完全な状態でだけ送る。
 const NET_HOT = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'st', 'th'];
 const NET_HOT_DIGITS = [2, 2, 2, 2, 3, 2, 2, 2, 2, 2];
-const NET_COLD = ['spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'roll2', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'item2', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow', 'in', 'fs', 'fT', 'fa', 'fb', 'fla', 'flb', 'fsp', 'fo'];
+const NET_COLD = ['spin', 'spinDur', 'boost', 'slow', 'inv', 'bump', 'roll', 'roll2', 'rc', 'wrong', 'ft', 'lapStart', 'best', 'bc', 'ms', 'grass', 'fin', 'lap', 'cp', 'item', 'item2', 'tw', 'tb', 'wet', 'gd', 'fd', 'ow', 'in', 'fs', 'fT', 'fa', 'fb', 'fla', 'flb', 'fsp', 'fo', 'gi', 'sq', 'rv', 'wk'];
 const NET_COLD_DEFAULT = NET_COLD.map((f) => (f === 'spinDur' || f === 'ms' ? 1 : 0));
 const NET_COLD_DIGITS = NET_COLD.map((f) => (f === 'ft' || f === 'lapStart' || f === 'best' ? 3 : 2));
 const PHASES = ['countdown', 'racing', 'finished'];
@@ -714,11 +741,11 @@ export function unpackNet(p) {
 // 位置は 2cm（16bit。コースの外まではみ出したときは 1cm・24bit）、向きは 1/65536 周、速さは 1cm/s。めったに変わらない項目は、既定値でないものだけ印つきで載せる。
 
 /** 演出イベントの種類（バイナリでは番号で送る） */
-export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house', 'log', 'mg', 'mgEnd', 'boom', 'fish', 'rodNo'];
-const BIN_VERSION = 7;
+export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house', 'log', 'mg', 'mgEnd', 'boom', 'fish', 'rodNo', 'rev', 'lic', 'squash'];
+const BIN_VERSION = 8;
 // 車の項目のうち、ふだんは 0 で、0 でないときだけ載せるもの（タイマー・はじかれ・高さなど。0 でない間は毎回変わる）。
 // よく 0 以外になるものを先に並べる（印は可変長なので、先頭 7 項目までなら 1 バイト）
-const BIN_DYN = ['kx', 'kz', 'gd', 'boost', 'roll', 'roll2', 'inv', 'spin', 'bump', 'y', 'vy', 'wrong', 'slow', 'grass', 'rc', 'bc', 'tw', 'tb', 'wet', 'ow', 'fs', 'fT', 'fa', 'fb', 'fla', 'flb', 'fsp', 'fo'];
+const BIN_DYN = ['kx', 'kz', 'gd', 'boost', 'roll', 'roll2', 'inv', 'spin', 'bump', 'y', 'vy', 'wrong', 'slow', 'grass', 'rc', 'bc', 'tw', 'tb', 'wet', 'ow', 'fs', 'fT', 'fa', 'fb', 'fla', 'flb', 'fsp', 'fo', 'gi', 'sq', 'rv', 'wk'];
 // めったに変わらない項目（チェックポイント・周回・ラップの時刻・アイテム・フード・最高速の倍率）。変わったときだけ載せる
 // （印は「印 × 2 + 1」を可変長で送る。0 は「この配信には載せていない」）
 const BIN_SLOW = ['cp', 'fd', 'ms', 'lap', 'item', 'item2', 'spinDur', 'fin', 'ft', 'lapStart', 'best'];

@@ -17,6 +17,9 @@ export const ITEM_INFO = {
   [ITEMS.LOG]: { name: '倒木', icon: '🪵' },
   [ITEMS.BOMB]: { name: '爆弾', icon: '💣' },
   [ITEMS.ROD]: { name: '釣り竿', icon: '🎣' },
+  [ITEMS.GIANT]: { name: '巨大化', icon: '💪' },
+  [ITEMS.REVERSE]: { name: '逆走爺', icon: '👴' },
+  [ITEMS.LICENSE]: { name: '免許返納', icon: '🪪' },
 };
 
 /** 2 回使えるアイテム → 1 回使ったあとに残るもの */
@@ -69,9 +72,10 @@ const TABLE_ORDER = [
  * 爆弾: 1 位は少なめ、それ以外は同じくらい。釣り竿: 1 位は出ない（上に誰もいない）。少しだけ出にくく、下の順位ほど出やすい
  */
 export function extraWeights(rank, total) {
-  if (total <= 1 || rank <= 1) return { bomb: 4, rod: 0 };
+  // 巨大化: どの順位でも同じくらい。逆走爺・免許返納: 1 位には出ず、後ろの順位ほど出やすい（少しめずらしめ）
+  if (total <= 1 || rank <= 1) return { bomb: 4, rod: 0, giant: 4, rev: 0, lic: 0 };
   const f = (Math.min(total, rank) - 1) / (total - 1);
-  return { bomb: 6, rod: Math.round(1 + 4 * f) };
+  return { bomb: 6, rod: Math.round(1 + 4 * f), giant: 5, rev: Math.round(1 + 3 * f), lic: Math.round(1 + 3 * f) };
 }
 
 /** 順位に応じたアイテムの重み（w[アイテム番号]）。rank: 1 = 先頭, total: 台数 */
@@ -89,6 +93,9 @@ export function itemWeights(rank, total) {
   const ex = extraWeights(rank, total);
   w[ITEMS.BOMB] = ex.bomb;
   w[ITEMS.ROD] = ex.rod;
+  w[ITEMS.GIANT] = ex.giant;
+  w[ITEMS.REVERSE] = ex.rev;
+  w[ITEMS.LICENSE] = ex.lic;
   return w;
 }
 
@@ -160,6 +167,8 @@ export function rodTarget(s, k, progs, track) {
 export function useItem(s, k, events, progs = null, callRain = null, track = null) {
   if (!k.item) return; // ルーレット中でも、すでに持っているアイテムは使える
   const held = k.item;
+  // 免許返納で歩いている間は、車がないのでアイテムは使えない（飼い主だけは呼べる）
+  if (k.wk > 0 && held !== ITEMS.OWNER) return;
   // 釣り竿: 前（順位が上）に釣れる相手がいないとき（1 位など）は使えない。アイテムは持ったまま
   if (held === ITEMS.ROD && !rodTarget(s, k, progs, track)) {
     events.push({ t: 'rodNo', k: k.i });
@@ -250,33 +259,71 @@ export function useItem(s, k, events, progs = null, callRain = null, track = nul
       events.push({ t: 'fish', k: k.i, v: tk.i, x: tk.x, z: tk.z, n: 0 });
     } else {
       const L = track.length;
-      const q0 = track.project(tk.x, tk.z);
-      const oldS = ((q0.s % L) + L) % L;
-      const lat0 = q0.lat;
       const p = track.project(k.x, k.z);
+      const me = ((p.s % L) + L) % L;
+      const myLat = p.lat;
+      const q0 = track.project(tk.x, tk.z);
+      const lat0 = q0.lat;
+      // 相手の場所: 自分の場所を基準に、コース上の近いほうの向きで測った距離（前ならプラス、後ろならマイナス。半周まで）
+      const fa = me + track.wrapDS(q0.s - me);
       const lim = track.roadHalf - 2;
-      const lat = Math.max(-lim, Math.min(lim, p.lat + (p.lat > 0 ? -2.5 : 2.5)));
+      const lat = Math.max(-lim, Math.min(lim, myLat + (myLat > 0 ? -2.5 : 2.5)));
       // 引き寄せている間に自分も進むので、着くころの自分の位置の 7m 後ろをめざす
+      // （すぐ前の相手なら、少し前へ引っぱることもある。1 周ぐるっと回すことはない）
       const T = ITEMS.ROD_TIME;
-      const ns = p.s + Math.max(0, k.sp) * T - ITEMS.ROD_BACK;
-      // コースに沿って後ろへ（前にいた車なので、戻る向き）
-      let fa = oldS;
-      while (fa < ns) fa += L;
-      while (fa - L > ns) fa -= L;
-      Object.assign(tk, { fs: T, fT: T, fa, fb: ns, fla: lat0, flb: lat, fsp: Math.max(0, Math.min(tk.sp, k.sp) * 0.6), fo: k.i });
+      const fb = me + Math.max(0, k.sp) * T - ITEMS.ROD_BACK;
+      Object.assign(tk, { fs: T, fT: T, fa, fb, fla: lat0, flb: lat, fsp: Math.max(0, Math.min(tk.sp, k.sp) * 0.6), fo: k.i });
       tk.wrong = 0;
-      // 周回数は変えない。チェックポイントだけ着く場所に合わせる（戻った分はもう一度走る）。
-      // スタートラインを後ろへまたいだときは、もう一度ラインを越えたときに周回が元に戻るように 1 つ減らしておく
-      const newS = ((ns % L) + L) % L;
+      // 周回数は場所に合わせるだけ（ふつうは変わらない）。スタートラインをまたいで動いたときだけ、
+      // またいだ向きに 1 つ増減する（後ろへ戻ったら、もう一度ラインを越えたときに元に戻る）。チェックポイントは着く場所に合わせる
+      const newS = ((fb % L) + L) % L;
       const N = track.checkpoints;
       if (!(tk.lap === 0 && tk.cp === 0)) {
-        if (newS > oldS && tk.lap > 0) tk.lap--;
+        tk.lap = Math.max(0, tk.lap + Math.floor(fb / L) - Math.floor(fa / L));
         tk.cp = Math.min(N - 1, Math.floor((newS / L) * N));
       }
       k.stats.hits++;
       tk.stats.hitBy++;
       events.push({ t: 'fish', k: k.i, v: tk.i, x: tk.x, z: tk.z, n: 1 }); // 位置は釣られた場所
     }
+  } else if (item === ITEMS.GIANT) {
+    // 巨大化: しばらく大きくなる。触れた相手をつぶして遅くする（race.js の車どうしの当たり）
+    k.gi = ITEMS.GIANT_TIME;
+  } else if (item === ITEMS.REVERSE) {
+    // 逆走爺: 使った人以外の全員、しばらく操作が逆になる（ガードで 1 回防げる。飼い主モード・ゴール済み・釣られて飛んでいる車は平気）
+    for (const o of s.karts) {
+      if (o === k || o.fin || o.ow > 0 || o.fs > 0) continue;
+      if (o.gd > 0) {
+        o.gd = 0;
+        o.inv = Math.max(o.inv, 0.8);
+        events.push({ t: 'block', k: o.i, x: o.x, z: o.z });
+        continue;
+      }
+      o.rv = ITEMS.REVERSE_TIME;
+    }
+    events.push({ t: 'rev', k: k.i, x: k.x, z: k.z });
+  } else if (item === ITEMS.LICENSE) {
+    // 免許返納: 5 位以内（使った人を除く）からランダムに 2 台、車を取り上げてしばらく歩かせる
+    const ranked = progs ? s.karts.slice().sort((a, b) => progs[b.i] - progs[a.i] || a.i - b.i) : [];
+    const cand = ranked.slice(0, ITEMS.LICENSE_TOP).filter((o) => o !== k && !o.fin && !(o.ow > 0) && !(o.fs > 0) && !(o.wk > 0));
+    let n = 0;
+    while (cand.length && n < ITEMS.LICENSE_N) {
+      const o = cand.splice(Math.floor(nextRandom(s) * cand.length), 1)[0];
+      n++;
+      if (o.gd > 0) {
+        o.gd = 0;
+        o.inv = Math.max(o.inv, 0.8);
+        events.push({ t: 'block', k: o.i, x: o.x, z: o.z });
+        continue;
+      }
+      o.wk = ITEMS.LICENSE_TIME;
+      o.gi = 0;
+      o.boost = 0;
+      o.stats.hitBy++;
+      k.stats.hits++;
+      events.push({ t: 'lic', k: k.i, v: o.i, x: o.x, z: o.z });
+    }
+    if (!n) events.push({ t: 'poof', x: k.x, z: k.z });
   } else if (item === ITEMS.GUARD) {
     k.gd = ITEMS.GUARD_TIME;
   } else if (item === ITEMS.FRISBEE) {
@@ -310,6 +357,8 @@ export function useItem(s, k, events, progs = null, callRain = null, track = nul
     });
   } else if (item === ITEMS.OWNER) {
     k.ow = ownerTime(s.karts, k, progs);
+    k.rv = 0; // 飼い主が引っぱるので、逆走爺・免許返納は消える
+    k.wk = 0;
     k.spin = 0;
     k.slow = 0;
     k.wet = 0;
@@ -395,6 +444,8 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
     const pr = s.proj[i];
     pr.age += dt;
     pr.life -= dt;
+    const px0 = pr.x; // 動く前の位置（この tick に通った線の上で当たりを見る）
+    const pz0 = pr.z;
     if (pr.f) {
       // フリスビー: コースに沿って飛び、狙った相手のいる横位置へ寄っていく（壁にぶつからず、カーブも曲がる）
       if (pr.ps === undefined) {
@@ -404,7 +455,22 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
       }
       if (pr.sp === undefined) pr.sp = Math.hypot(pr.vx, pr.vz) || 1; // コースに沿って進む速さ（投げたときに決まる）
       const sp = pr.sp;
-      const tg = pr.t >= 0 ? karts[pr.t] : null;
+      let tg = pr.t >= 0 ? karts[pr.t] : null;
+      // 狙った相手を追い越した・ゴールした・飼い主モードになったら、今の場所から前にいる車を狙い直す
+      if (tg && ((tg.fin && !tg.npc) || tg.ow > 0 || tg.fs > 0 || track.wrapDS(track.project(tg.x, tg.z).s - pr.ps) < -6)) tg = null;
+      if (!tg) {
+        pr.t = -1;
+        let best = ITEMS.FRISBEE_RANGE - (pr.d || 0);
+        for (const o of karts) {
+          if (o.i === pr.o || (o.fin && !o.npc) || o.ow > 0 || o.fs > 0) continue;
+          const ahead = track.wrapDS(track.project(o.x, o.z).s - pr.ps);
+          if (ahead > 0 && ahead < best) {
+            best = ahead;
+            pr.t = o.i;
+          }
+        }
+        tg = pr.t >= 0 ? karts[pr.t] : null;
+      }
       const lim = track.roadHalf - 1.5;
       if (tg && !(tg.fin && !tg.npc)) {
         const tq = track.project(tg.x, tg.z);
@@ -414,7 +480,6 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
         const dl = goal - pr.pl;
         const maxStep = ITEMS.FRISBEE_LATERAL * dt;
         pr.pl += Math.max(-maxStep, Math.min(maxStep, dl));
-        if (ahead < -6) pr.t = -1; // 追い越してしまったら相手を追わない
       }
       pr.ps += sp * dt;
       const np = track.pointAt(pr.ps, pr.pl);
@@ -449,9 +514,16 @@ export function updateItems(s, dt, track, boxPos, rankOf, events) {
       for (const k of karts) {
         if (k.ow > 0) continue; // 飼い主モード中はすり抜ける
         if (k.i === pr.o && pr.age < 0.5) continue; // 投げた直後に自分に当たらない（跳ね返りには当たる）
-        const dx = k.x - pr.x;
-        const dz = k.z - pr.z;
-        if (dx * dx + dz * dz < ITEMS.BONE_HIT_R ** 2 && k.y < 2.5) {
+        // この tick に通った線（動く前 → 今）と車の近さで判定（速く飛んでいても、途中の車をすり抜けない）。
+        // フリスビーは、狙っていない車にも通り道で当たる
+        const sx = pr.x - px0;
+        const sz = pr.z - pz0;
+        const sl = sx * sx + sz * sz;
+        const u = sl > 0 ? Math.max(0, Math.min(1, ((k.x - px0) * sx + (k.z - pz0) * sz) / sl)) : 1;
+        const dx = k.x - (px0 + sx * u);
+        const dz = k.z - (pz0 + sz * u);
+        const hr = pr.f ? ITEMS.FRISBEE_HIT_R : ITEMS.BONE_HIT_R;
+        if (dx * dx + dz * dz < hr * hr && k.y < 2.5) {
           remove = true;
           if (spinKart(k, ITEMS.BONE_SPIN)) {
             k.stats.hitBy++;

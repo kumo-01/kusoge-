@@ -1845,6 +1845,37 @@ export class World {
     }
   }
 
+  /**
+   * トンネルの中の車はヘッドライトを自動でつける（入口の少し手前から）。me: 自分の車の番号（本物のライトで前を照らす）
+   * 車ごとの判定は数フレームに 1 回（軽くするため）
+   */
+  updateHeadlights(karts, me) {
+    const t = this.track;
+    if (!t.tunnels.length) return;
+    this._hlTick = ((this._hlTick | 0) + 1) % 6;
+    karts.forEach((k, i) => {
+      const v = this.karts[i];
+      if (!v || !k) return;
+      if ((i + this._hlTick) % 6 === 0 || v._lightsOn === undefined) v.setLights(t.inTunnel(t.project(k.x, k.z).s, 10));
+    });
+    // 自分の車だけ、本物のライト（スポットライト）で道を照らす。ライトの数が変わると重い作り直しになるので、いつも置いておき明るさだけ変える
+    if (!this._spot) {
+      this._spot = new THREE.SpotLight(0xfff1c8, 0, 60, 0.55, 0.6, 1.1);
+      this._spot.castShadow = false;
+      this.scene.add(this._spot, this._spot.target);
+    }
+    const k = karts[me];
+    const on = !!(k && this.karts[me]?._lightsOn && !(k.wk > 0));
+    const target = on ? 220 : 0;
+    this._spot.intensity += (target - this._spot.intensity) * 0.2;
+    if (k) {
+      const fx = Math.sin(k.h);
+      const fz = Math.cos(k.h);
+      this._spot.position.set(k.x + fx * 1.5, (k.y || 0) + 1.6, k.z + fz * 1.5);
+      this._spot.target.position.set(k.x + fx * 25, 0, k.z + fz * 25);
+    }
+  }
+
   /** 影を落とすライトを注目点に合わせて動かす */
   followSun(x, z) {
     this.sun.position.set(x + 40, 80, z + 25);

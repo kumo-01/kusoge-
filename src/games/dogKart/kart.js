@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildDog } from './dog.js';
-import { KART } from './constants.js';
+import { KART, ITEMS } from './constants.js';
 
 const shared = {};
 function once(key, make) {
@@ -60,10 +60,10 @@ const DOG_KINDS = ['shiba', 'corgi', 'poodle', 'pug', 'dachs', 'husky', 'doberma
  * dog: 犬の位置, flames: ブーストの炎, antenna: アンテナの根元, lean: 曲がるときの傾き（マイナスは内側へ傾く）
  */
 const VEH = [
-  { dog: [0, 0.62, -0.45], flames: [[-0.45, 0.55, -1.9], [0.45, 0.55, -1.9]], antenna: [0.7, 1.0, -1.1], lean: 0.14 }, // カート
-  { dog: [0, 0.98, -0.42], flames: [[0, 0.62, -1.7]], antenna: [0, 1.15, -1.25], lean: -0.32 }, // バイク
-  { dog: [0, 0.98, 0.15], flames: [[-0.45, 0.4, -1.55], [0.45, 0.4, -1.55]], antenna: [0.75, 1.75, -1.25], lean: 0.08 }, // ショッピングカート（カゴに乗る）
-  { dog: [0, 0.9, -0.35], flames: [[-0.5, 0.45, -1.3], [0.5, 0.45, -1.3]], antenna: [0.45, 1.0, -0.95], lean: 0.1 }, // 三輪車
+  { dog: [0, 0.62, -0.45], flames: [[-0.45, 0.55, -1.9], [0.45, 0.55, -1.9]], antenna: [0.7, 1.0, -1.1], lean: 0.14, lights: [[-0.5, 0.6, 2.0], [0.5, 0.6, 2.0]] }, // カート
+  { dog: [0, 0.98, -0.42], flames: [[0, 0.62, -1.7]], antenna: [0, 1.15, -1.25], lean: -0.32, lights: [[0, 1.0, 1.5]] }, // バイク
+  { dog: [0, 0.98, 0.15], flames: [[-0.45, 0.4, -1.55], [0.45, 0.4, -1.55]], antenna: [0.75, 1.75, -1.25], lean: 0.08, lights: [[-0.6, 0.85, 1.25], [0.6, 0.85, 1.25]] }, // ショッピングカート（カゴに乗る）
+  { dog: [0, 0.9, -0.35], flames: [[-0.5, 0.45, -1.3], [0.5, 0.45, -1.3]], antenna: [0.45, 1.0, -0.95], lean: 0.1, lights: [[0, 1.05, 1.15]] }, // 三輪車
 ];
 
 /** スピン中の見た目の回転角（状態から決まるのでホストとゲストで同じ） */
@@ -135,6 +135,7 @@ export class KartView {
       tire.receiveShadow = false;
       this.wheels.push(spin);
       if (front) this.frontPivots.push(pivot);
+      (this._pivots ||= []).push(pivot);
       return pivot;
     };
     const tube = (len, r = 0.07) => once(`g-tube-${len}-${r}`, () => new THREE.CylinderGeometry(r, r, len, 6));
@@ -290,7 +291,10 @@ export class KartView {
     this.dog.group.position.set(...lay.dog);
     this.dog.group.scale.setScalar(0.92);
     this.body.add(this.dog.group);
-    if (index === 6) this.group.scale.setScalar(1.12); // ボス犬は少し大きい
+    this.baseScale = index === 6 ? 1.12 : 1; // ボス犬は少し大きい
+    this.group.scale.setScalar(this.baseScale);
+    this._scale = 1; // 巨大化の倍率（なめらかに変える）
+    this._dogPos = [...lay.dog];
 
     // ガード中の泡
     this.shield = new THREE.Mesh(
@@ -402,9 +406,44 @@ export class KartView {
     }
     this.cloud.visible = false;
     this.group.add(this.cloud);
+    // 逆走爺: 頭の上で紫の輪がくるくる回る
+    this.revRing = new THREE.Mesh(
+      once('g-revring', () => new THREE.TorusGeometry(0.9, 0.12, 8, 24)),
+      once('m-revring', () => new THREE.MeshBasicMaterial({ color: 0xc04cff })),
+    );
+    this.revRing.position.set(0, 3.4, -0.3);
+    this.revRing.rotation.x = Math.PI / 2;
+    this.revRing.visible = false;
+    this.group.add(this.revRing);
+    // 免許返納で隠す乗り物の部品（犬・目を回す星以外）
+    this._vehObjs = [...this.body.children.filter((c) => c !== this.dog.group && c !== this.dizzy), ...(this._pivots || [])];
+    this._lightsOn = false;
+    this._walking = false;
+    // ヘッドライト（トンネルの中で自動でつく）: 光る電球と、前へのびる光の筋
+    this.headlights = new THREE.Group();
+    this.headlights.visible = false;
+    for (const lp of lay.lights) {
+      const bulb = new THREE.Mesh(once('g-hl-bulb', () => new THREE.SphereGeometry(0.2, 10, 8)), once('m-hl-bulb', () => new THREE.MeshBasicMaterial({ color: 0xfffbe0 })));
+      bulb.position.set(...lp);
+      const beam = new THREE.Mesh(
+        once('g-hl-beam', () => new THREE.ConeGeometry(2.4, 12, 16, 1, true).rotateX(-Math.PI / 2).translate(0, 0, 6)),
+        once('m-hl-beam', () => new THREE.MeshBasicMaterial({ color: 0xfff3b0, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })),
+      );
+      beam.position.set(lp[0], lp[1] - 0.05, lp[2] + 0.1);
+      beam.rotation.x = 0.06; // 少し下向き
+      beam.renderOrder = 2;
+      this.headlights.add(bulb, beam);
+    }
+    this.body.add(this.headlights);
     this.firstPerson = false;
     this.own = false; // 自分の車か
     this._t = 0;
+  }
+
+  /** ヘッドライトをつける・消す（トンネルの中で自動でつく。歩いている間はつかない） */
+  setLights(on) {
+    this._lightsOn = on;
+    this.headlights.visible = on && !this._walking;
   }
 
   /** 一人称視点のときは自分の犬を隠す（カメラが頭の中に入らないように） */
@@ -491,6 +530,34 @@ export class KartView {
       this.ownerArms[0].rotation.set(-0.5, 0, -1.25); // リードを持つ手（車側）は犬のほうへ
       this.ownerArms[1].rotation.x = Math.sin(ph) * 0.8;
       this.owner.position.y = Math.abs(Math.sin(ph)) * 0.18;
+    }
+    // 巨大化: なめらかに大きく・戻る
+    const gt = r.gi > 0 ? ITEMS.GIANT_SCALE : 1;
+    this._scale += (gt - this._scale) * Math.min(1, dt * 6);
+    this.group.scale.setScalar(this.baseScale * this._scale);
+    // つぶされた: ぺちゃんこ
+    if (r.sq > 0) {
+      const f = Math.min(1, r.sq / 0.3);
+      this.body.scale.set(1 + 0.35 * f, 1 - 0.6 * f, 1 + 0.35 * f);
+    }
+    // 逆走爺
+    this.revRing.visible = r.rv > 0 && !this.firstPerson;
+    if (this.revRing.visible) this.revRing.rotation.z = -t * 8;
+    // 免許返納: 乗り物を隠して、犬が地面をとことこ歩く
+    const walking = r.wk > 0;
+    if (walking !== this._walking) {
+      this._walking = walking;
+      for (const o of this._vehObjs) o.visible = !walking;
+      this.headlights.visible = this._lightsOn && !walking;
+      this.flames.forEach((f) => (f.visible = false));
+    }
+    if (walking) {
+      const ph = t * 14;
+      this.dog.group.position.set(this._dogPos[0], 0.25 + Math.abs(Math.sin(ph)) * 0.25, this._dogPos[2]);
+      this.dog.group.rotation.z = Math.sin(ph) * 0.12;
+    } else if (this.dog.group.position.y !== this._dogPos[1]) {
+      this.dog.group.position.set(...this._dogPos);
+      this.dog.group.rotation.z = 0;
     }
     this.dog.animate({ dt, speed: r.sp, steer: r.st, spin: r.spin, boost: boosting ? 1 : 0, bump: r.bump, mood });
   }

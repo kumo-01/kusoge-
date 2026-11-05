@@ -517,6 +517,13 @@ class DogKartGame {
           } else if (e.item === ITEMS.ROD) {
             snd.play('throw');
             fx?.text('それっ!', k.x, 3.5, k.z, 3.2);
+          } else if (e.item === ITEMS.GIANT) {
+            snd.play('boost');
+            fx?.ring(k.x, 0.5, k.z, 0xff7a2f, 8);
+            fx?.text('ムキムキ!', k.x, 5, k.z, 4.5);
+            if (e.k === me) this.hud.flash('💪 巨大化！', 'good', 1200);
+          } else if (e.item === ITEMS.REVERSE || e.item === ITEMS.LICENSE) {
+            snd.play('itemReady');
           } else if (e.item === ITEMS.GUARD) {
             snd.play('itemReady');
             fx?.ring(k.x, 0.8, k.z, 0x7fd0ff, 5);
@@ -553,6 +560,41 @@ class DogKartGame {
             snd.play('miss');
             this.hud.flash(this.sim.rankOf(me) === 1 ? '🎣 1位のときは釣り竿を使えない！' : '🎣 釣れる相手がいない…', 'bad', 1300);
           }
+          break;
+        case 'rev': {
+          // 逆走爺: 使った人以外の操作が逆に
+          const k = kartPos(e.k);
+          snd.play('thunder');
+          if (k) fx?.text('逆走爺じゃ〜!', k.x, 4.5, k.z, 4.5);
+          if (e.k === me) this.hud.flash('👴 逆走爺！ みんなの操作が逆に！', 'good', 1600);
+          else if (kartPos(me)?.rv > 0) {
+            this.hud.flash('👴 逆走爺が出た！ 操作が逆になる！', 'bad', 1800);
+            this.cam?.addShake(0.4);
+          }
+          break;
+        }
+        case 'lic': {
+          // 免許返納: 車を取り上げられた
+          snd.play('hit');
+          fx?.puff(e.x, 1, e.z, { n: 10, size: 1.2, spread: 3 });
+          fx?.text('免許返納!', e.x, 4.5, e.z, 4.5);
+          const v = kartPos(e.v);
+          if (e.v === me) {
+            this.hud.flash('🪪 免許返納… しばらく歩いて！', 'bad', 1800);
+            this.cam?.addShake(0.6);
+          } else if (e.k === me) this.hud.flash(`🪪 ${v ? kartName(v) : ''}の車を没収！`, 'good', 1400);
+          break;
+        }
+        case 'squash':
+          // 巨大化した車につぶされた
+          snd.play('bump');
+          fx?.text('ペチャ!', e.x, 3.5, e.z, 4);
+          fx?.stars(e.x, 1, e.z, 6, 0.6);
+          if (e.k === me) {
+            this.cam?.addShake(0.6);
+            this.hud.flash('つぶされた〜！', 'bad', 900);
+          }
+          if (e.by === me) this.hud.flash('💪 ペチャンコ！', 'good', 800);
           break;
         case 'boom':
           // 爆弾の爆発
@@ -1025,6 +1067,7 @@ class DogKartGame {
       });
       w.updateItems(st.items, dt);
       w.updateFishing(karts);
+      w.updateHeadlights(karts, this.me);
       if (!this.paused) {
         this._kartEffects(karts, dt);
         // 飛んでいるホネのキラキラの軌跡
@@ -1086,6 +1129,9 @@ class DogKartGame {
         phase: s.phase,
         tw,
         wet: mine.wet || 0,
+        rv: mine.rv || 0,
+        wk: mine.wk || 0,
+        gi: mine.gi || 0,
         food: sk.fd || 0,
         karts,
         netText: this.paused ? '⏸ 一時停止中' : `📶 ${this.serverSim ? 'サーバー' : this.isHost ? 'ゲスト' : 'ホスト'}と接続中 ${rtt}${diag}`,

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { Track } from '../src/games/dogKart/track.js';
 import { RaceSim, packNetBin, unpackNetBin, packNet, unpackNet, sanitizeSnapshot, VEHICLES } from '../src/games/dogKart/race.js';
 import { IN, ITEMS, RAIN, RACE } from '../src/games/dogKart/constants.js';
+import { useItem } from '../src/games/dogKart/items.js';
 
 const DT = 1 / 60;
 const track = new Track();
@@ -246,5 +247,119 @@ test('飼い主モード: 倒木のすぐ後ろ（止まっている）で使っ
       if (k.ow <= 0) k.ow = 3;
     }
     assert.ok(track.wrapDS(track.project(k.x, k.z).s - s0) > 5, `倒木の先へ進める (gap ${gap})`);
+  }
+});
+
+test('釣り竿: すぐ前の相手を、速く走りながら釣っても、1 周ぐるっと戻さない（周回はそのまま、自分の後ろへ）', () => {
+  const sim = race({ npcs: 2 });
+  const [a, b, c, d] = sim.s.karts;
+  put(a, 500, 0, { lap: 1, cp: 2, sp: 35 });
+  put(b, 515, 3, { lap: 1, cp: 2, sp: 30 });
+  put(c, 100, 0);
+  put(d, 50, 0);
+  sim.step(DT, [0, 0]);
+  a.item = ITEMS.ROD;
+  sim.step(DT, [IN.ITEM | IN.UP, 0]);
+  assert.ok(Math.abs(b.fb - b.fa) < 60, `近い距離だけ動く (${b.fa} → ${b.fb})`);
+  assert.equal(b.lap, 1, '周回は変わらない');
+  for (let i = 0; i < 80; i++) sim.step(DT, [IN.UP, 0]);
+  const ds = track.wrapDS(track.project(a.x, a.z).s - track.project(b.x, b.z).s);
+  assert.ok(ds > 0 && ds < 25, `自分の後ろ (${ds})`);
+  assert.equal(b.lap, 1);
+});
+
+test('フリスビー: 狙った相手を追い越したら、その先の車を狙い直す。通り道の車にも当たる', () => {
+  // NPC は止まっていると復帰してしまうので、人間 3 人で
+  const sim = race({ players: [0, 1, 2] });
+  const [a, c, d] = sim.s.karts;
+  put(a, 100, 0);
+  put(c, 140, 0, { inv: 0 }); // すぐ前（最初に狙う）
+  put(d, 300, -8, { inv: 0 });
+  sim.step(DT, [0, 0, 0]);
+  a.item = ITEMS.FRISBEE;
+  sim.step(DT, [IN.ITEM, 0, 0]);
+  const pr = sim.s.proj.find((p) => p.f);
+  assert.equal(pr.t, c.i);
+  // c を急に後ろへ動かして外させる → 前の d を狙い直して当たる
+  put(c, 20, 0);
+  let hitD = false;
+  for (let i = 0; i < 360 && !hitD; i++) {
+    for (const k of [a, c, d]) k.sp = 0;
+    sim.step(DT, [0, 0, 0]);
+    hitD = sim.drainEvents().some((e) => e.t === 'hit' && e.k === d.i);
+  }
+  assert.ok(hitD, '狙い直した相手に当たる');
+  // 通り道の車: 狙っていない車がちょうど通り道にいれば当たる
+  const sim2 = race({ players: [0, 1, 2] });
+  const [a2, b2, c2] = sim2.s.karts;
+  put(a2, 100, 0);
+  put(b2, 400, 0);
+  put(c2, 150, 0.5, { inv: 0 });
+  sim2.step(DT, [0, 0, 0]);
+  a2.item = ITEMS.FRISBEE;
+  sim2.step(DT, [IN.ITEM, 0, 0]);
+  sim2.s.proj[0].t = b2.i; // 狙いは遠くの b2。c2 はちょうど通り道にいる
+  let hitC = false;
+  for (let i = 0; i < 120 && !hitC; i++) {
+    for (const k of [a2, b2, c2]) k.sp = 0;
+    sim2.step(DT, [0, 0, 0]);
+    hitC = sim2.drainEvents().some((e) => e.t === 'hit' && e.k === c2.i);
+  }
+  assert.ok(hitC);
+});
+
+test('巨大化: 大きくなり、触れた相手をつぶして遅くする（スピンはしない）', () => {
+  const sim = race();
+  const [a, b] = sim.s.karts;
+  put(a, 200, 0, { sp: 20 });
+  put(b, 203, 0.5, { sp: 10 });
+  a.item = ITEMS.GIANT;
+  sim.step(DT, [IN.ITEM | IN.UP, IN.UP]);
+  assert.ok(a.gi > 0);
+  let sq = false;
+  for (let i = 0; i < 30 && !sq; i++) {
+    sim.step(DT, [IN.UP, IN.UP]);
+    sq = sim.drainEvents().some((e) => e.t === 'squash' && e.k === b.i);
+  }
+  assert.ok(sq, 'つぶれた');
+  assert.ok(b.sq > 0 && b.slow > 0);
+  assert.equal(b.spin, 0);
+});
+
+test('逆走爺: 使った人以外の操作が逆になる（アクセルでバック）', () => {
+  const sim = race({ npcs: 1 });
+  const [a, b] = sim.s.karts;
+  put(a, 200, 0);
+  put(b, 300, 0, { sp: 0 });
+  a.item = ITEMS.REVERSE;
+  sim.step(DT, [IN.ITEM, 0]);
+  assert.equal(a.rv, 0);
+  assert.ok(b.rv > 0 && sim.s.karts[2].rv > 0);
+  for (let i = 0; i < 40; i++) sim.step(DT, [0, IN.UP]);
+  assert.ok(b.sp < 0, `アクセルでバックする (${b.sp})`);
+  for (let i = 0; i < 60 * ITEMS.REVERSE_TIME; i++) sim.step(DT, [0, 0]);
+  assert.equal(b.rv, 0);
+});
+
+test('免許返納: 5 位以内（使った人を除く）から 2 台が歩きになり、遅くなる', () => {
+  for (let n = 0; n < 6; n++) {
+    const sim = race({ npcs: 6 });
+    sim.s.rng = 1234 + n * 77;
+    const ks = sim.s.karts;
+    ks.forEach((k, i) => put(k, 900 - i * 50, 0)); // 0 が 1 位 … 7 が 8 位
+    sim.step(DT, new Array(2).fill(0));
+    const user = n % 2 ? ks[2] : ks[6]; // 3 位（5 位以内）と 7 位
+    user.item = ITEMS.LICENSE;
+    sim.prog = ks.map((k) => sim.progressOf(k));
+    useItem(sim.s, user, [], sim.prog, null, track);
+    const walked = ks.filter((k) => k.wk > 0);
+    assert.equal(walked.length, 2);
+    for (const k of walked) {
+      assert.notEqual(k, user);
+      assert.ok(sim.rankOf(k.i, sim.prog) <= 5);
+    }
+    const w = walked[0];
+    for (let i = 0; i < 120; i++) sim.step(DT, [IN.UP, IN.UP]);
+    assert.ok(w.sp <= ITEMS.WALK_SPEED + 0.5, `歩く速さ (${w.sp})`);
   }
 });
