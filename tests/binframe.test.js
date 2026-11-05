@@ -50,7 +50,7 @@ test('レースの状態のバイナリ形式: JSON 版と同じ中身に戻り�
     assert.deepEqual(back.snap.foodTaken, ref.foodTaken);
     assert.equal(back.snap.bananas.length, ref.bananas.length);
     for (let k = 0; k < ref.karts.length; k++) {
-      for (const f of Object.keys(ref.karts[k])) assert.ok(Math.abs((back.snap.karts[k][f] || 0) - (ref.karts[k][f] || 0)) < (f === 'x' || f === 'z' ? 0.011 : 0.0011), `kart ${k} ${f}`);
+      for (const f of Object.keys(ref.karts[k])) assert.ok(Math.abs((back.snap.karts[k][f] || 0) - (ref.karts[k][f] || 0)) < (['x', 'z', 'fa', 'fb'].includes(f) ? 0.011 : 0.0011), `kart ${k} ${f}`);
     }
     assert.deepEqual(back.ev.map((x) => [x.id, x.t, x.k]), ev.map((x) => [x.id, x.t, Number.isInteger(x.k) && x.k >= 0 ? x.k : -1]));
   }

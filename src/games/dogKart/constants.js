@@ -93,7 +93,8 @@ export const ITEMS = {
   BOMB_RADIUS: 10, // 爆発に巻き込まれる範囲（m）
   BOMB_SPIN: 1.6,
   BOMB_MAX: 6,
-  ROD_BACK: 5, // 釣った車を、自分の何 m 後ろに置くか
+  ROD_BACK: 7, // 釣った車を、自分の何 m 後ろに置くか
+  ROD_TIME: 1.1, // 釣った車が引き寄せられて着くまで（秒）
 };
 
 export const NET = {

@@ -1017,6 +1017,7 @@ class DogKartGame {
         w.karts[i].update(k, dt, mood);
       });
       w.updateItems(st.items, dt);
+      w.updateFishing(karts);
       if (!this.paused) {
         this._kartEffects(karts, dt);
         // 飛んでいるホネのキラキラの軌跡

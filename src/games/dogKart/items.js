@@ -108,7 +108,7 @@ export function chooseItem(s, rank, total) {
 
 /** スピンさせる。無敵中なら false（force: スピン後などの短い無敵は無視する。ガードと飼い主モードでは防がれる） */
 export function spinKart(k, dur, force = false) {
-  if (k.fin || k.ow > 0 || (k.inv > 0 && !force)) return false;
+  if (k.fin || k.ow > 0 || k.fs > 0 || (k.inv > 0 && !force)) return false; // 釣られて飛んでいる間も当たらない
   if (k.gd > 0) {
     // ガード: 1 回だけ防ぐ（直後の連続ヒットを避けるため少しだけ無敵）
     k.gd = 0;
@@ -221,7 +221,7 @@ export function useItem(s, k, events, progs = null, callRain = null, track = nul
       const me = track.project(k.x, k.z).s;
       const ahead = [];
       for (const o of s.karts) {
-        if (o === k || o.fin) continue;
+        if (o === k || o.fin || o.fs > 0) continue;
         const d = (((track.project(o.x, o.z).s - me) % L) + L) % L;
         if (d > 0.01) ahead.push([d, o]);
       }
@@ -238,26 +238,22 @@ export function useItem(s, k, events, progs = null, callRain = null, track = nul
       events.push({ t: 'fish', k: k.i, v: tk.i, x: tk.x, z: tk.z, n: 0 });
     } else {
       const L = track.length;
-      const oldS = (((track.project(tk.x, tk.z).s) % L) + L) % L;
+      const q0 = track.project(tk.x, tk.z);
+      const oldS = ((q0.s % L) + L) % L;
+      const lat0 = q0.lat;
       const p = track.project(k.x, k.z);
       const lim = track.roadHalf - 2;
       const lat = Math.max(-lim, Math.min(lim, p.lat + (p.lat > 0 ? -2.5 : 2.5)));
-      const ns = p.s - ITEMS.ROD_BACK;
-      const np = track.pointAt(ns, lat);
-      tk.x = np.x;
-      tk.z = np.z;
-      tk.h = np.h;
-      tk.sp = Math.max(0, Math.min(tk.sp, k.sp) * 0.6);
-      tk.kx = 0;
-      tk.kz = 0;
-      tk.y = 1.6;
-      tk.vy = 3;
-      tk.boost = 0;
-      tk.slow = Math.max(tk.slow, 0.6);
-      tk.inv = Math.max(tk.inv, 1);
-      tk.bump = 0.5;
+      // 引き寄せている間に自分も進むので、着くころの自分の位置の 7m 後ろをめざす
+      const T = ITEMS.ROD_TIME;
+      const ns = p.s + Math.max(0, k.sp) * T - ITEMS.ROD_BACK;
+      // コースに沿って後ろへ（前にいた車なので、戻る向き）
+      let fa = oldS;
+      while (fa < ns) fa += L;
+      while (fa - L > ns) fa -= L;
+      Object.assign(tk, { fs: T, fT: T, fa, fb: ns, fla: lat0, flb: lat, fsp: Math.max(0, Math.min(tk.sp, k.sp) * 0.6), fo: k.i });
       tk.wrong = 0;
-      // 周回数は変えない。チェックポイントだけ新しい場所に合わせる（戻った分はもう一度走る）。
+      // 周回数は変えない。チェックポイントだけ着く場所に合わせる（戻った分はもう一度走る）。
       // スタートラインを後ろへまたいだときは、もう一度ラインを越えたときに周回が元に戻るように 1 つ減らしておく
       const newS = ((ns % L) + L) % L;
       const N = track.checkpoints;
@@ -267,7 +263,7 @@ export function useItem(s, k, events, progs = null, callRain = null, track = nul
       }
       k.stats.hits++;
       tk.stats.hitBy++;
-      events.push({ t: 'fish', k: k.i, v: tk.i, x: tk.x, z: tk.z, n: 1 });
+      events.push({ t: 'fish', k: k.i, v: tk.i, x: tk.x, z: tk.z, n: 1 }); // 位置は釣られた場所
     }
   } else if (item === ITEMS.GUARD) {
     k.gd = ITEMS.GUARD_TIME;

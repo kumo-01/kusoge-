@@ -51,7 +51,7 @@ test('爆弾: 前に投げて、投げてから 2〜3 秒後に落ちた場所�
   assert.equal(sim.s.bombs.length, 0);
 });
 
-test('釣り竿: コース上でいちばん近く前の車を、どんなに離れていても自分の 5m 後ろへ。周回数は変えない', () => {
+test('釣り竿: コース上でいちばん近く前の車を、どんなに離れていても自分の 7m 後ろへ引き寄せる。周回数は変えない', () => {
   const sim = race({ npcs: 2 });
   const [a, b, c, d] = sim.s.karts;
   // a（使う人）の前: c が 300m 先（1 周多い）、d が 600m 先。b は後ろ
@@ -64,8 +64,25 @@ test('釣り竿: コース上でいちばん近く前の車を、どんなに離
   sim.step(DT, [IN.ITEM, 0]);
   const ev = sim.drainEvents().find((e) => e.t === 'fish');
   assert.ok(ev && ev.n === 1 && ev.v === c.i, 'いちばん近く前（c）を釣る');
+  // 一瞬で飛ばず、引き寄せられて動く（宙を飛ぶ）
+  assert.ok(c.fs > 0);
+  let maxY = 0;
+  let prevS = track.project(c.x, c.z).s;
+  let backward = 0;
+  for (let i = 0; i < 60 * ITEMS.ROD_TIME + 5; i++) {
+    a.sp = 0;
+    sim.step(DT, [0, 0]);
+    maxY = Math.max(maxY, c.y);
+    const cs = track.project(c.x, c.z).s;
+    if (track.wrapDS(cs - prevS) < -0.01) backward++;
+    assert.ok(Math.abs(track.wrapDS(cs - prevS)) < 20, '途中で瞬間移動しない');
+    prevS = cs;
+  }
+  assert.ok(maxY > 3, '弧を描いて飛ぶ');
+  assert.ok(backward > 30, 'コースに沿って後ろへ動く');
+  assert.equal(c.fs, 0);
   const ds = track.wrapDS(track.project(a.x, a.z).s - track.project(c.x, c.z).s);
-  assert.ok(ds > 3 && ds < 7, `5m 後ろ (${ds})`);
+  assert.ok(ds > 5 && ds < 9, `7m 後ろ (${ds})`);
   assert.equal(c.lap, 2, '周回数は変わらない');
   assert.ok(c.cp <= a.cp + 1);
 });
@@ -82,6 +99,7 @@ test('釣り竿: 飼い主モードの車は飛ばして、その 1 つ先の車
   sim.step(DT, [IN.ITEM, 0]);
   const ev = sim.drainEvents().find((e) => e.t === 'fish');
   assert.equal(ev.v, c.i);
+  for (let i = 0; i < 80; i++) sim.step(DT, [0, 0]);
   assert.ok(track.project(c.x, c.z).s < 200);
 });
 

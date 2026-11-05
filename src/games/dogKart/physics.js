@@ -53,12 +53,58 @@ export function createKart(index, pos, boss = false, npc = index >= 2, style = i
     gd: 0, // ガードの残り時間（0 なら無し）
     wet: 0, // 豪雨で遅くなっている残り時間
     ow: 0, // 飼い主モードの残り時間（0 なら無し。この間は無敵で自動で走る）
+    // 釣り竿で釣られて、後ろへ引き寄せられている間（fs: 残り時間, fT: 全体の時間, fa → fb: コース上の距離, fla → flb: 横位置, fsp: 着いたときの速さ, fo: 釣った車）
+    fs: 0,
+    fT: 0,
+    fa: 0,
+    fb: 0,
+    fla: 0,
+    flb: 0,
+    fsp: 0,
+    fo: 0,
     stats: { bumps: 0, hits: 0, hitBy: 0, walls: 0, items: 0, boosts: 0, foods: 0, mg: 0, mgN: 0 },
   };
 }
 
 /** 物理に関わる数値フィールド（予測の誤差補正で使う） */
-export const PHYS_KEYS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'spin', 'boost', 'slow', 'inv', 'rc', 'wet'];
+export const PHYS_KEYS = ['x', 'z', 'y', 'vy', 'h', 'sp', 'kx', 'kz', 'spin', 'boost', 'slow', 'inv', 'rc', 'wet', 'fs', 'fT', 'fa', 'fb', 'fla', 'flb', 'fsp', 'fo'];
+
+/**
+ * 釣られて引き寄せられている車を 1 ステップ進める（操作は効かない）。コースに沿って後ろへ、弧を描いて飛ぶ。
+ * 釣ったときに決まった値だけで動くので、サーバー・自分の車の予測・ほかの車の推定で同じ動きになる
+ */
+export function stepFished(k, dt, track) {
+  k.fs = Math.max(0, k.fs - dt);
+  const T = Math.max(0.05, k.fT);
+  const u = Math.min(1, 1 - k.fs / T);
+  const e = u * u * (3 - 2 * u); // ゆっくり動き出して、ゆっくり着く
+  const p = track.pointAt(k.fa + (k.fb - k.fa) * e, k.fla + (k.flb - k.fla) * e);
+  k.x = p.x;
+  k.z = p.z;
+  k.h = p.h;
+  const dist = Math.abs(k.fb - k.fa);
+  k.y = Math.min(16, 5 + dist * 0.03) * 4 * u * (1 - u);
+  k.vy = 0;
+  k.sp = 0;
+  k.kx = 0;
+  k.kz = 0;
+  k.st *= 0.8;
+  k.th = 0;
+  k.spin = 0;
+  k.boost = 0;
+  k.inv = Math.max(k.inv, 0.5);
+  if (k.fs <= 0) {
+    // 着いた: 少し上から落ちて、そのまま前へ走る
+    k.fT = 0;
+    k.y = 0.6;
+    k.vy = 2;
+    k.sp = k.fsp;
+    k.slow = Math.max(k.slow, 0.6);
+    k.inv = Math.max(k.inv, 1);
+    k.bump = 0.5;
+  }
+  return 0;
+}
 
 export function maxSpeedOf(k) {
   let m = (k.boost > 0 ? KART.BOOST_SPEED : KART.MAX_SPEED) * (k.ms || 1) * (1 + (k.fd || 0) * FOOD.SPEED);
@@ -95,6 +141,7 @@ export function setVelocity(k, vx, vz) {
  * @returns {number} 壁への衝突速度（0 なら衝突なし）
  */
 export function stepKart(k, input, dt, track, active, holdSteer = false) {
+  if (k.fs > 0) return stepFished(k, dt, track);
   // ゴールした人間は操作終了。NPC はゴール後も走り続ける（コース上で止まって邪魔にならないように）
   const control = active && k.spin <= 0 && (!k.fin || k.npc);
   const up = control && input & IN.UP;

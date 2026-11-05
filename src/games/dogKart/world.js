@@ -1853,6 +1853,65 @@ export class World {
     if (this.track.tunnels.length) this._tunTarget = this.track.inTunnel(this.track.project(x, z).s, 8) ? 1 : 0;
   }
 
+  /**
+   * 釣り竿: 釣った車から竿をのばし、釣られて飛んでいる車まで糸を張る。karts: 描く位置の車（fs > 0 なら釣られている。fo が釣った車）
+   */
+  updateFishing(karts) {
+    const pool = (this._fish ||= []);
+    let n = 0;
+    for (const k of karts) {
+      if (!(k?.fs > 0)) continue;
+      const o = karts[k.fo];
+      if (!o || o === k) continue;
+      let f = pool[n];
+      if (!f) {
+        const rod = new THREE.Mesh(this._track(new THREE.CylinderGeometry(0.07, 0.14, 1, 6).translate(0, 0.5, 0)), this._track(new THREE.MeshToonMaterial({ color: 0x8a5a2b })));
+        const reel = new THREE.Mesh(this._track(new THREE.SphereGeometry(0.16, 8, 6)), this._track(new THREE.MeshToonMaterial({ color: 0xd8dde6 })));
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(17 * 3), 3));
+        this._track(geo);
+        const line = new THREE.Line(geo, this._track(new THREE.LineBasicMaterial({ color: 0xffffff })));
+        line.frustumCulled = false;
+        this.scene.add(rod, reel, line);
+        f = pool[n] = { rod, reel, line, geo };
+      }
+      n++;
+      f.rod.visible = f.reel.visible = f.line.visible = true;
+      // 竿: 釣った車の頭の上から、釣られた車のほうへ斜め上にのばす
+      const bx = o.x;
+      const by = (o.y || 0) + 1.8;
+      const bz = o.z;
+      let dx = k.x - o.x;
+      let dz = k.z - o.z;
+      const dl = Math.hypot(dx, dz) || 1;
+      dx /= dl;
+      dz /= dl;
+      const L = 4;
+      const tx = bx + dx * L * 0.55;
+      const ty = by + L * 0.8;
+      const tz = bz + dz * L * 0.55;
+      f.rod.position.set(bx, by, bz);
+      const dir = this._fv1 || (this._fv1 = new THREE.Vector3());
+      dir.set(tx - bx, ty - by, tz - bz);
+      const len = dir.length();
+      f.rod.scale.set(1, len, 1);
+      f.rod.quaternion.setFromUnitVectors(this._fup1 || (this._fup1 = new THREE.Vector3(0, 1, 0)), dir.normalize());
+      f.reel.position.set(bx + dx * 0.4, by + 0.5, bz + dz * 0.4);
+      // 糸: 竿の先から、釣られた車まで。ぴんと張って少しだけたるむ
+      const ex = k.x;
+      const ey = (k.y || 0) + 1.6;
+      const ez = k.z;
+      const sag = Math.min(2.5, Math.hypot(ex - tx, ez - tz) * 0.04);
+      const pos = f.geo.attributes.position;
+      for (let i = 0; i <= 16; i++) {
+        const u = i / 16;
+        pos.setXYZ(i, tx + (ex - tx) * u, ty + (ey - ty) * u - sag * 4 * u * (1 - u), tz + (ez - tz) * u);
+      }
+      pos.needsUpdate = true;
+    }
+    for (let i = n; i < pool.length; i++) pool[i].rod.visible = pool[i].reel.visible = pool[i].line.visible = false;
+  }
+
   /** 3D の点を画面に写す（-1〜1 が画面の中。z > 1 はカメラの後ろ）。直前に描いたときのカメラで計算する */
   projectPoint(x, y, z) {
     const v = this._pv || (this._pv = new THREE.Vector3());
