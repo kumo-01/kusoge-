@@ -3255,9 +3255,26 @@ canvas {
   letter-spacing: 0.08em;
   margin-bottom: -3px;
 }
+.adm-cnt {
+  color: var(--adm-acc);
+  font-weight: 500;
+}
+.adm-selbar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.adm-panel .adm-sel {
+  padding: 2px 0;
+  color: var(--adm-dim);
+  font-size: 10px;
+}
+.adm-panel .adm-sel + .adm-sel {
+  border-left: 0;
+}
 .adm-list {
   display: grid;
   border: 1px solid var(--adm-line);
+  margin-top: -4px;
 }
 .adm-panel .adm-row {
   display: grid;

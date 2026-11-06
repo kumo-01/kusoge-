@@ -387,3 +387,70 @@ test('管理モード: アイテムを書き換える・渡してすぐ使わせ
   assert.equal(b.item2, 0);
   assert.equal(a.item, 0);
 });
+
+test('管理モード: 続けて何回押しても毎回使う・2 回使えるものは 1 秒あけて残りも使う・何台でも選べる', () => {
+  const sim = race({ npcs: 3 });
+  const ks = sim.s.karts;
+  for (let i = 0; i < 90; i++) sim.step(DT, [IN.UP, IN.UP]);
+  sim.drainEvents();
+  const uses = [];
+  const run = (n) => {
+    for (let i = 0; i < n; i++) {
+      sim.step(DT, [IN.UP, IN.UP]);
+      for (const e of sim.drainEvents()) if (e.t === 'use') uses.push({ k: e.k, item: e.item, tick: sim.s.tick });
+    }
+  };
+  const usesOf = (k) => uses.filter((u) => u.k === k);
+  // 同じ tick に 5 回「渡して使う」（ホネ）: 5 本とも出る。持っているアイテムはそのまま
+  ks[1].item = ITEMS.GUARD;
+  for (let i = 0; i < 5; i++) assert.equal(sim.admin('give', { kart: 1, item: ITEMS.BONE }), true);
+  run(8);
+  assert.equal(usesOf(1).length, 5, '5 回とも使った');
+  assert.equal(ks[1].item, ITEMS.GUARD, '持っていたアイテムは残る');
+  // 犬小屋 2 個: すぐ 1 つ、1 秒後にもう 1 つ。枠には何も残らない（人の車で確かめる。NPC は自分でもアイテムを使うので）
+  const houses = () => uses.filter((u) => u.k === 0 && (u.item === ITEMS.HOUSE2 || u.item === ITEMS.HOUSE));
+  ks[0].item = 0;
+  ks[0].item2 = 0;
+  sim.admin('give', { kart: 0, item: ITEMS.HOUSE2 });
+  run(1);
+  assert.equal(houses().length, 1);
+  assert.equal(ks[0].item, 0, '残りは枠に入れない');
+  run(50);
+  assert.equal(houses().length, 1, 'まだ 1 秒たっていない');
+  run(15);
+  assert.equal(houses().length, 2, '1 秒後に 2 つ目');
+  assert.equal(houses()[1].tick - houses()[0].tick, 60);
+  assert.equal(ks[0].item, 0);
+  // 持っているフリスビー 2 枚を「使わせる」と、2 枚とも投げる
+  const fris = () => uses.filter((u) => u.k === 1 && (u.item === ITEMS.FRISBEE2 || u.item === ITEMS.FRISBEE));
+  ks[1].item = ITEMS.FRISBEE2;
+  ks[1].item2 = ITEMS.GUARD;
+  sim.admin('use', { kart: 1 });
+  assert.equal(ks[1].item, ITEMS.GUARD, '2 つ目の枠が前に出る');
+  run(70);
+  assert.equal(fris().length, 2, 'フリスビーを 2 枚');
+  assert.equal(ks[1].item, ITEMS.GUARD);
+  // 何台でも: 全員にブースト
+  ks.forEach((k) => (k.boost = 0));
+  assert.equal(sim.admin('give', { karts: ks.map((k) => k.i), item: ITEMS.BOOST }), true);
+  run(1);
+  assert.ok(ks.every((k) => k.boost > 0), '全員が使った');
+  sim.admin('item', { karts: [0, 2], slot: 1, item: ITEMS.BOMB });
+  assert.deepEqual(ks.map((k) => k.item === ITEMS.BOMB), ks.map((k) => k.i === 0 || k.i === 2));
+  sim.admin('clear', { karts: [0, 2] });
+  assert.equal(ks[0].item + ks[2].item, 0);
+  assert.equal(sim.admin('give', { karts: [99, -1, 'a'], item: ITEMS.BOOST }), false, '不正な車だけなら受け付けない');
+});
+
+test('管理モード: 使えなかったとき（歩いている間）は、持っていたアイテムを枠に戻す', () => {
+  const sim = race({ npcs: 1 });
+  const k = sim.s.karts[1];
+  for (let i = 0; i < 90; i++) sim.step(DT, [IN.UP, IN.UP]);
+  k.wk = 3;
+  k.item = ITEMS.BONE;
+  k.item2 = 0;
+  sim.admin('use', { kart: 1 });
+  sim.step(DT, [IN.UP, IN.UP]);
+  assert.equal(k.item, ITEMS.BONE);
+  assert.equal(sim.s.proj.length, 0);
+});

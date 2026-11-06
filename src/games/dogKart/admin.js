@@ -1,5 +1,5 @@
 // 管理パネル（ホストだけ・管理モードのときだけ）。画面の上を指やマウスで動かせる。
-// 車を選んで、好きなアイテムを渡す・2 つ目の枠に入れる・今すぐ使わせる・消す、ができる。
+// 車を選んで（何台でも）、好きなアイテムを渡す・2 つ目の枠に入れる・今すぐ使わせる・消す、ができる。
 import { h } from '../../core/util.js';
 import { ITEM_INFO } from './items.js';
 import { ITEMS } from './constants.js';
@@ -13,7 +13,8 @@ export class AdminPanel {
    */
   constructor(root, send) {
     this.send = send;
-    this.sel = 0; // 選んでいる車
+    this.sel = new Set([0]); // 選んでいる車（何台でも）
+    this.karts = [];
     this.mode = 'give'; // 'give' = 渡してすぐ使う / 'set1' = 1 つ目に入れる / 'set2' = 2 つ目に入れる
     this.rows = [];
     this.list = h('div.adm-list');
@@ -31,7 +32,9 @@ export class AdminPanel {
     this.log = h('div.adm-log', null, '> 待機中');
     this.head = h('div.adm-head', null, h('span', null, h('b', null, 'ADMIN'), ' 管理モード'), (this.minBtn = h('button.adm-min', { type: 'button', title: 'たたむ', onclick: () => this._toggleMin() }, '－')));
     const cap = (t) => h('div.adm-cap', null, t);
-    this.body = h('div.adm-body', null, cap('対象 / 持ち物'), this.list, cap('アイテムの操作'), this.modes, this.items, this.actions, this.log);
+    const selBtn = (label, pick) => h('button.adm-sel', { type: 'button', onclick: () => this._selectWhere(pick) }, label);
+    this.selBar = h('div.adm-selbar', null, selBtn('全員', () => true), selBtn('人だけ', (k) => !k.npc), selBtn('NPCだけ', (k) => k.npc), selBtn('解除', () => false));
+    this.body = h('div.adm-body', null, h('div.adm-cap', null, '対象（何台でも） ', (this.selCount = h('b.adm-cnt', null, '1台を選択中'))), this.selBar, this.list, cap('アイテムの操作'), this.modes, this.items, this.actions, this.log);
     this.names = [];
     this.el = h('div.adm-panel', { 'data-ctl': '' }, this.head, this.body);
     root.append(this.el);
@@ -45,21 +48,32 @@ export class AdminPanel {
     for (const b of this.modes.children) b.classList.toggle('on', b.dataset.m === m);
   }
 
+  /** 選んでいる車（番号の順） */
+  _targets() {
+    return [...this.sel].sort((a, b) => a - b);
+  }
+
   _pick(item) {
+    const karts = this._targets();
+    if (!karts.length) return this._log(null, '車を選んでください');
     const nm = ITEM_INFO[item]?.name || item;
-    if (this.mode === 'give') this.send('give', { kart: this.sel, item });
-    else this.send('item', { kart: this.sel, slot: this.mode === 'set2' ? 2 : 1, item });
-    this._log(`${nm} → ${this.mode === 'give' ? '渡して使用' : this.mode === 'set2' ? '枠2' : '枠1'}`);
+    if (this.mode === 'give') this.send('give', { karts, item });
+    else this.send('item', { karts, slot: this.mode === 'set2' ? 2 : 1, item });
+    this._log(karts, `${nm} → ${this.mode === 'give' ? '渡して使用' : this.mode === 'set2' ? '枠2' : '枠1'}`);
   }
 
   _do(op, label) {
-    this.send(op, { kart: this.sel });
-    this._log(label);
+    const karts = this._targets();
+    if (!karts.length) return this._log(null, '車を選んでください');
+    this.send(op, { karts });
+    this._log(karts, label);
   }
 
-  _log(text) {
-    const n = this.names[this.sel] ?? `#${this.sel + 1}`;
-    this.log.textContent = `> ${String(this.sel + 1).padStart(2, '0')} ${n}: ${text}`;
+  _log(karts, text) {
+    this._n = (this._n || 0) + 1;
+    let who = '';
+    if (karts) who = karts.length === 1 ? `${String(karts[0] + 1).padStart(2, '0')} ${this.names[karts[0]] ?? ''}` : `${karts.length}台`;
+    this.log.textContent = `> #${this._n} ${who ? `${who}: ` : ''}${text}`;
   }
 
   _toggleMin() {
@@ -76,13 +90,15 @@ export class AdminPanel {
       this.rows = karts.map((_, i) => {
         const name = h('span.adm-name');
         const it = h('span.adm-its');
-        const row = h('button.adm-row', { type: 'button', onclick: () => this._select(i) }, h('span.adm-no', null, String(i + 1).padStart(2, '0')), name, it);
+        const row = h('button.adm-row', { type: 'button', onclick: () => this._toggle(i) }, h('span.adm-no', null, String(i + 1).padStart(2, '0')), name, it);
         return { row, name, it, key: '' };
       });
       this.list.replaceChildren(...this.rows.map((r) => r.row));
-      this._select(Math.min(this.sel, karts.length - 1));
+      for (const i of [...this.sel]) if (i >= karts.length) this.sel.delete(i);
+      this._paintSel();
     }
     this.names = names;
+    this.karts = karts;
     karts.forEach((k, i) => {
       const r = this.rows[i];
       const icon = (v) => (v ? ITEM_INFO[v]?.icon || '?' : '－');
@@ -94,9 +110,20 @@ export class AdminPanel {
     });
   }
 
-  _select(i) {
-    this.sel = i;
-    this.rows.forEach((r, j) => r.row.classList.toggle('on', j === i));
+  _toggle(i) {
+    if (this.sel.has(i)) this.sel.delete(i);
+    else this.sel.add(i);
+    this._paintSel();
+  }
+
+  _selectWhere(pick) {
+    this.sel = new Set(this.karts.map((k, i) => (pick(k) ? i : -1)).filter((i) => i >= 0));
+    this._paintSel();
+  }
+
+  _paintSel() {
+    this.rows.forEach((r, j) => r.row.classList.toggle('on', this.sel.has(j)));
+    if (this.selCount) this.selCount.textContent = `${this.sel.size}台を選択中`;
   }
 
   _bindDrag() {
