@@ -4,6 +4,7 @@
 //   [0] 0xB7（目印） [1] 種類（1 = 位置の定期配信 / 2 = 操作） [2..3] 世代 gen [4..7] 試合 ID のハッシュ [8..] 種類ごとの中身
 //   1: [8..11] 配信の通し番号 seq、[12..] ゲームが詰めた状態（ゲームモジュールの encodeNetBinary / decodeNetBinary）
 //   2: [8..11] 最後の操作の seq、[12] 操作の数 n、[13..] 操作のビット（古い順に n 個）
+//      そのあとに（P2P のゲストだけ）[1 バイト: 1][2 バイト: 読めた最新の配信の番号]（受け取り確認。差分の配信の元になる）
 
 const MAGIC = 0xb7;
 export const FRAME_SNAPSHOT = 1;
@@ -38,15 +39,20 @@ export function encodeSnapshotFrame(matchId, gen, seq, payload) {
   return buf;
 }
 
-/** 操作。inputs: 直近の操作ビット（古い順）、seq: 最後の操作の番号 */
-export function encodeInputFrame(matchId, gen, seq, inputs) {
+/** 操作。inputs: 直近の操作ビット（古い順）、seq: 最後の操作の番号、ack: 読めた最新の配信の番号（なければ付けない） */
+export function encodeInputFrame(matchId, gen, seq, inputs, ack = null) {
   const n = Math.min(255, inputs.length);
   const list = inputs.slice(inputs.length - n);
-  const buf = new ArrayBuffer(13 + n);
+  const withAck = Number.isInteger(ack) && ack >= 0;
+  const buf = new ArrayBuffer(13 + n + (withAck ? 3 : 0));
   const dv = header(buf, FRAME_INPUT, matchId, gen);
   dv.setUint32(8, seq >>> 0, true);
   dv.setUint8(12, n);
   for (let i = 0; i < n; i++) dv.setUint8(13 + i, list[i] & 255);
+  if (withAck) {
+    dv.setUint8(13 + n, 1);
+    dv.setUint16(14 + n, ack & 0xffff, true);
+  }
   return buf;
 }
 
@@ -73,6 +79,7 @@ export function decodeFrame(data) {
       const n = u8[12];
       if (u8.length < 13 + n) return null;
       f.inputs = Array.from(u8.subarray(13, 13 + n));
+      f.ack = u8.length >= 16 + n && u8[13 + n] === 1 ? dv.getUint16(14 + n, true) : -1;
       return f;
     }
     return null;

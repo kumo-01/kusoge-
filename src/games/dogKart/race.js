@@ -24,6 +24,7 @@ export class RaceSim {
   /** @param {{ npcs?: number, boss?: number }} options npcs: ふつうの NPC の台数, boss: ボス犬を出すか */
   constructor(track, options = {}) {
     this.track = track;
+    this.seed = options.seed; // テスト用: 乱数の種（なければ毎回ちがうレース）
     this.boxPos = track.itemBoxes();
     this.events = [];
     // 人間の席（部屋の 0 = ホスト, 1・2 = ゲスト）。車の番号 i の人間は slots[i] の席
@@ -59,7 +60,7 @@ export class RaceSim {
       proj: [],
       bananas: [],
       nextId: 1,
-      rng: (Math.random() * 4294967296) >>> 0,
+      rng: Number.isInteger(this.seed) ? this.seed >>> 0 : (Math.random() * 4294967296) >>> 0, // seed: テスト用（毎回同じレースに）
       acks: Array.from({ length: this.humans }, () => 0), // 人間（車の番号）ごとに、最後に適用した入力の seq
       tc: [], // タイミングブーストのチャンス地点（スタートからの走行距離）
       rain: 0, // 豪雨の残り時間
@@ -1474,46 +1475,67 @@ function quantKart(k) {
 function quantHead(s) {
   return [Math.round(s.t * 1000), Math.round(s.endT * 100), s.winner | 0, Math.round(s.rain * 100), s.rk | 0, Math.max(0, PHASES.indexOf(s.phase)), ...s.acks.map((a) => Math.round(a) || 0)];
 }
-/** 前の 2 回（a1: 1 回前、a2: 2 回前。d1, d0: それぞれの間の tick 数）から、この回の値を予想する */
-function predictVal(a1, a2, d1, d0, c, w) {
-  if (a1 === undefined) return 0;
-  if (c || a2 === undefined || d0 <= 0) return a1;
-  const dv = w ? wrapS16(a1 - a2) : a1 - a2;
-  const p = a1 + Math.round((dv * d1) / d0);
-  return w ? wrap16(p) : p;
-}
 const zz = (r) => (r >= 0 ? r * 2 : -r * 2 - 1);
 const unzz = (u) => (u % 2 ? -(u + 1) / 2 : u / 2);
 
+// 項目ごとの「予想は前と同じ」「1 周で戻る角度」の印（毎回 defs を引かないよう、並びにしておく。最後の項目の印が後ろまで続く）
+const flagCache = new Map();
+function vecFlags(defs) {
+  let f = flagCache.get(defs);
+  if (!f) {
+    f = { c: new Uint8Array(64), w: new Uint8Array(64) };
+    for (let j = 0; j < 64; j++) {
+      const d = defs[Math.min(j, defs.length - 1)];
+      f.c[j] = d.c ? 1 : 0;
+      f.w[j] = d.w ? 1 : 0;
+    }
+    flagCache.set(defs, f);
+  }
+  return f;
+}
+/** 項目 j の予想: 前の 2 回（a1: 1 回前、a2: 2 回前。d1, d0: それぞれの間の tick 数）から伸ばす。送る側と受け取る側で、まったく同じ整数になる */
+function predictAt(j, a1, a2, d1, d0, F) {
+  if (!a1) return 0;
+  const x1 = a1[j];
+  if (x1 === undefined) return 0;
+  if (F.c[j] || !a2 || d0 <= 0) return x1;
+  const x2 = a2[j];
+  if (x2 === undefined) return x1;
+  if (F.w[j]) return wrap16(x1 + Math.round((wrapS16(x1 - x2) * d1) / d0));
+  return x1 + Math.round(((x1 - x2) * d1) / d0);
+}
+
 /** 値の並び vals を、予想との差で書く（差のある項目の印 + 差） */
+const VEC_RES = new Float64Array(64);
 function writeVec(w, vals, a1, a2, d1, d0, defs) {
-  let m = 0;
-  const res = [];
+  // 印は 30 bit ずつに分けてビット演算で作る（項目は 30 個を超える）。差は使い回しの配列に（毎回の配列を作らない）
+  const F = vecFlags(defs);
+  let lo = 0;
+  let hi = 0;
+  let nr = 0;
   for (let j = 0; j < vals.length; j++) {
-    const d = defs[Math.min(j, defs.length - 1)];
-    const p = predictVal(a1?.[j], a2?.[j], d1, d0, d.c, d.w);
-    const r = d.w ? wrapS16(vals[j] - p) : vals[j] - p;
+    const p = predictAt(j, a1, a2, d1, d0, F);
+    const r = F.w[j] ? wrapS16(vals[j] - p) : vals[j] - p;
     if (r !== 0) {
-      m += 2 ** j;
-      res.push(r);
+      if (j < 30) lo |= 1 << j;
+      else hi |= 1 << (j - 30);
+      VEC_RES[nr++] = r;
     }
   }
-  w.uv(m);
-  for (const r of res) w.uv(zz(r));
+  w.uv(hi * 1073741824 + lo);
+  for (let i = 0; i < nr; i++) w.uv(zz(VEC_RES[i]));
 }
 function readVec(r, n, a1, a2, d1, d0, defs) {
   const m = r.uv();
-  // 印を 30 bit ずつに分けて、ビット演算で調べる（項目は 30 個を超える）
   const lo = m % 1073741824;
   const hi = (m - lo) / 1073741824;
+  const F = vecFlags(defs);
   const out = new Array(n);
-  const last = defs.length - 1;
   for (let j = 0; j < n; j++) {
-    const d = defs[j < last ? j : last];
-    const p = predictVal(a1?.[j], a2?.[j], d1, d0, d.c, d.w);
+    const p = predictAt(j, a1, a2, d1, d0, F);
     if ((j < 30 ? lo >> j : hi >> (j - 30)) & 1) {
       const v = p + unzz(r.uv());
-      out[j] = d.w ? wrap16(v) : v;
+      out[j] = F.w[j] ? wrap16(v) : v;
     } else out[j] = p;
   }
   return out;
@@ -1661,9 +1683,18 @@ export class NetBinDecoder {
   constructor() {
     this.st = null;
     this.needKey = false;
+    this.ring = null; // v11: 読めた配信（次の配信の元）
+    this.ackN = -1; // v11: 読めた最新の配信の番号（下 16 bit。ホストへの受け取り確認）
   }
   decode(u8, prev = null) {
     if (!u8 || !u8.length) return null;
+    if (u8[0] === BIN_ACK) {
+      try {
+        return decodeAck(this, u8);
+      } catch {
+        return null;
+      }
+    }
     if (u8[0] !== BIN_DELTA) return unpackNetBin(u8, prev);
     try {
       return this._decodeDelta(u8, prev);
@@ -1766,4 +1797,266 @@ export class NetBinDecoder {
     snap.bombs = flags & DF.BOMBS ? readBombs(r) : [];
     return { snap, ev };
   }
+}
+
+// ---- 受け取り確認つきの差分の配信（v11）: P2P のホスト用 ----
+// P2P の高速チャンネルは取りこぼし・順番の入れ替わりがあるので、「前の回」を元にした差分（v10）は使えない。
+// そこでゲストは、受け取って読めた最新の配信の番号を操作と一緒に送り返す（受け取り確認）。
+// ホストはゲストごとに、そのゲストが確かに持っている配信（確認済みの最新 2 回）を元にして差分を作る。
+// 取りこぼしても、元にしている配信はゲストの手元にあるので、次の配信はいつでも読める。
+// 演出イベントは、そのゲストが受け取りを確認するまで載せ続ける（取りこぼしても必ず届く。今までは 3 回載せるだけだった）。
+const BIN_ACK = 11;
+const ACK_HIST = 64; // 元にできる配信の数（これより古い確認しかないときはキー）
+const ACK_MAX_AGE = 56;
+const coldVals = (k) => SLOW_IDX.map((ci) => Math.round((k[BIN_COLD[ci]] || 0) * (BIN_COLD_KIND[ci] === 'f' ? 1000 : 100)));
+const sameArr = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
+const flagsOf = (a) => {
+  const out = new Uint8Array(a.length);
+  for (let i = 0; i < a.length; i++) if (a[i] > 0) out[i] = 1;
+  return out;
+};
+/** 前の回と同じ中身なら前の配列を使う（覚えておく量が減り、ゲストごとの比べも一瞬で済む） */
+const reuse = (cur, prev) => (sameArr(cur, prev) ? prev : cur);
+
+/** P2P のホスト: 配信 1 回ごとに frame()、ゲストごとに encodeFor()。ゲストの受け取り確認は ack() */
+export class NetAckEncoder {
+  constructor() {
+    this.n = 0; // 配信の番号（ずっと増える。送るときは下 16 bit）
+    this.hist = new Map();
+    this.peers = new Map();
+    this.maxEv = 0;
+    this.cur = null;
+  }
+  /** 状態を読み込み直した: 元にできる配信を捨てる（次はゲスト全員にキー） */
+  reset() {
+    this.hist.clear();
+    for (const p of this.peers.values()) {
+      p.a1 = p.a2 = -1;
+      p.ev = [];
+    }
+  }
+  _peer(id) {
+    let p = this.peers.get(id);
+    if (!p) this.peers.set(id, (p = { a1: -1, a2: -1, ev: [] }));
+    return p;
+  }
+  /** この回の状態を覚える（ゲストごとの encodeFor の前に 1 回） */
+  frame(s, ev = []) {
+    const n = ++this.n;
+    const pv = this.hist.get(n - 1);
+    const fr = {
+      n,
+      tick: s.tick,
+      head: quantHead(s),
+      karts: s.karts.map(quantKart),
+      cold: s.karts.map((k, i) => reuse(coldVals(k), pv?.cold[i])),
+      boxF: reuse(flagsOf(s.boxes), pv?.boxF),
+      foodF: reuse(flagsOf(s.foods), pv?.foodF),
+      ban: reuse(s.bananas.map((b) => b.id), pv?.ban),
+      logs: reuse(s.logs.map((l) => l.id), pv?.logs),
+    };
+    this.hist.set(n, fr);
+    this.hist.delete(n - ACK_HIST);
+    // 新しい演出イベント（P2P でも 1 回だけ入れて、受け取りが確認されるまで載せ続ける）
+    const fresh = netEvents(ev).filter((e) => e.id > this.maxEv);
+    for (const e of fresh) this.maxEv = Math.max(this.maxEv, e.id);
+    for (const p of this.peers.values()) {
+      for (const e of fresh) p.ev.push({ e, first: n });
+      if (p.ev.length > 120) p.ev.splice(0, p.ev.length - 120);
+    }
+    this._fresh = fresh;
+    this.cur = { fr, s };
+  }
+  /** ゲスト id の受け取り確認（読めた最新の配信の番号の下 16 bit） */
+  ack(id, n16) {
+    const p = this._peer(id);
+    if (!Number.isInteger(n16) || n16 < 0) {
+      p.a1 = p.a2 = -1; // 読めた配信がまだない（読み込み直した）: 次はキー
+      return;
+    }
+    // 下 16 bit から本当の番号へ（今の番号に一番近いもの）
+    let n = this.n - ((this.n - n16) & 0xffff);
+    if (n > this.n || !this.hist.has(n) || n <= p.a1) return; // 古い・順番が入れ替わった確認
+    p.a2 = p.a1;
+    p.a1 = n;
+    p.ev = p.ev.filter((x) => x.first > n);
+  }
+  /** ゲスト id 向けの、この回の配信 */
+  encodeFor(id) {
+    const { fr, s } = this.cur;
+    const p = this._peer(id);
+    if (this._fresh.length && !p.ev.some((x) => x.first === fr.n)) for (const e of this._fresh) p.ev.push({ e, first: fr.n }); // 初めて送るゲスト
+    let b1 = p.a1 >= 0 && fr.n - p.a1 < ACK_MAX_AGE ? this.hist.get(p.a1) : null;
+    if (b1 && (b1.karts.length !== fr.karts.length || b1.head.length !== fr.head.length)) b1 = null;
+    let b2 = b1 && p.a2 >= 0 ? this.hist.get(p.a2) : null;
+    if (b2 && (b2.karts.length !== fr.karts.length || b2.head.length !== fr.head.length)) b2 = null;
+    const key = !b1;
+    const cold = fr.cold.map((c, i) => key || !sameArr(c, b1.cold[i]));
+    const anyCold = cold.some(Boolean);
+    const withSets = key || !sameArr(fr.boxF, b1.boxF) || !sameArr(fr.foodF, b1.foodF);
+    const withBananas = key || !sameArr(fr.ban, b1.ban);
+    const withLogs = key || !sameArr(fr.logs, b1.logs);
+    const inShort = (o) => Math.abs(o.x) < 655 && Math.abs(o.z) < 655;
+    const short = s.bananas.every(inShort) && s.proj.every(inShort);
+    const evs = p.ev.slice(-255).map((x) => x.e);
+    let flags = 0;
+    if (withSets) flags |= DF.SETS;
+    if (withBananas) flags |= DF.BANANAS;
+    if (short) flags |= DF.SHORT;
+    if (key) flags |= DF.KEY;
+    if (withLogs) flags |= DF.LOGS;
+    if (s.mg) flags |= DF.MG;
+    if (s.bombs?.length) flags |= DF.BOMBS;
+    if (s.proj.length) flags |= DF.PROJ;
+    if (s.houses.length) flags |= DF.HOUSES;
+    if (evs.length) flags |= DF.EVENTS;
+    if (anyCold) flags |= DF.COLD;
+    const w = new BinWriter(256);
+    w.u8(BIN_ACK);
+    w.uv(flags);
+    w.u16(fr.n & 0xffff);
+    let d1 = 0;
+    let d0 = 0;
+    if (key) {
+      w.uv(fr.tick);
+      w.u8(fr.head.length);
+      w.u8(fr.karts.length);
+    } else {
+      w.u8(fr.n - b1.n);
+      w.u8(b2 ? b1.n - b2.n : 0);
+      d1 = fr.tick - b1.tick;
+      d0 = b2 ? b1.tick - b2.tick : 0;
+      w.uv(Math.max(0, d1));
+    }
+    writeVec(w, fr.head, b1?.head, b2?.head, d1, d0, HDF_ALL);
+    fr.karts.forEach((v, i) => writeVec(w, v, b1?.karts[i], b2?.karts[i], d1, d0, KDF));
+    if (anyCold) {
+      let cm = 0;
+      cold.forEach((c, i) => c && (cm += 2 ** i));
+      w.uv(cm);
+      s.karts.forEach((k, i) => {
+        if (!cold[i]) return;
+        let sm = 0;
+        SLOW_IDX.forEach((ci, j) => {
+          if (!isDefault(k, ci)) sm += 2 ** j;
+        });
+        w.uv(sm);
+        SLOW_IDX.forEach((ci, j) => Math.floor(sm / 2 ** j) % 2 && putField(w, k, ci));
+      });
+    }
+    if (withSets) {
+      w.set(takenOf(s.boxes), s.boxes.length);
+      w.set(takenOf(s.foods), s.foods.length);
+    }
+    if (flags & DF.PROJ) writeProj(w, s.proj, short);
+    if (withBananas) writeBananas(w, s.bananas, short);
+    if (flags & DF.HOUSES) writeHouses(w, s.houses);
+    if (withLogs) writeLogs(w, s.logs);
+    if (flags & DF.EVENTS) writeEvents(w, evs);
+    if (s.mg) writeMg(w, s.mg);
+    if (flags & DF.BOMBS) writeBombs(w, s.bombs);
+    return w.bytes();
+  }
+}
+
+/** v11 を読む（NetBinDecoder から）。読めた配信は手元に残し、次の配信の元にする */
+function decodeAck(dec, u8) {
+  const r = new BinReader(u8);
+  r.u8();
+  const flags = r.uv();
+  const n = r.u16();
+  const key = !!(flags & DF.KEY);
+  const ring = (dec.ring ||= new Map());
+  let b1 = null;
+  let b2 = null;
+  let tick;
+  let nh;
+  let nk;
+  let d1 = 0;
+  let d0 = 0;
+  if (key) {
+    tick = r.uv();
+    nh = r.u8();
+    nk = Math.min(r.u8(), RACE.MAX_KARTS);
+  } else {
+    const o1 = r.u8();
+    const o2 = r.u8();
+    b1 = ring.get((n - o1) & 0xffff);
+    b2 = o2 ? ring.get((n - o1 - o2) & 0xffff) : null;
+    if (!b1 || (o2 && !b2)) return null; // 元の配信を持っていない（読み込み直した直後など）。受け取り確認でホストがキーを送る
+    d1 = r.uv();
+    d0 = b2 ? b1.tick - b2.tick : 0;
+    tick = b1.tick + d1;
+    nh = b1.head.length;
+    nk = b1.karts.length;
+  }
+  if (ring.has(n)) return null; // 同じ配信が 2 回届いた
+  const head = readVec(r, nh, b1?.head, b2?.head, d1, d0, HDF_ALL);
+  const karts = [];
+  for (let i = 0; i < nk; i++) karts.push(readVec(r, KDF.length, b1?.karts[i], b2?.karts[i], d1, d0, KDF));
+  const snap = {
+    tick,
+    t: head[0] / 1000,
+    endT: head[1] / 100,
+    winner: head[2],
+    rain: head[3] / 100,
+    rk: head[4],
+    phase: PHASES[head[5]] || PHASES[0],
+    acks: head.slice(6),
+  };
+  snap.karts = karts.map((v) => {
+    const k = { ...KART_SHAPE };
+    for (let j = 0; j < KDF.length; j++) {
+      const d = KDF[j];
+      if (d.w) {
+        let h = (v[j] * TAU) / U16;
+        if (h > Math.PI) h -= TAU;
+        k.h = h;
+      } else k[d.f] = v[j] / d.q;
+    }
+    k.th = thOf(k);
+    return k;
+  });
+  // 載っていない部分は、元にした配信（b1）から
+  const base = b1?.snap;
+  const cm = flags & DF.COLD ? r.uv() : 0;
+  snap.karts.forEach((k, i) => {
+    if ((cm >> i) & 1) {
+      const sm = r.uv();
+      SLOW_IDX.forEach((ci, j) => (k[BIN_COLD[ci]] = Math.floor(sm / 2 ** j) % 2 ? getField(r, ci) : BIN_COLD_DEFAULT[ci]));
+    } else if (base?.karts[i]) for (const f of BIN_SLOW) k[f] = base.karts[i][f];
+    else for (const ci of SLOW_IDX) k[BIN_COLD[ci]] = BIN_COLD_DEFAULT[ci];
+  });
+  const short = !!(flags & DF.SHORT);
+  if (flags & DF.SETS) {
+    snap.boxTaken = r.set(200);
+    snap.foodTaken = r.set(400);
+  } else {
+    snap.boxTaken = base ? base.boxTaken.slice() : [];
+    snap.foodTaken = base ? base.foodTaken.slice() : [];
+  }
+  snap.proj = flags & DF.PROJ ? readProj(r, short).slice(0, 32) : [];
+  if (flags & DF.BANANAS) snap.bananas = readBananas(r, short).slice(0, ITEMS.BANANA_MAX + 2);
+  else {
+    const dt = Math.max(0, (tick - (b1?.tick ?? tick)) / 60);
+    snap.bananas = base ? base.bananas.map((b) => ({ ...b, age: b.age + dt })) : [];
+  }
+  snap.houses = flags & DF.HOUSES ? readHouses(r).slice(0, 8) : [];
+  if (flags & DF.LOGS) snap.logs = readLogs(r);
+  else snap.logs = base ? base.logs.map((l) => ({ ...l })) : [];
+  const ev = flags & DF.EVENTS ? readEvents(r) : [];
+  snap.mg = flags & DF.MG ? readMg(r) : null;
+  snap.bombs = flags & DF.BOMBS ? readBombs(r) : [];
+  // 手元に残す（次の配信の元）。古いものから捨てる
+  // （読んだ状態はこのあと sanitizeSnapshot で別のオブジェクトに写されるので、そのまま覚えておける）
+  ring.set(n, { tick, head, karts, snap });
+  // 受け取り確認は、読めた中で一番新しい配信（順番が入れ替わって古いものが後から届くことがある）
+  if (dec.ackN < 0 || ((n - dec.ackN) & 0xffff) < 0x8000) dec.ackN = n;
+  if (ring.size > ACK_HIST) for (const k of [...ring.keys()]) if (((dec.ackN - k) & 0xffff) >= ACK_HIST) ring.delete(k);
+  return { snap, ev };
 }

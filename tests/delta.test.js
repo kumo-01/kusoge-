@@ -121,3 +121,109 @@ test('差分の配信: コースの外まで飛ばされた車・アイテムや
     e.sim.s.karts.forEach((k, j) => assert.ok(Math.abs(d.snap.karts[j].x - k.x) < 0.006 && Math.abs(d.snap.karts[j].z - k.z) < 0.006, `車 ${j}`));
   }
 });
+
+// ---- P2P: 受け取り確認つきの差分（v11） ----
+import { NetAckEncoder } from '../src/games/dogKart/race.js';
+
+/** 取りこぼし loss・遅れ lag（tick）のある通信で、ホスト → ゲスト 2 人に配信し、ゲストは受け取り確認を返す */
+function p2p(loss, lag, seconds = 60) {
+  const e = new DogKartEngine({ players: [0, 1, 2], npcs: 8, boss: 1, mg: 1 });
+  const enc = new NetAckEncoder();
+  const v9 = new NetBinEncoder();
+  const decs = { 1: new NetBinDecoder(), 2: new NetBinDecoder() };
+  let rnd = 7;
+  const R = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
+  let pipe = [];
+  let acks = [];
+  let acc = 0;
+  const st = { bytes: 0, n: 0, bytes9: 0, ok: 0, nul: 0, evIn: new Set(), evOut: { 1: new Set(), 2: new Set() } };
+  for (let i = 0; i < 60 * seconds; i++) {
+    e.step(1 / 60, { 0: 1, 1: i % 80 < 20 ? 5 : 1, 2: 1 });
+    for (const a of acks.filter((x) => x.at <= i)) enc.ack(a.id, a.n);
+    acks = acks.filter((x) => x.at > i);
+    acc += 1;
+    const every = e.sim.s.mg ? 6 : 1.5;
+    if (acc >= every) {
+      acc -= every;
+      const ev = e.drainNetEvents();
+      for (const x of ev) st.evIn.add(x.id);
+      enc.frame(e.sim.s, ev);
+      st.bytes9 += v9.encode(e.sim.s, ev).length * 2;
+      for (const id of [1, 2]) {
+        const b = enc.encodeFor(id);
+        st.bytes += b.length;
+        st.n++;
+        if (R() > loss) pipe.push({ at: i + lag + Math.floor(R() * 4), id, b, tick: e.sim.s.tick, karts: e.sim.s.karts.map((k) => [k.x, k.z, k.item, k.lap, k.cp]) });
+      }
+    }
+    for (const p of pipe.filter((x) => x.at <= i)) {
+      const d = decs[p.id].decode(p.b, null);
+      if (!d) {
+        st.nul++;
+        continue;
+      }
+      st.ok++;
+      for (const x of d.ev) st.evOut[p.id].add(x.id);
+      assert.equal(d.snap.tick, p.tick);
+      d.snap.karts.forEach((k, j) => {
+        const t = p.karts[j];
+        assert.ok(Math.abs(k.x - t[0]) < 0.006 && Math.abs(k.z - t[1]) < 0.006, `車 ${j} の位置`);
+        assert.deepEqual([k.item, k.lap, k.cp], t.slice(2), `車 ${j} のアイテム・周回`);
+      });
+      if (R() > loss) acks.push({ at: i + lag + Math.floor(R() * 4), id: p.id, n: decs[p.id].ackN });
+    }
+    pipe = pipe.filter((x) => x.at > i);
+  }
+  return st;
+}
+
+test('P2P の差分の配信: 取りこぼし・順番の入れ替わり・遅れがあっても、届いた配信はいつも読めて元と一致する', () => {
+  for (const [loss, lag] of [
+    [0, 3],
+    [0.15, 6],
+    [0.35, 10],
+  ]) {
+    const st = p2p(loss, lag);
+    assert.equal(st.nul, 0, `読めない配信がある（取りこぼし ${loss}）`);
+    assert.ok(st.ok > 1000);
+    assert.ok(st.bytes < st.bytes9 * (loss > 0.3 ? 0.75 : 0.6), `大きさ ${(st.bytes / st.n).toFixed(0)} バイト（v9: ${(st.bytes9 / st.n).toFixed(0)}）`);
+  }
+});
+
+test('P2P の差分の配信: 演出イベントは、受け取りが確認されるまで載せ続けるので、取りこぼしても届く', () => {
+  const st = p2p(0.25, 6);
+  const sent = [...st.evIn];
+  // 最後の 1 秒に起きたものは、まだ届いていなくてよい
+  const settled = sent.slice(0, Math.max(0, sent.length - 15));
+  for (const id of [1, 2]) assert.deepEqual(settled.filter((x) => !st.evOut[id].has(x)), [], `ゲスト ${id} に届かなかったイベント`);
+});
+
+test('P2P の差分の配信: 読み込み直したゲスト（受け取り確認なし）にはキーを送り、そこから差分に戻る', () => {
+  const e = new DogKartEngine({ players: [0, 1], npcs: 2 });
+  const enc = new NetAckEncoder();
+  let dec = new NetBinDecoder();
+  const send = () => {
+    e.step(1 / 60, { 0: 1, 1: 1 });
+    e.step(1 / 60, { 0: 1, 1: 1 });
+    enc.frame(e.sim.s, e.drainNetEvents());
+    return enc.encodeFor(1);
+  };
+  let b = send();
+  assert.ok(b[1] & 8, '最初はキー');
+  assert.ok(dec.decode(b));
+  enc.ack(1, dec.ackN);
+  b = send();
+  assert.ok(!(b[1] & 8), '確認のあとは差分');
+  assert.ok(dec.decode(b));
+  // 読み込み直した: 新しい受け手は差分を読めない → 確認なし（-1）を返すと、次はキー
+  dec = new NetBinDecoder();
+  assert.equal(dec.decode(send()), null);
+  enc.ack(1, dec.ackN);
+  b = send();
+  assert.ok(b[1] & 8);
+  assert.ok(dec.decode(b));
+  // 状態を読み込み直した（巻き戻し）ホストは、全員にキーを送る
+  enc.ack(1, dec.ackN);
+  enc.reset();
+  assert.ok(send()[1] & 8);
+});

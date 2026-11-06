@@ -124,3 +124,11 @@ test('位置: ふだんは 2 バイト（2cm）、コースの外まではみ出
   assert.ok(Math.abs(back.karts[1].x - 900.123) < 0.006);
   assert.ok(Math.abs(unpackNetBin(small).snap.karts[0].z - e.sim.s.karts[0].z) < 0.011);
 });
+
+test('枠: 操作に受け取り確認（読めた最新の配信の番号）を付けられる。付けなければ -1', () => {
+  const a = decodeFrame(encodeInputFrame('m', 1, 99, [1, 2, 3], 65535));
+  assert.deepEqual([a.inputs, a.ack], [[1, 2, 3], 65535]);
+  assert.equal(decodeFrame(encodeInputFrame('m', 1, 99, [1], 0)).ack, 0);
+  assert.equal(decodeFrame(encodeInputFrame('m', 1, 99, [1])).ack, -1);
+  assert.equal(decodeFrame(encodeInputFrame('m', 1, 99, [1], -1)).ack, -1);
+});

@@ -99,8 +99,9 @@ export class GameManager extends Emitter {
           return;
         }
         if (this.isHost) return;
-        // 連続入力は順不同の高速チャンネルで送る（重複・欠落は seq と重ね送りで吸収）
-        this.net.sendFast(this.net.binary ? encodeInputFrame(matchId, this.gen, seq, inputs) : { type: 'player_input', matchId, gen: this.gen, seq, inputs });
+        // 連続入力は順不同の高速チャンネルで送る（重複・欠落は seq と重ね送りで吸収）。
+        // P2P は、読めた最新の配信の番号（受け取り確認）も一緒に送る。ホストはそれを元に差分の配信を作る
+        this.net.sendFast(this.net.binary ? encodeInputFrame(matchId, this.gen, seq, inputs, game.netAck ?? null) : { type: 'player_input', matchId, gen: this.gen, seq, inputs });
       },
       // ゲーム固有メッセージ（双方向）
       sendGameMessage: (data) => {
@@ -302,6 +303,7 @@ export class GameManager extends Emitter {
       if (f.kind === FRAME_INPUT && this.isHost && !this.serverSim) {
         const player = this.players.indexOf(slot);
         if (this.running && player > 0) game.onMessage({ type: 'player_input', player, seq: f.seq, inputs: f.inputs });
+        if (player > 0 && f.ack !== undefined) game.netAckFrom?.(slot, f.ack);
       } else if (f.kind === FRAME_SNAPSHOT && (!this.isHost || this.serverSim) && this.running && game.decodeNetBinary) {
         const d = game.decodeNetBinary(f.payload);
         if (d) game.applyNetSnapshot(d.snap, d.ev, f.seq);
@@ -372,8 +374,8 @@ export class GameManager extends Emitter {
   }
 
   _sendSnapshot() {
-    // 巻き戻し用の完全な状態は 3 回に 1 回（約 0.1 秒おき）だけ残す。毎回コピーすると重い
-    const keep = !this.game.encodeNetSnapshot || (this._histN = (this._histN | 0) + 1) % 3 === 0;
+    // 巻き戻し用の完全な状態は 8 回に 1 回（約 0.2 秒おき）だけ残す。毎回コピーすると重い
+    const keep = !this.game.encodeNetSnapshot || (this._histN = (this._histN | 0) + 1) % 8 === 0;
     const snap = keep ? this.game.getSnapshot() : null;
     const ev = this.game.drainNetEvents ? this.game.drainNetEvents() : [];
     const t = now();
@@ -384,6 +386,13 @@ export class GameManager extends Emitter {
     }
     if (this.net.congested && ev.length === 0) return; // 送信が詰まっているときは位置更新を間引く
     // P2P はバイナリの枠で送る（JSON の約 1/3.5）。部屋の中継は文字だけなので JSON
+    // ゲストごとに、そのゲストが受け取りを確認した配信を元にした差分を送る（取りこぼしがあっても読める。約 1/3 の大きさ）
+    if (this.net.binary && this.game.encodeNetBinaryFor && this.net.sendFastTo) {
+      this.game.netFrame(ev);
+      const seq = ++this._netSeq;
+      for (const slot of this.players) if (slot > 0 && this.net.isConnected?.(slot)) this.net.sendFastTo(slot, encodeSnapshotFrame(this.matchId, this.gen, seq, this.game.encodeNetBinaryFor(slot)));
+      return;
+    }
     if (this.net.binary && this.game.encodeNetBinary) {
       this.net.sendFast(encodeSnapshotFrame(this.matchId, this.gen, ++this._netSeq, this.game.encodeNetBinary(ev)));
       return;

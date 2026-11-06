@@ -5,7 +5,7 @@
 //         ほかの車・飛んでいるアイテムは、自分の車と同じ時刻まで先へ計算して描く（netview.js）。
 
 import { Track } from './track.js';
-import { RaceSim, sanitizeSnapshot, unpackNet, kartName, NetBinEncoder, NetBinDecoder, NET_EVENT_TYPES, BIN_COLD_FIELDS } from './race.js';
+import { RaceSim, sanitizeSnapshot, unpackNet, kartName, NetBinEncoder, NetBinDecoder, NetAckEncoder, NET_EVENT_TYPES, BIN_COLD_FIELDS } from './race.js';
 import { DogKartEngine } from './engine.js';
 import { Predictor, RemoteKarts } from './netview.js';
 import { stepKart } from './physics.js';
@@ -258,10 +258,14 @@ class DogKartGame {
     const every = this._same >= 30 && bits === 0 ? 30 : this._same >= 8 ? 8 : NET.INPUT_SEND_EVERY;
     // ふだんは 1.5 tick ごと（tick の番号を 1.5 で割った整数部分が変わったとき。1 tick と 2 tick の間隔を交互に）
     const due = every === NET.INPUT_SEND_EVERY ? Math.floor(this.seq / every) !== Math.floor((this.seq - 1) / every) : this.pending.length >= every;
+    // P2P: 新しい配信を読めたら、操作が変わらなくても 2 tick ごとに受け取り確認を返す（ホストの差分の元が新しいほど小さくなる）
+    const ackDue = !reliable && this._dec && this._dec.ackN !== this._ackSent && this.seq - (this._sentAt | 0) >= 2;
     // 押し方が変わった tick は、まとめずにすぐ送る（反応が 1 tick 速くなる）
-    if (due || bits & IN.ONESHOT || this._same === 0) {
+    if (due || bits & IN.ONESHOT || this._same === 0 || ackDue) {
       this.ctx.sendInput(this.seq, reliable ? this.pending.slice() : this.sentInputs.slice());
       this.pending = [];
+      this._sentAt = this.seq;
+      this._ackSent = this._dec?.ackN;
     }
     if (NET.PREDICTION && this.pred.k && this.sim.s.karts[this.me].ow > 0) {
       // 飼い主モード中は自動で走る（操作はできない）。自分の車も、ほかの車と同じく確定状態から同じ時刻まで先を推定して使う
@@ -333,9 +337,29 @@ class DogKartGame {
     return this.engine.encode();
   }
 
-  /** 定期配信用にバイナリで詰める（P2P のホスト。ev: この配信に載せる演出イベント） */
+  /** 定期配信用にバイナリで詰める（全員に同じもの。ev: この配信に載せる演出イベント） */
   encodeNetBinary(ev) {
     return (this._enc ||= new NetBinEncoder()).encode(this.sim.s, ev);
+  }
+
+  /** P2P のホスト: この回の配信の状態を覚える（このあとゲストごとに encodeNetBinaryFor） */
+  netFrame(ev) {
+    (this._ackEnc ||= new NetAckEncoder()).frame(this.sim.s, ev);
+  }
+
+  /** P2P のホスト: 席 slot のゲスト向けの配信（そのゲストが受け取りを確認した配信からの差分） */
+  encodeNetBinaryFor(slot) {
+    return this._ackEnc.encodeFor(slot);
+  }
+
+  /** P2P のホスト: 席 slot のゲストの受け取り確認 */
+  netAckFrom(slot, n16) {
+    (this._ackEnc ||= new NetAckEncoder()).ack(slot, n16);
+  }
+
+  /** P2P のゲスト: 読めた最新の配信の番号（なければ -1 = 次はキーを送ってほしい） */
+  get netAck() {
+    return this._dec ? this._dec.ackN : -1;
   }
 
   /**
@@ -371,6 +395,7 @@ class DogKartGame {
   loadSnapshot(snap) {
     this._binMem = null; // 完全な状態を読んだら、補う元もそれに合わせる
     this._enc?.reset();
+    this._ackEnc?.reset();
     this.sim.loadSnapshot(snap);
     const s = this.sim.s;
     this.world?.effects.clear();

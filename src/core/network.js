@@ -526,6 +526,11 @@ export class HostNetwork extends Emitter {
     return any;
   }
 
+  /** 席 slot のゲストだけへ、高速チャンネルで送る（ゲストごとに中身が違う配信） */
+  sendFastTo(slot, msg) {
+    return this.linkOf(slot)?.sendFast(msg) || false;
+  }
+
   get congested() {
     return this.slots.some((x) => x.link?.congested);
   }

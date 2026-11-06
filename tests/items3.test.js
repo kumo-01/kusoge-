@@ -9,7 +9,7 @@ import { useItem } from '../src/games/dogKart/items.js';
 const DT = 1 / 60;
 const track = new Track();
 function race(opts = {}) {
-  const sim = new RaceSim(track, { players: [0, 1], npcs: 0, ...opts });
+  const sim = new RaceSim(track, { players: [0, 1], npcs: 0, seed: 20261106, ...opts }); // 毎回同じレースに（NPC の動きでたまに結果が変わらないように）
   const n = sim.humans;
   while (sim.s.phase === 'countdown') sim.step(DT, new Array(n).fill(0));
   for (let i = 0; i < 60; i++) sim.step(DT, new Array(n).fill(IN.UP));
