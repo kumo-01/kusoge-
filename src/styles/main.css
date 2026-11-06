@@ -3162,3 +3162,153 @@ canvas {
 .is-phone .hud-mg-track {
   height: 44px;
 }
+
+/* ---------- 管理モード（ホストだけ） ---------- */
+.adm-ask {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.adm-panel {
+  position: fixed;
+  left: 12px;
+  top: 120px;
+  z-index: 40;
+  width: min(300px, 86vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(30, 24, 40, 0.88);
+  color: #fff;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 14px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-family: var(--font);
+  font-size: 0.8rem;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  text-shadow: none;
+}
+.adm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-weight: 900;
+  cursor: move;
+  background: rgba(226, 103, 28, 0.85);
+  border-radius: 12px 12px 0 0;
+}
+.adm-min {
+  font: inherit;
+  width: 26px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #4a3426;
+  font-weight: 900;
+  cursor: pointer;
+}
+.adm-body {
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  touch-action: pan-y;
+}
+.adm-body[hidden] {
+  display: none;
+}
+.adm-list {
+  display: grid;
+  gap: 3px;
+}
+.adm-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font: inherit;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+.adm-row.on {
+  border-color: #ffd23f;
+  background: rgba(255, 210, 63, 0.25);
+}
+.adm-its {
+  white-space: nowrap;
+}
+.adm-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.adm-mode,
+.adm-act {
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.72rem;
+  padding: 5px 4px;
+  border-radius: 8px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.85);
+  color: #4a3426;
+  cursor: pointer;
+}
+.adm-mode.on {
+  background: #ffd23f;
+}
+.adm-items {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.adm-item {
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 2px;
+  border-radius: 8px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.92);
+  color: #4a3426;
+  cursor: pointer;
+}
+.adm-item .ic {
+  font-size: 1.15rem;
+  line-height: 1.1;
+  white-space: nowrap;
+  letter-spacing: -0.2em;
+}
+.adm-item small {
+  font-size: 0.55rem;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 100%;
+}
+.adm-item:active,
+.adm-mode:active,
+.adm-act:active {
+  transform: scale(0.95);
+}
+.adm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.adm-act.danger {
+  background: #ff8a8a;
+  color: #fff;
+}

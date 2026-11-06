@@ -170,6 +170,10 @@ export class Game {
         // 開発・テスト用: ALLOW_DEBUG=1 のときだけ（本番では設定されていないので無視される）
         if (host && this.env.ALLOW_DEBUG === '1' && this.engine) this.debug(msg.op, msg.args || {});
         break;
+      case 'e_admin':
+        // 管理モード: 部屋のホストからだけ受け付ける（ゲストからは送れない）
+        if (host && this.engine && this.running) this.engine.sim.admin(msg.op, msg.args || {});
+        break;
       case 'player_input': {
         if (!this.running || !this.engine || msg.matchId !== this.matchId || msg.gen !== this.gen) break;
         const player = this.players.indexOf(conn.slot);

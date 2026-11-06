@@ -1,6 +1,36 @@
 // 犬のモデル（Three.js のプリミティブを組み合わせたローポリ・デフォルメ）
 // ホスト: 柴犬 / ゲスト: コーギー
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+
+/**
+ * グループの直下の、動かさない部品（メッシュ）を材質ごとに 1 つにまとめる（描画の呼び出しを減らす）。
+ * keep: 個別に見せたり動かしたりする部品（まとめない）。子のグループ（耳・目など動くもの）はそのまま
+ */
+function mergeStatic(group, keep) {
+  const byMat = new Map();
+  for (const c of group.children) {
+    if (!c.isMesh || keep.has(c)) continue;
+    if (!byMat.has(c.material)) byMat.set(c.material, []);
+    byMat.get(c.material).push(c);
+  }
+  for (const [mat, list] of byMat) {
+    if (list.length < 2) continue;
+    const geos = list.map((o) => {
+      o.updateMatrix();
+      const g0 = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      return g0.applyMatrix4(o.matrix);
+    });
+    const merged = mergeGeometries(geos);
+    for (const g0 of geos) g0.dispose();
+    if (!merged) continue;
+    for (const o of list) group.remove(o);
+    const m0 = new THREE.Mesh(merged, mat);
+    m0.castShadow = true;
+    m0.userData.ownGeo = true; // この犬だけの形（捨てるときに消す）
+    group.add(m0);
+  }
+}
 
 const geo = {};
 function g(key, make) {
@@ -225,5 +255,10 @@ export function buildDog(kind) {
     }
   }
 
+  // 動かさない部品をまとめる（体・頭・肩・目・耳・しっぽの中で、それぞれ）
+  const keep = new Set([tongue, ...tears]);
+  group.traverse((o) => {
+    if (o.isGroup || o === group) o.children.length > 1 && mergeStatic(o, keep);
+  });
   return { group, animate };
 }

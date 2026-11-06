@@ -115,6 +115,8 @@ export class GameManager extends Emitter {
       },
       // 席ごとのプレイヤー名（準備画面で入力したもの。空なら未入力）。部屋の状態から毎回読む（途中で変わっても反映される）
       getNames: () => (this.namesFn ? this.namesFn() : []),
+      // サーバー計算の試合で、計算役（サーバー）へ直接送る（管理モードなど。ホストだけが受け付けられる）
+      engineCommand: (msg) => (this.game === game && this.serverSim ? this.engineCommand(msg) : false),
       getNetInfo: () => ({ rtt: this.serverSim ? this.engine?.rtt ?? null : this.net.rtt, running: this.running, route: this.serverSim ? this.engine?.route || '' : '' }),
     };
     if (server) {

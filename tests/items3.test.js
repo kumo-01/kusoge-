@@ -363,3 +363,27 @@ test('免許返納: 5 位以内（使った人を除く）から 2 台が歩き�
     assert.ok(w.sp <= ITEMS.WALK_SPEED + 0.5, `歩く速さ (${w.sp})`);
   }
 });
+
+test('管理モード: アイテムを書き換える・渡してすぐ使わせる・消す（不正な値は受け付けない）', () => {
+  const sim = race({ npcs: 1 });
+  const [a, b, c] = sim.s.karts;
+  assert.equal(sim.admin('item', { kart: 1, slot: 1, item: ITEMS.BOMB }), true);
+  assert.equal(b.item, ITEMS.BOMB);
+  sim.admin('item', { kart: 1, slot: 2, item: ITEMS.GUARD });
+  assert.equal(b.item2, ITEMS.GUARD);
+  assert.equal(sim.admin('item', { kart: 1, slot: 1, item: 99 }), false);
+  assert.equal(sim.admin('item', { kart: 9, slot: 1, item: 1 }), false);
+  // 渡してすぐ使う（NPC にも）
+  sim.admin('give', { kart: 2, item: ITEMS.BOOST });
+  sim.step(DT, [0, 0]);
+  assert.ok(c.boost > 0, '使った');
+  // 今持っているものを使わせる
+  sim.admin('use', { kart: 1 });
+  sim.step(DT, [0, 0]);
+  assert.equal(sim.s.bombs.length, 1, '爆弾を投げた');
+  assert.equal(b.item, ITEMS.GUARD, '2 つ目が前に出る');
+  sim.admin('clear', { kart: 1 });
+  assert.equal(b.item, 0);
+  assert.equal(b.item2, 0);
+  assert.equal(a.item, 0);
+});

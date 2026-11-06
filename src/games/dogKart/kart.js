@@ -418,6 +418,17 @@ export class KartView {
     // 免許返納で隠す乗り物の部品（犬・目を回す星以外）
     this._vehObjs = [...this.body.children.filter((c) => c !== this.dog.group && c !== this.dizzy), ...(this._pivots || [])];
     this._lightsOn = false;
+    // 影を落とすのは大きな部品だけ（小さい部品の影はほとんど見えないのに、影を描く手間は部品の数だけかかる）
+    const sph = new THREE.Sphere();
+    const ws = new THREE.Vector3();
+    this.group.updateMatrixWorld(true);
+    this.group.traverse((o) => {
+      if (!o.isMesh || !o.castShadow) return;
+      if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+      sph.copy(o.geometry.boundingSphere);
+      o.getWorldScale(ws);
+      o.castShadow = sph.radius * Math.max(ws.x, ws.y, ws.z) > 0.42;
+    });
     this._walking = false;
     // ヘッドライト（トンネルの中で自動でつく）: 光る電球と、前へのびる光の筋
     this.headlights = new THREE.Group();
@@ -565,5 +576,6 @@ export class KartView {
   dispose() {
     for (const m of this._mats) m.dispose();
     for (const g of this._geos) g.dispose();
+    this.dog.group.traverse((o) => o.userData.ownGeo && o.geometry.dispose());
   }
 }

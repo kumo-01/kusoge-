@@ -127,7 +127,7 @@ export class RaceSim {
       if (active) {
         stepTiming(k, this.prog[k.i], s.tc, !!(inp & IN.TAP), dt, ev);
       }
-      if (active && inp & IN.ITEM) useItem(s, k, ev, this.prog, (u) => this.callRain(u), track);
+      if (active && (inp & IN.ITEM || this.adminUse?.has(k.i))) useItem(s, k, ev, this.prog, (u) => this.callRain(u), track);
       if (active && inp & IN.RESPAWN && k.npc) this.respawn(k); // 人は復帰できない（NPC が引っかかったときだけ）
       const fishing = k.fs > 0;
       const wall = stepKart(k, inp, dt, track, active);
@@ -219,6 +219,7 @@ export class RaceSim {
       }
     }
 
+    this.adminUse?.clear();
     updateItems(s, dt, track, this.boxPos, (i) => this.rankOf(i), ev);
 
     if (s.phase === 'finished') s.endT = Math.max(0, s.endT - dt);
@@ -318,6 +319,53 @@ export class RaceSim {
         }
       }
     }
+  }
+
+  /**
+   * 管理モード（ホストだけ）の操作。値はここで確かめる（サーバー計算のときは、サーバーがホストからの指示だけ受け付ける）
+   * - item: { kart, slot: 1 | 2, item } 車のアイテムを書き換える（0 で空に）
+   * - clear: { kart } 車のアイテムを両方とも空に（ルーレットも止める）
+   * - use: { kart } 車が今持っているアイテムを、次の tick に使わせる
+   * - give: { kart, item } 1 つ目の枠にアイテムを入れて、すぐ使わせる
+   * 戻り値: 受け付けたら true
+   */
+  admin(op, a = {}) {
+    const s = this.s;
+    const k = Number.isInteger(a.kart) ? s.karts[a.kart] : null;
+    const item = Number.isInteger(a.item) && a.item >= 0 && a.item < ITEMS.COUNT ? a.item : -1;
+    if (!k) return false;
+    if (op === 'item') {
+      if (item < 0) return false;
+      if (a.slot === 2) {
+        if (!k.item && item) k.item = item; // 1 つ目が空なら 1 つ目に
+        else k.item2 = k.item ? item : 0;
+      } else {
+        k.item = item;
+        if (!item && k.item2) {
+          k.item = k.item2;
+          k.item2 = 0;
+        }
+      }
+      return true;
+    }
+    if (op === 'clear') {
+      k.item = 0;
+      k.item2 = 0;
+      k.roll = 0;
+      k.roll2 = 0;
+      return true;
+    }
+    if (op === 'use' || op === 'give') {
+      if (op === 'give') {
+        if (item <= 0) return false;
+        if (k.item) k.item2 = k.item2 || k.item; // 持っていたものは 2 つ目へ（空いていれば）
+        k.item = item;
+      }
+      if (!k.item) return false;
+      (this.adminUse ||= new Set()).add(k.i);
+      return true;
+    }
+    return false;
   }
 
   /** レースを終わらせるのに必要な、ゴールした人間の数（3 人のときは 2 人） */
@@ -742,7 +790,8 @@ export function unpackNet(p) {
 
 /** 演出イベントの種類（バイナリでは番号で送る） */
 export const NET_EVENT_TYPES = ['go', 'box', 'item', 'use', 'hit', 'slip', 'block', 'bump', 'wall', 'lap', 'finish', 'respawn', 'boing', 'poof', 'timing', 'rain', 'food', 'house', 'log', 'mg', 'mgEnd', 'boom', 'fish', 'rodNo', 'rev', 'lic', 'squash'];
-const BIN_VERSION = 8;
+const BIN_VERSION = 9;
+const EV_KART = ['k', 'by', 'r', 'v']; // 演出イベントの、車の番号の項目
 // 車の項目のうち、ふだんは 0 で、0 でないときだけ載せるもの（タイマー・はじかれ・高さなど。0 でない間は毎回変わる）。
 // よく 0 以外になるものを先に並べる（印は可変長なので、先頭 7 項目までなら 1 バイト）
 const BIN_DYN = ['kx', 'kz', 'gd', 'boost', 'roll', 'roll2', 'inv', 'spin', 'bump', 'y', 'vy', 'wrong', 'slow', 'grass', 'rc', 'bc', 'tw', 'tb', 'wet', 'ow', 'fs', 'fT', 'fa', 'fb', 'fla', 'flb', 'fsp', 'fo', 'gi', 'sq', 'rv', 'wk'];
@@ -777,8 +826,26 @@ function getField(r, i) {
   return kind === 'f' ? r.f32() : kind === 'b' ? r.u8() : kind === 'p' ? r.u8() / 100 : r.i16() / 100;
 }
 const isDefault = (k, i) => Math.round((k[BIN_COLD[i]] || 0) * 100) === Math.round(BIN_COLD_DEFAULT[i] * 100);
+// はじかれの速さ（kx, kz）は、ごく小さいもの（0.15m/s 未満）は 0 として送らない（ずっと少しだけ残っていて、毎回 2 バイトずつかかっていた）
+const KNOCK_IDX = new Set(['kx', 'kz'].map((f) => BIN_COLD.indexOf(f)));
+const dynDefault = (k, i) => (KNOCK_IDX.has(i) ? Math.abs(k[BIN_COLD[i]] || 0) < 0.15 : isDefault(k, i));
+/** アクセルの状態（見た目用）は送らず、操作から決める */
+const thOf = (k) => (k.spin > 0 || k.fs > 0 ? 0 : k.in & IN.UP ? 1 : k.in & IN.DOWN ? -1 : 0);
 const setKey = (a) => a.map((t) => (t > 0 ? 1 : 0)).join('');
 const TAU = Math.PI * 2;
+/** 位置: コースの範囲なら 2 バイトずつ（2cm 単位）、はみ出すものがあれば 3 バイトずつ（1cm 単位） */
+function putXZ(w, o, short) {
+  if (short) {
+    w.i16(o.x * 50);
+    w.i16(o.z * 50);
+  } else {
+    w.i24(o.x * 100);
+    w.i24(o.z * 100);
+  }
+}
+function getXZ(r, short) {
+  return short ? { x: r.i16() / 50, z: r.i16() / 50 } : { x: r.i24() / 100, z: r.i24() / 100 };
+}
 
 class BinWriter {
   constructor(size = 1024) {
@@ -987,7 +1054,8 @@ export function packNetBin(s, ev = [], only = null) {
   const withSets = !only || only.sets;
   const withBananas = !only || only.bananas;
   // 車の位置: コースは原点から ±655m に収まるので、ふだんは 2 バイト（2cm 単位）。はみ出す車がいれば 3 バイト（1cm 単位）
-  const short = s.karts.every((k) => Math.abs(k.x) < 655 && Math.abs(k.z) < 655);
+  const inShort = (o) => Math.abs(o.x) < 655 && Math.abs(o.z) < 655;
+  const short = s.karts.every(inShort) && s.bananas.every(inShort) && s.proj.every(inShort);
   // ふだんは既定値の項目（決着後の残り時間・勝者・雨・順位の印）は、既定値でないときだけ載せる
   const extra = Math.round(s.endT * 100) !== 0 || s.winner !== -1 || Math.round(s.rain * 100) !== 0 || s.rk !== -1;
   const withLogs = !only || only.logs;
@@ -1013,12 +1081,11 @@ export function packNetBin(s, ev = [], only = null) {
     w.u16((((k.h % TAU) + TAU) % TAU) * (65536 / TAU));
     w.i16(k.sp * 100);
     w.i8(k.st * 100);
-    w.i8(k.th);
     w.u8(k.in);
     // タイマーなど: 0 でないものだけ、毎回
     let dm = 0;
     DYN_IDX.forEach((i, j) => {
-      if (!isDefault(k, i)) dm += 2 ** j;
+      if (!dynDefault(k, i)) dm += 2 ** j;
     });
     w.uv(dm);
     DYN_IDX.forEach((i, j) => Math.floor(dm / 2 ** j) % 2 && putField(w, k, i));
@@ -1043,14 +1110,12 @@ export function packNetBin(s, ev = [], only = null) {
   for (const p of s.proj) {
     w.uv(p.id);
     w.u8(p.o);
-    w.i24(p.x * 100);
-    w.i24(p.z * 100);
+    putXZ(w, p, short);
     w.i16(p.vx * 10);
     w.i16(p.vz * 10);
     w.u16(p.life * 100);
     w.u16(p.age * 100);
-    w.u8(p.b);
-    w.u8(p.f ? 1 : 0);
+    w.u8(Math.min(15, p.b | 0) | (p.f ? 16 : 0)); // 跳ね返れる回数とフリスビーかどうかを 1 バイトに
     w.i8(p.t ?? -1);
     w.u16((p.d || 0) * 10);
   }
@@ -1059,10 +1124,8 @@ export function packNetBin(s, ev = [], only = null) {
   for (const b of bans) {
     w.uv(b.id);
     w.u8(b.o);
-    w.i24(b.x * 100);
-    w.i24(b.z * 100);
-    w.u16(b.life * 10);
-    w.u16(b.age * 10);
+    putXZ(w, b, short);
+    w.u8(Math.min(255, b.age * 10)); // 置いてからの時間（置いた直後だけ意味がある。25 秒で頭打ち）。残り時間は送らない（時間では消えない）
   }
   w.u8(s.houses.length);
   for (const h of s.houses) {
@@ -1092,16 +1155,32 @@ export function packNetBin(s, ev = [], only = null) {
   for (const e of evs) {
     w.uv(e.id);
     w.u8(NET_EVENT_TYPES.indexOf(e.t));
-    for (const f of ['k', 'by', 'r', 'v']) w.u8(Number.isInteger(e[f]) && e[f] >= 0 ? e[f] : 255);
-    w.i24((e.x || 0) * 100);
-    w.i24((e.z || 0) * 100);
-    w.i16((e.s || 0) * 10);
-    w.u8(e.b || 0);
-    w.u8(e.item || 0);
-    w.u8(e.lap || 0);
-    w.i8(e.q || 0);
-    w.u8((e.grant ? 1 : 0) | (e.big ? 2 : 0));
-    w.u8(e.n || 0);
+    // 載っている項目の印のあとに、その項目だけ（ほとんどの演出は 2〜3 項目なので、約 20 → 6〜10 バイト）
+    const has = (f) => Number.isInteger(e[f]) && e[f] >= 0;
+    const fl = (e.grant ? 1 : 0) | (e.big ? 2 : 0);
+    let m = 0;
+    EV_KART.forEach((f, j) => has(f) && (m |= 1 << j));
+    if (Math.round((e.x || 0) * 100) || Math.round((e.z || 0) * 100)) m |= 16;
+    if (Math.round((e.s || 0) * 10)) m |= 32;
+    if (e.b) m |= 64;
+    if (e.item) m |= 128;
+    if (e.lap) m |= 256;
+    if (e.q) m |= 512;
+    if (fl) m |= 1024;
+    if (e.n) m |= 2048;
+    w.uv(m);
+    EV_KART.forEach((f, j) => m & (1 << j) && w.u8(e[f]));
+    if (m & 16) {
+      w.i24((e.x || 0) * 100);
+      w.i24((e.z || 0) * 100);
+    }
+    if (m & 32) w.i16((e.s || 0) * 10);
+    if (m & 64) w.u8(e.b);
+    if (m & 128) w.u8(e.item);
+    if (m & 256) w.u8(e.lap);
+    if (m & 512) w.i8(e.q);
+    if (m & 1024) w.u8(fl);
+    if (m & 2048) w.u8(e.n);
   }
   // ミニゲーム（あるときだけ）: 時計・お手本の拍（ミリ秒）・点数（車ごと。採点前は 0 個）
   if (s.mg) {
@@ -1162,10 +1241,10 @@ export function unpackNetBin(u8, prev = null) {
       k.h = h;
       k.sp = r.i16() / 100;
       k.st = r.i8() / 100;
-      k.th = r.i8();
       k.in = r.u8();
       const dm = r.uv();
       DYN_IDX.forEach((ci, j) => (k[BIN_COLD[ci]] = Math.floor(dm / 2 ** j) % 2 ? getField(r, ci) : BIN_COLD_DEFAULT[ci]));
+      k.th = thOf(k);
       const m = r.uv();
       if (m === 0) {
         // この配信には載っていない: 前の値を使う
@@ -1197,11 +1276,14 @@ export function unpackNetBin(u8, prev = null) {
     const np = r.u8();
     snap.proj = [];
     for (let i = 0; i < np; i++) {
-      snap.proj.push({ id: r.uv(), o: r.u8(), x: r.i24() / 100, z: r.i24() / 100, vx: r.i16() / 10, vz: r.i16() / 10, life: r.u16() / 100, age: r.u16() / 100, b: r.u8(), f: r.u8(), t: r.i8(), d: r.u16() / 10 });
+      const p = { id: r.uv(), o: r.u8(), ...getXZ(r, short), vx: r.i16() / 10, vz: r.i16() / 10, life: r.u16() / 100, age: r.u16() / 100 };
+      const bf = r.u8();
+      Object.assign(p, { b: bf & 15, f: bf & 16 ? 1 : 0, t: r.i8(), d: r.u16() / 10 });
+      snap.proj.push(p);
     }
     const nbn = r.u8();
     snap.bananas = [];
-    for (let i = 0; i < nbn; i++) snap.bananas.push({ id: r.uv(), o: r.u8(), x: r.i24() / 100, z: r.i24() / 100, life: r.u16() / 10, age: r.u16() / 10 });
+    for (let i = 0; i < nbn; i++) snap.bananas.push({ id: r.uv(), o: r.u8(), ...getXZ(r, short), life: ITEMS.BANANA_LIFE, age: r.u8() / 10 });
     if (!withBananas) {
       // 載っていない: 前に受け取ったバナナの、残り時間を進めて使う（バナナは動かない）
       const dt = Math.max(0, (snap.tick - (prev?.tick ?? snap.tick)) / 60);
@@ -1225,21 +1307,19 @@ export function unpackNetBin(u8, prev = null) {
     const ev = [];
     for (let i = 0; i < ne; i++) {
       const e = { id: r.uv(), t: NET_EVENT_TYPES[r.u8()] };
-      for (const f of ['k', 'by', 'r', 'v']) {
-        const v = r.u8();
-        e[f] = v === 255 ? -1 : v;
-      }
-      e.x = r.i24() / 100;
-      e.z = r.i24() / 100;
-      e.s = r.i16() / 10;
-      e.b = r.u8();
-      e.item = r.u8();
-      e.lap = r.u8();
-      e.q = r.i8();
-      const fl = r.u8();
+      const m = r.uv();
+      EV_KART.forEach((f, j) => (e[f] = m & (1 << j) ? r.u8() : -1));
+      e.x = m & 16 ? r.i24() / 100 : 0;
+      e.z = m & 16 ? r.i24() / 100 : 0;
+      e.s = m & 32 ? r.i16() / 10 : 0;
+      e.b = m & 64 ? r.u8() : 0;
+      e.item = m & 128 ? r.u8() : 0;
+      e.lap = m & 256 ? r.u8() : 0;
+      e.q = m & 512 ? r.i8() : 0;
+      const fl = m & 1024 ? r.u8() : 0;
       e.grant = !!(fl & 1);
       e.big = !!(fl & 2);
-      e.n = r.u8();
+      e.n = m & 2048 ? r.u8() : 0;
       if (e.t) ev.push(e);
     }
     snap.mg = null;
