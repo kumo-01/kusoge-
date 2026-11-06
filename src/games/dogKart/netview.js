@@ -151,6 +151,14 @@ export class Predictor {
  * ほかの車をサーバーの確定状態（過去）のまま描くと、実際より後ろに見えて、当たる位置や順位が見た目と食い違う。
  * そこで、確定状態からその車の今の操作（in）のまま同じ tick 数だけ先へ計算して描く。操作が変わったときのずれは少しずつ吸収する。
  */
+/** 遠くの車: 向きと速さのまま n tick 進める（物理の計算はしない） */
+function glide(k, n, dt) {
+  if (n <= 0 || k.fs > 0) return;
+  const d = (k.sp || 0) * dt * n;
+  k.x += Math.sin(k.h) * d + (k.kx || 0) * dt * n;
+  k.z += Math.cos(k.h) * d + (k.kz || 0) * dt * n;
+}
+
 export class RemoteKarts {
   constructor() {
     this.reset();
@@ -160,20 +168,33 @@ export class RemoteKarts {
     this.g = []; // 車ごとの「今の時刻」の推定
     this.p = []; // 1 tick 前の推定（画面の更新との間を補間する）
     this.off = []; // 見た目のずれ（少しずつ 0 に戻す）
+    this.far = []; // 遠くの車（細かい計算を省いて、向きと速さのまま進める）
   }
 
-  /** karts: 最新の確定状態、ahead: 自分の車がそれより何 tick 先か */
-  sync(karts, me, ahead, track, active, dt) {
+  /**
+   * karts: 最新の確定状態、ahead: 自分の車がそれより何 tick 先か。
+   * (cx, cz): 自分の車の位置。ここから NET.REMOTE_FAR より遠い車は、物理の計算（壁・坂・草など）を省き、向きと速さのまま進める
+   * （次の配信ですぐ正しい位置に直るうえ、遠くの車のずれは見えない。ゲストの計算の大半は、ほかの車を先へ進める計算だった）
+   */
+  sync(karts, me, ahead, track, active, dt, cx, cz) {
+    const far2 = NET.REMOTE_FAR * NET.REMOTE_FAR;
     for (let i = 0; i < karts.length; i++) {
       if (i === me) {
         this.g[i] = null;
         continue;
       }
       const k = { ...karts[i] };
-      let prev = { x: k.x, z: k.z, y: k.y, h: k.h };
-      for (let t = 0; t < ahead; t++) {
+      const far = cx !== undefined && (k.x - cx) ** 2 + (k.z - cz) ** 2 > far2;
+      this.far[i] = far;
+      let prev;
+      if (far) {
+        glide(k, Math.max(0, ahead - 1), dt);
         prev = { x: k.x, z: k.z, y: k.y, h: k.h };
-        stepKart(k, k.in, dt, track, active, true);
+        if (ahead > 0) glide(k, 1, dt);
+      } else {
+        for (let t = 0; t < ahead - 1; t++) stepKart(k, k.in, dt, track, active, true);
+        prev = { x: k.x, z: k.z, y: k.y, h: k.h };
+        if (ahead > 0) stepKart(k, k.in, dt, track, active, true);
       }
       const old = this.g[i];
       const o = this.off[i] || (this.off[i] = { x: 0, z: 0, y: 0, h: 0, vx: 0, vz: 0, vh: 0 });
@@ -217,8 +238,14 @@ export class RemoteKarts {
     for (let i = 0; i < this.g.length; i++) {
       const k = this.g[i];
       if (!k) continue;
-      this.p[i] = { x: k.x, z: k.z, y: k.y, h: k.h };
-      stepKart(k, k.in, dt, track, active, true);
+      const p = this.p[i] || (this.p[i] = { x: 0, z: 0, y: 0, h: 0 });
+      p.x = k.x;
+      p.z = k.z;
+      p.y = k.y;
+      p.h = k.h;
+      if (this.far[i]) {
+        if (active) glide(k, 1, dt);
+      } else stepKart(k, k.in, dt, track, active, true);
     }
   }
 

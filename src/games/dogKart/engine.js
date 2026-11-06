@@ -4,11 +4,15 @@
 
 import { NET, IN } from './constants.js';
 import { Track } from './track.js';
-import { RaceSim, packNet, NetBinEncoder } from './race.js';
+import { RaceSim, packNet, NetBinEncoder, NetDeltaEncoder } from './race.js';
 
 export class DogKartEngine {
-  /** @param {{ course?: number, npcs?: number, boss?: number, mg?: number, players?: number[], track?: Track }} options */
+  /**
+   * @param {{ course?: number, npcs?: number, boss?: number, mg?: number, players?: number[], track?: Track, delta?: boolean }} options
+   * delta: 配信を前回からの差分にする（順番どおり・取りこぼしなく届く通信のとき。サーバー）
+   */
   constructor(options = {}) {
+    this.delta = !!options.delta;
     this.track = options.track || new Track(options.course ?? 0);
     this.sim = new RaceSim(this.track, { npcs: options.npcs ?? 0, boss: options.boss ?? 0, players: options.players, mg: options.mg ?? 1 });
     this.gq = this._newQueues(); // 人（車の番号）ごとの入力キュー
@@ -144,10 +148,11 @@ export class DogKartEngine {
     for (let i = 0; i < this.sim.humans; i++) inputs.push(local && local[i] !== undefined ? local[i] : this._nextInput(i));
     this.sim.step(dt, inputs);
     const ev = this.sim.drainEvents();
-    // 定期配信は順不同のチャンネルで送るので、取りこぼしに備えて同じイベントを 3 回続けて載せる（受け手は id で重複を除く）
+    // 定期配信が順不同のチャンネル（P2P）なら、取りこぼしに備えて同じイベントを 3 回続けて載せる（受け手は id で重複を除く）。
+    // 差分の配信（サーバー。取りこぼしがない）は 1 回だけ
     for (const e of ev) {
       e.id = ++this.evSeq;
-      this.netEvents.push({ e, n: 3 });
+      this.netEvents.push({ e, n: this.delta ? 1 : 3 });
     }
     if (this.netEvents.length > 150) this.netEvents.splice(0, this.netEvents.length - 150);
     return ev;
@@ -170,7 +175,7 @@ export class DogKartEngine {
 
   /** 定期配信用のバイナリ（状態と、この配信に載せる演出イベント） */
   encodeBinary(ev) {
-    return (this.enc ||= new NetBinEncoder()).encode(this.sim.s, ev);
+    return (this.enc ||= this.delta ? new NetDeltaEncoder() : new NetBinEncoder()).encode(this.sim.s, ev);
   }
 
   getSnapshot() {

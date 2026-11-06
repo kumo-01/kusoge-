@@ -13,7 +13,7 @@ import { decode, encode, ENGINE_FROM_HOST, ENGINE_FROM_PLAYER } from '../../src/
 import { encodeSnapshotFrame, decodeFrame, matchHash, FRAME_INPUT } from '../../src/core/binframe.js';
 
 const FIXED_DT = 1 / 60;
-const NET_EVERY = 2; // 60Hz ÷ 2 = 毎秒 30 回配信
+const NET_EVERY = 1.5; // 60Hz ÷ 1.5 = 毎秒 40 回配信（1 tick と 2 tick の間隔を交互に）
 const MAX_STEPS = 8;
 const MAX_FRAME_DT = 0.25;
 const TICK_MS = 16;
@@ -39,7 +39,7 @@ export class Game {
     this._idleTimer = null;
     this._acc = 0;
     this._last = 0;
-    this._netTick = 0;
+    this._netAcc = 0;
     this._startedAt = 0;
   }
 
@@ -87,8 +87,9 @@ export class Game {
         .then((t) => (this.dcColo = (/colo=([A-Z]+)/.exec(t) || [])[1] || ''))
         .catch(() => {});
     }
-    const conn = { ws: server, slot, colo };
+    const conn = { ws: server, slot, colo, keyAt: 0 };
     this.socks.add(conn);
+    this.engine?.enc?.forceKey?.(); // つないだばかりの人は差分の元を持っていないので、次の配信はキー
     clearTimeout(this._idleTimer);
     this._idleTimer = null;
     server.addEventListener('message', (ev) => this.onMessage(conn, ev.data));
@@ -157,6 +158,15 @@ export class Game {
       case 'e_sync_request':
         if (this.engine) this.sendFull(conn);
         break;
+      case 'e_key': {
+        // 差分の元が無い人がいる: 次の配信をキーにする（頼みすぎないよう、1 人 0.25 秒に 1 回まで）
+        const t = Date.now();
+        if (this.engine && t - conn.keyAt > 250) {
+          conn.keyAt = t;
+          this.engine.enc?.forceKey?.();
+        }
+        break;
+      }
       case 'e_pause':
         if (host) this.pause();
         break;
@@ -229,7 +239,8 @@ export class Game {
     const o = msg.options || {};
     const int = (v, d, lo, hi) => (Number.isInteger(v) ? Math.min(hi, Math.max(lo, v)) : d);
     try {
-      this.engine = new DogKartEngine({ course: int(o.course, 0, 0, 99), npcs: int(o.npcs, 0, 0, 10), boss: int(o.boss, 0, 0, 1), mg: int(o.mg, 1, 0, 1), players });
+      // delta: サーバーとの通信は順番どおり・取りこぼしなく届くので、配信は前回からの差分にする（約 1/3 の大きさ）
+      this.engine = new DogKartEngine({ course: int(o.course, 0, 0, 99), npcs: int(o.npcs, 0, 0, 10), boss: int(o.boss, 0, 0, 1), mg: int(o.mg, 1, 0, 1), players, delta: true });
     } catch (err) {
       return this.send(conn, { type: 'e_error', reason: 'engine-failed' });
     }
@@ -259,6 +270,7 @@ export class Game {
       this._startTimer = null;
       this.running = true;
       this._acc = 0;
+      this.engine?.enc?.forceKey?.(); // 止まっている間に配信を受け取れなかった人がいてもそろう
       this._last = performance.now();
       this._timer = setInterval(() => this.tick(), TICK_MS);
     }, delayMs);
@@ -276,8 +288,13 @@ export class Game {
       this.engine.step(FIXED_DT);
       this._acc -= FIXED_DT;
       steps++;
-      // ミニゲーム中は車が止まっているので、配信を 1/3 に減らす（通信量・サーバーの計算の節約）
-      if (++this._netTick % (this.engine.sim.s.mg ? NET_EVERY * 3 : NET_EVERY) === 0) due = true;
+      // ミニゲーム中は車が止まっているので、配信を 1/4 に減らす（通信量・サーバーの計算の節約）
+      this._netAcc += 1;
+      const every = this.engine.sim.s.mg ? NET_EVERY * 4 : NET_EVERY;
+      if (this._netAcc >= every) {
+        this._netAcc -= every;
+        due = true;
+      }
       const result = this.engine.takeResult();
       if (result) {
         this.pause();

@@ -93,6 +93,7 @@ const SCHEMAS = {
   e_admin: { op: str(20), args: obj }, // 管理モード（ホストだけ）: アイテムを渡す・書き換える・使わせる // 開発用（サーバー側の変数 ALLOW_DEBUG=1 のときだけ動く。本番では無視される）
   // 誰からでも
   e_sync_request: {}, // 自分に完全な状態を送ってほしい（再接続したときなど）
+  e_key: {}, // 差分の配信の元が無い（途中から受け取った・取りこぼした）: 次の配信を、差分でない「キー」にしてほしい
   e_ping: { t: num(0, 1e15) },
   // サーバー → 全員（game_snapshot は部屋の通信と同じ形）
   e_started: { matchId: id },
@@ -107,8 +108,8 @@ export const FROM_GUEST = new Set([
   'leave', 'bye', 'ping', 'pong', 'presence',
 ]);
 /** サーバー計算の通信（worker/relay/game.js ⇔ src/core/engineClient.js） */
-export const ENGINE_FROM_HOST = new Set(['e_start', 'e_sync', 'e_pause', 'e_resume', 'e_abort', 'e_debug', 'e_admin', 'e_sync_request', 'e_ping', 'player_input']);
-export const ENGINE_FROM_PLAYER = new Set(['e_sync_request', 'e_ping', 'player_input']);
+export const ENGINE_FROM_HOST = new Set(['e_start', 'e_sync', 'e_pause', 'e_resume', 'e_abort', 'e_debug', 'e_admin', 'e_sync_request', 'e_key', 'e_ping', 'player_input']);
+export const ENGINE_FROM_PLAYER = new Set(['e_sync_request', 'e_key', 'e_ping', 'player_input']);
 export const ENGINE_TO_CLIENT = new Set(['e_started', 'e_full', 'game_snapshot', 'e_result', 'e_error', 'e_pong']);
 
 /** 高速チャンネル（順不同）で受け付けるもの */

@@ -21,14 +21,14 @@ import { EngineClient } from './engineClient.js';
 
 export const LOOP_CONFIG = {
   FIXED_DT: 1 / 60, // ゲーム更新 60Hz
-  SNAPSHOT_HZ: 30, // ネットワーク配信（毎秒30回）
+  SNAPSHOT_HZ: 40, // ネットワーク配信（毎秒40回）
   MAX_FRAME_DT: 1.0, // 端末が止まっていた時間のうち、追いつく上限（これより長く止まっていた分は捨てる）
   MAX_STEPS: 24, // 1 フレームで進める更新の上限（止まっていた分はこの速さで追いつく。受け取る側は、追いつけない分をサーバーの進みに合わせて別途追いつく）
   HISTORY_SEC: 6, // 切断時に巻き戻せる範囲
   MIN_RENDER_MS: 14, // 描画は最大 60fps（120Hz の画面では 1 フレームおきに描いて電池と発熱を抑える）
 };
 
-const NET_EVERY = Math.max(1, Math.round(1 / LOOP_CONFIG.FIXED_DT / LOOP_CONFIG.SNAPSHOT_HZ)); // 60Hz ÷ 30Hz = 2 tick ごと
+const NET_EVERY = Math.max(1, 1 / LOOP_CONFIG.FIXED_DT / LOOP_CONFIG.SNAPSHOT_HZ); // 60Hz ÷ 40Hz = 1.5 tick ごと（1 tick と 2 tick を交互に）
 
 export class GameManager extends Emitter {
   constructor({ role, slot = null, net, input, sound, music, layer }) {
@@ -305,6 +305,14 @@ export class GameManager extends Emitter {
       } else if (f.kind === FRAME_SNAPSHOT && (!this.isHost || this.serverSim) && this.running && game.decodeNetBinary) {
         const d = game.decodeNetBinary(f.payload);
         if (d) game.applyNetSnapshot(d.snap, d.ev, f.seq);
+        else if (game.netNeedKey && this.serverSim && this.engine) {
+          // 差分の配信の元が無い（途中から受け取った・取りこぼした）: サーバーに、次はキーを送ってもらう
+          const t = now();
+          if (!(t - this._keyAskAt < 250)) {
+            this._keyAskAt = t;
+            this.engine.send({ type: 'e_key' });
+          }
+        }
       }
     } catch (err) {
       console.warn('[game] バイナリの処理でエラー', err);
@@ -330,7 +338,14 @@ export class GameManager extends Emitter {
         steps++;
         // 配信は「2 tick ごと」に、その tick の状態で送る（描画のタイミングで送ると配信の間隔が不揃いになり、相手の動きが揺れる）
         // （ゲームが netEvery を持っていれば、その間隔。2D のゲームは動きが少ないので間隔を広げる）
-        if (this.isHost && !this.serverSim && this.running && this.game === game && (this._netTick = (this._netTick | 0) + 1) % (game.netEvery || NET_EVERY) === 0) this._sendSnapshot();
+        if (this.isHost && !this.serverSim && this.running && this.game === game) {
+          const every = game.netEvery || NET_EVERY;
+          this._netAcc = (this._netAcc || 0) + 1;
+          if (this._netAcc >= every) {
+            this._netAcc = Math.min(this._netAcc - every, every);
+            this._sendSnapshot();
+          }
+        }
         if (this.game !== game || !this.running) break;
       }
     }

@@ -243,6 +243,7 @@ export class World {
     this._buildGround();
     this._buildTrack();
     this._buildScenery();
+    this._freezeStatic();
     this._buildItemViews();
     this._buildWeather();
 
@@ -263,6 +264,22 @@ export class World {
     this._ro = new ResizeObserver(() => this.resize());
     this._ro.observe(container);
     this.resize();
+  }
+
+  /**
+   * 動かない景色（地面・道・木・建物など）は、毎回の行列の計算をやめる（部品が 2000 個以上あり、毎コマ計算していた）。
+   * 動くもの（空・雲・旗・波打ち際・太陽）と、あとから足すもの（車・アイテム・演出・天気）はそのまま
+   */
+  _freezeStatic() {
+    const live = new Set([this.sky, this.surf, this.sun, this.sun.target, this.hemi, ...(this.clouds || []), ...(this.flags || []), ...(this.fans || []).map((f) => f.group)].filter(Boolean));
+    const walk = (o) => {
+      if (live.has(o)) return;
+      o.updateMatrix();
+      o.matrixAutoUpdate = false;
+      for (const c of o.children) walk(c);
+    };
+    this.scene.updateMatrixWorld(true);
+    walk(this.scene);
   }
 
   _track(obj) {
@@ -302,14 +319,19 @@ export class World {
     const rk = this.ringR / 430;
     this.cloudRange = 420 * rk;
     for (let i = 0; i < Math.round((this.lite ? 7 : 16) * Math.min(2, this.dens)); i++) {
-      const g = new THREE.Group();
+      // 雲ひとつ分の球を 1 つの形にまとめる（球ごとに描くと、雲だけで 100 回近く描いていた）
       const n = 3 + Math.floor(rnd() * 4);
+      const parts = [];
+      const mx = new THREE.Matrix4();
       for (let j = 0; j < n; j++) {
-        const m = new THREE.Mesh(puff, cloudMat);
-        m.position.set(j * 5 - n * 2.5, rnd() * 2, rnd() * 4);
-        m.scale.setScalar(4 + rnd() * 4);
-        g.add(m);
+        const px = j * 5 - n * 2.5;
+        const py = rnd() * 2;
+        const pz = rnd() * 4;
+        const sc = 4 + rnd() * 4;
+        parts.push(puff.clone().applyMatrix4(mx.makeScale(sc, sc, sc).setPosition(px, py, pz)));
       }
+      const g = new THREE.Mesh(this._track(mergeGeometries(parts)), cloudMat);
+      for (const p of parts) p.dispose();
       const a = rnd() * Math.PI * 2;
       const r = (150 + rnd() * 250) * rk;
       g.position.set(this.center.x + Math.cos(a) * r, 70 + rnd() * 50, this.center.z + Math.sin(a) * r);
@@ -2014,6 +2036,30 @@ export class World {
     this._adaptQuality();
     if (((this._lodTick = (this._lodTick | 0) + 1) & 7) === 1) this._lodWalls();
     this.renderer.render(this.scene, this.camera);
+    // 次のコマで「画面に映る車か」を判定するための視野（このコマのカメラ）
+    const c = this.camera;
+    (this._pm ||= new THREE.Matrix4()).multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse);
+    (this._frustum ||= new THREE.Frustum()).setFromProjectionMatrix(this._pm);
+  }
+
+  /** 位置 (x, y, z) の半径 r の球が、前のコマの視野に入るか（視野がまだなければ true） */
+  inView(x, y, z, r) {
+    if (!this._frustum) return true;
+    const sp = (this._sphere ||= new THREE.Sphere());
+    sp.center.set(x, y, z);
+    sp.radius = r;
+    return this._frustum.intersectsSphere(sp);
+  }
+
+  /**
+   * 車の見た目を出す・隠す。画面に映らない車（後ろや遠くの曲がり角の先）は、部品（1 台に約 100 個）の行列の計算と描画の判定をまとめて省く
+   */
+  setKartShown(i, on) {
+    const v = this.karts[i];
+    if (!v || v._shown === on) return;
+    v._shown = on;
+    v.group.visible = v.blob.visible = on;
+    v.group.matrixWorldAutoUpdate = v.blob.matrixWorldAutoUpdate = on;
   }
 
   dispose() {

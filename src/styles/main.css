@@ -3170,80 +3170,120 @@ canvas {
   margin-top: 8px;
 }
 .adm-panel {
+  /* 裏画面ふう: 黒地・細い線・角ゴシック。ゲームの見た目（丸い・太い）とは分ける */
+  --adm-bg: rgba(10, 13, 16, 0.92);
+  --adm-line: #2e3a44;
+  --adm-fg: #d8e2e8;
+  --adm-dim: #7f909c;
+  --adm-acc: #4fd1a5;
+  --adm-warn: #ff6b6b;
   position: fixed;
   left: 12px;
   top: 120px;
   z-index: 40;
-  width: min(300px, 86vw);
-  max-height: 80vh;
+  width: min(232px, 80vw);
+  max-height: 76vh;
   display: flex;
   flex-direction: column;
-  background: rgba(30, 24, 40, 0.88);
-  color: #fff;
-  border: 2px solid rgba(255, 255, 255, 0.5);
-  border-radius: 14px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-  font-family: var(--font);
-  font-size: 0.8rem;
+  background: var(--adm-bg);
+  color: var(--adm-fg);
+  border: 1px solid var(--adm-line);
+  border-radius: 2px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  font-family: 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
   pointer-events: auto;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   text-shadow: none;
 }
+.adm-panel button {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  letter-spacing: inherit;
+  color: var(--adm-fg);
+  background: transparent;
+  border: 1px solid var(--adm-line);
+  border-radius: 0;
+  cursor: pointer;
+  text-shadow: none;
+  box-shadow: none;
+}
 .adm-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
-  font-weight: 900;
+  gap: 6px;
+  padding: 4px 4px 4px 8px;
   cursor: move;
-  background: rgba(226, 103, 28, 0.85);
-  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--adm-line);
+  background: #161c22;
+  color: var(--adm-dim);
+  font-size: 10px;
+  letter-spacing: 0.08em;
 }
-.adm-min {
-  font: inherit;
-  width: 26px;
-  height: 22px;
-  border: 0;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.85);
-  color: #4a3426;
-  font-weight: 900;
-  cursor: pointer;
+.adm-head b {
+  color: var(--adm-acc);
+  font-weight: 700;
+}
+.adm-panel .adm-min {
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
 }
 .adm-body {
   overflow-y: auto;
-  padding: 8px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   touch-action: pan-y;
 }
 .adm-body[hidden] {
   display: none;
 }
+.adm-cap {
+  color: var(--adm-dim);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  margin-bottom: -3px;
+}
 .adm-list {
   display: grid;
-  gap: 3px;
+  border: 1px solid var(--adm-line);
 }
-.adm-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  font: inherit;
-  font-weight: 800;
-  padding: 3px 8px;
-  border-radius: 8px;
-  border: 2px solid transparent;
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  cursor: pointer;
+.adm-panel .adm-row {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 4px;
+  border: 0;
+  border-left: 2px solid transparent;
   text-align: left;
 }
-.adm-row.on {
-  border-color: #ffd23f;
-  background: rgba(255, 210, 63, 0.25);
+.adm-panel .adm-row + .adm-row {
+  border-top: 1px solid #1d252c;
+}
+.adm-no {
+  color: var(--adm-dim);
+}
+.adm-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.adm-panel .adm-row.on {
+  border-left-color: var(--adm-acc);
+  background: rgba(79, 209, 165, 0.14);
+  color: #fff;
 }
 .adm-its {
   white-space: nowrap;
@@ -3251,64 +3291,74 @@ canvas {
 .adm-modes {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
 }
-.adm-mode,
-.adm-act {
-  font: inherit;
-  font-weight: 800;
-  font-size: 0.72rem;
-  padding: 5px 4px;
-  border-radius: 8px;
-  border: 0;
-  background: rgba(255, 255, 255, 0.85);
-  color: #4a3426;
-  cursor: pointer;
+.adm-panel .adm-mode {
+  padding: 4px 2px;
+  color: var(--adm-dim);
 }
-.adm-mode.on {
-  background: #ffd23f;
+.adm-panel .adm-mode + .adm-mode {
+  border-left: 0;
+}
+.adm-panel .adm-mode.on {
+  color: #0b0f12;
+  background: var(--adm-acc);
+  border-color: var(--adm-acc);
+  font-weight: 700;
 }
 .adm-items {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
 }
-.adm-item {
-  font: inherit;
+.adm-panel .adm-item {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 4px 2px;
-  border-radius: 8px;
-  border: 0;
-  background: rgba(255, 255, 255, 0.92);
-  color: #4a3426;
-  cursor: pointer;
+  gap: 3px;
+  padding: 2px 3px;
+  border-color: #1f2830;
+  background: #12181d;
+  text-align: left;
+  min-width: 0;
 }
 .adm-item .ic {
-  font-size: 1.15rem;
-  line-height: 1.1;
+  font-size: 13px;
+  line-height: 1.2;
   white-space: nowrap;
-  letter-spacing: -0.2em;
+  letter-spacing: -0.25em;
+  flex: none;
 }
 .adm-item small {
-  font-size: 0.55rem;
-  font-weight: 800;
+  font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
-  max-width: 100%;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
-.adm-item:active,
-.adm-mode:active,
-.adm-act:active {
-  transform: scale(0.95);
+.adm-panel button:hover {
+  border-color: var(--adm-acc);
+}
+.adm-panel button:active {
+  background: rgba(79, 209, 165, 0.3);
 }
 .adm-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
+  gap: 2px;
 }
-.adm-act.danger {
-  background: #ff8a8a;
-  color: #fff;
+.adm-panel .adm-act {
+  padding: 4px 2px;
+}
+.adm-panel .adm-act.danger {
+  color: var(--adm-warn);
+  border-color: rgba(255, 107, 107, 0.45);
+}
+.adm-log {
+  color: var(--adm-dim);
+  font-size: 10px;
+  min-height: 1.35em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-top: 1px solid #1d252c;
+  padding-top: 4px;
 }

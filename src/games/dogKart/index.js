@@ -5,7 +5,7 @@
 //         ほかの車・飛んでいるアイテムは、自分の車と同じ時刻まで先へ計算して描く（netview.js）。
 
 import { Track } from './track.js';
-import { RaceSim, sanitizeSnapshot, unpackNet, kartName, NetBinEncoder, unpackNetBin, NET_EVENT_TYPES, BIN_COLD_FIELDS } from './race.js';
+import { RaceSim, sanitizeSnapshot, unpackNet, kartName, NetBinEncoder, NetBinDecoder, NET_EVENT_TYPES, BIN_COLD_FIELDS } from './race.js';
 import { DogKartEngine } from './engine.js';
 import { Predictor, RemoteKarts } from './netview.js';
 import { stepKart } from './physics.js';
@@ -256,8 +256,10 @@ class DogKartGame {
     this._lastBits = bits;
     // （何も押していない間は 1 秒に 2 回、押しっぱなしの間は約 8 回。サーバーは前の入力を保つ）
     const every = this._same >= 30 && bits === 0 ? 30 : this._same >= 8 ? 8 : NET.INPUT_SEND_EVERY;
+    // ふだんは 1.5 tick ごと（tick の番号を 1.5 で割った整数部分が変わったとき。1 tick と 2 tick の間隔を交互に）
+    const due = every === NET.INPUT_SEND_EVERY ? Math.floor(this.seq / every) !== Math.floor((this.seq - 1) / every) : this.pending.length >= every;
     // 押し方が変わった tick は、まとめずにすぐ送る（反応が 1 tick 速くなる）
-    if (this.pending.length >= every || bits & IN.ONESHOT || this._same === 0) {
+    if (due || bits & IN.ONESHOT || this._same === 0) {
       this.ctx.sendInput(this.seq, reliable ? this.pending.slice() : this.sentInputs.slice());
       this.pending = [];
     }
@@ -351,7 +353,7 @@ class DogKartGame {
       logs: (s.logs || []).map((l) => ({ ...l })),
     };
     if (mem.tick < 0) mem.tick = s.tick;
-    const d = unpackNetBin(u8, mem);
+    const d = (this._dec ||= new NetBinDecoder()).decode(u8, mem);
     if (!d) return null;
     if (d.snap.tick >= mem.tick) {
       // 新しいものだけ覚える（P2P は順番が入れ替わって届くことがある）
@@ -446,7 +448,8 @@ class DogKartGame {
       const active = s.phase === 'racing' || (s.phase === 'countdown' && this._guestRaceTime() >= 0);
       // 飼い主モード中は自分の車も同じように推定する（操作できないので）
       const wasAuto = !!this.remote.g[this.me];
-      this.remote.sync(s.karts, s.karts[this.me].ow > 0 ? -1 : this.me, ahead, this.track, active && s.phase !== 'finished', this.ctx.fixedDt);
+      const mk = s.karts[this.me];
+      this.remote.sync(s.karts, mk.ow > 0 ? -1 : this.me, ahead, this.track, active && s.phase !== 'finished', this.ctx.fixedDt, mk.x, mk.z);
       // 予測 ⇔ 推定の切り替えで、自分の車の見た目が飛ばないよう、見た目のずれを引き継ぐ
       const g = this.remote.g[this.me];
       const ro = this.remote.off[this.me];
@@ -943,9 +946,14 @@ class DogKartGame {
     });
   }
 
-  /** ホストが計算するときの配信の間隔（tick）。ミニゲーム中は車が止まっているので 1/3 に減らす */
+  /** ホストが計算するときの配信の間隔（tick。毎秒 40 回）。ミニゲーム中は車が止まっているので 1/4 に減らす */
   get netEvery() {
-    return this.sim?.s?.mg ? 6 : 2;
+    return this.sim?.s?.mg ? 6 : 1.5;
+  }
+
+  /** 差分の配信の元が無くて読めなかった（次の配信をキーにしてもらう） */
+  get netNeedKey() {
+    return !!this._dec?.needKey;
   }
 
   // ---- レース中のミニゲーム（リズムを真似しろ！） ----
@@ -1073,6 +1081,12 @@ class DogKartGame {
       karts.forEach((k, i) => {
         // 気分: 勝った人は喜ぶ。負けた人はレースが終わってからしょんぼり（3 人のときは 2 人目がゴールするまで続く）
         const mood = winner < 0 ? 0 : k.npc ? (k.fin ? 1 : 0) : winner === i ? 1 : k.fin ? 0 : s.phase === 'finished' ? -1 : 0;
+        // 画面に映らない車は、見た目の計算（動き・揺れ・部品の行列）を省く。自分の車はいつも計算する
+        const shown = i === this.me || w.inView(k.x, (k.y || 0) + 1, k.z, k.gi > 0 ? 8 : 5);
+        w.setKartShown(i, shown);
+        if (!shown) return;
+        const cp = w.camera.position;
+        w.karts[i].setDetail(i === this.me || (k.x - cp.x) ** 2 + (k.z - cp.z) ** 2 < 32 * 32);
         w.karts[i].setFirstPerson(firstPerson && i === this.me);
         w.karts[i].own = i === this.me;
         w.karts[i].update(k, dt, mood);

@@ -102,7 +102,8 @@ export class RaceSim {
       ev.push({ t: 'go' });
     }
     const active = s.phase === 'racing';
-    this.prog = s.karts.map((k) => this.progressOf(k));
+    const prog = this.prog && this.prog.length === s.karts.length ? this.prog : (this.prog = new Array(s.karts.length));
+    for (let i = 0; i < s.karts.length; i++) prog[i] = this.progressOf(s.karts[i]);
 
     s.rain = Math.max(0, s.rain - dt);
     for (let i = 0; i < s.foods.length; i++) if (s.foods[i] > 0) s.foods[i] = Math.max(0, s.foods[i] - dt);
@@ -236,7 +237,8 @@ export class RaceSim {
     const s = this.s;
     if (!this.mgOn || s.mg || s.mgN >= s.mgAt.length || s.t < 5) return;
     if (s.karts.some((k) => !k.npc && k.fin)) return;
-    const lead = Math.max(...s.karts.map((k) => this.progressOf(k)));
+    let lead = -Infinity;
+    for (const k of s.karts) lead = Math.max(lead, this.progressOf(k));
     if (lead < s.mgAt[s.mgN]) return;
     s.mgN++;
     s.mg = { t: 0, pat: makePattern(s), taps: Array.from({ length: this.humans }, () => []), sc: null };
@@ -1106,8 +1108,20 @@ export function packNetBin(s, ev = [], only = null) {
     w.set(taken(s.boxes), s.boxes.length);
     w.set(taken(s.foods), s.foods.length);
   }
-  w.u8(s.proj.length);
-  for (const p of s.proj) {
+  writeProj(w, s.proj, short);
+  writeBananas(w, withBananas ? s.bananas : [], short);
+  writeHouses(w, s.houses);
+  if (withLogs) writeLogs(w, s.logs);
+  writeEvents(w, ev);
+  if (s.mg) writeMg(w, s.mg);
+  if (s.bombs?.length) writeBombs(w, s.bombs);
+  return w.bytes();
+}
+
+// ---- 配信の後半（アイテム・演出・ミニゲーム・爆弾）の詰め方。v9（全部入り）と v10（差分）で共通 ----
+function writeProj(w, list, short) {
+  w.u8(list.length);
+  for (const p of list) {
     w.uv(p.id);
     w.u8(p.o);
     putXZ(w, p, short);
@@ -1119,16 +1133,36 @@ export function packNetBin(s, ev = [], only = null) {
     w.i8(p.t ?? -1);
     w.u16((p.d || 0) * 10);
   }
-  const bans = withBananas ? s.bananas : [];
-  w.u8(bans.length);
-  for (const b of bans) {
+}
+function readProj(r, short) {
+  const out = [];
+  const n = r.u8();
+  for (let i = 0; i < n; i++) {
+    const p = { id: r.uv(), o: r.u8(), ...getXZ(r, short), vx: r.i16() / 10, vz: r.i16() / 10, life: r.u16() / 100, age: r.u16() / 100 };
+    const bf = r.u8();
+    Object.assign(p, { b: bf & 15, f: bf & 16 ? 1 : 0, t: r.i8(), d: r.u16() / 10 });
+    out.push(p);
+  }
+  return out;
+}
+function writeBananas(w, list, short) {
+  w.u8(list.length);
+  for (const b of list) {
     w.uv(b.id);
     w.u8(b.o);
     putXZ(w, b, short);
     w.u8(Math.min(255, b.age * 10)); // 置いてからの時間（置いた直後だけ意味がある。25 秒で頭打ち）。残り時間は送らない（時間では消えない）
   }
-  w.u8(s.houses.length);
-  for (const h of s.houses) {
+}
+function readBananas(r, short) {
+  const out = [];
+  const n = r.u8();
+  for (let i = 0; i < n; i++) out.push({ id: r.uv(), o: r.u8(), ...getXZ(r, short), life: ITEMS.BANANA_LIFE, age: r.u8() / 10 });
+  return out;
+}
+function writeHouses(w, list) {
+  w.u8(list.length);
+  for (const h of list) {
     w.uv(h.id);
     w.u8(h.o);
     w.u8(h.t);
@@ -1136,21 +1170,36 @@ export function packNetBin(s, ev = [], only = null) {
     w.i24(h.z * 100);
     w.u16(h.age * 100);
   }
-  if (withLogs) {
-    w.u8(s.logs.length);
-    for (const l of s.logs) {
-      w.uv(l.id);
-      w.u8(l.o);
-      w.u32(l.s * 100);
-      w.i16(l.a * 100);
-      w.i16(l.b * 100);
-      w.i24(l.x1 * 100);
-      w.i24(l.z1 * 100);
-      w.i24(l.x2 * 100);
-      w.i24(l.z2 * 100);
-    }
+}
+function readHouses(r) {
+  const out = [];
+  const n = r.u8();
+  for (let i = 0; i < n; i++) out.push({ id: r.uv(), o: r.u8(), t: r.u8(), x: r.i24() / 100, z: r.i24() / 100, age: r.u16() / 100 });
+  return out;
+}
+function writeLogs(w, list) {
+  w.u8(list.length);
+  for (const l of list) {
+    w.uv(l.id);
+    w.u8(l.o);
+    w.u32(l.s * 100);
+    w.i16(l.a * 100);
+    w.i16(l.b * 100);
+    w.i24(l.x1 * 100);
+    w.i24(l.z1 * 100);
+    w.i24(l.x2 * 100);
+    w.i24(l.z2 * 100);
   }
-  const evs = ev.filter((e) => NET_EVENT_TYPES.includes(e.t)).slice(0, 255);
+}
+function readLogs(r) {
+  const out = [];
+  const n = r.u8();
+  for (let i = 0; i < n; i++) out.push({ id: r.uv(), o: r.u8(), s: r.u32() / 100, a: r.i16() / 100, b: r.i16() / 100, x1: r.i24() / 100, z1: r.i24() / 100, x2: r.i24() / 100, z2: r.i24() / 100 });
+  return out.slice(0, ITEMS.LOG_MAX);
+}
+const netEvents = (ev) => ev.filter((e) => NET_EVENT_TYPES.includes(e.t)).slice(0, 255);
+function writeEvents(w, ev) {
+  const evs = netEvents(ev);
   w.u8(evs.length);
   for (const e of evs) {
     w.uv(e.id);
@@ -1182,30 +1231,65 @@ export function packNetBin(s, ev = [], only = null) {
     if (m & 1024) w.u8(fl);
     if (m & 2048) w.u8(e.n);
   }
-  // ミニゲーム（あるときだけ）: 時計・お手本の拍（ミリ秒）・点数（車ごと。採点前は 0 個）
-  if (s.mg) {
-    w.u16(s.mg.t * 100);
-    w.u8(s.mg.pat.length);
-    for (const b of s.mg.pat) w.u16(b * 1000);
-    const sc = s.mg.sc || [];
-    w.u8(sc.length);
-    for (const v of sc) w.u8(v);
+}
+function readEvents(r) {
+  const ne = r.u8();
+  const ev = [];
+  for (let i = 0; i < ne; i++) {
+    const e = { id: r.uv(), t: NET_EVENT_TYPES[r.u8()] };
+    const m = r.uv();
+    EV_KART.forEach((f, j) => (e[f] = m & (1 << j) ? r.u8() : -1));
+    e.x = m & 16 ? r.i24() / 100 : 0;
+    e.z = m & 16 ? r.i24() / 100 : 0;
+    e.s = m & 32 ? r.i16() / 10 : 0;
+    e.b = m & 64 ? r.u8() : 0;
+    e.item = m & 128 ? r.u8() : 0;
+    e.lap = m & 256 ? r.u8() : 0;
+    e.q = m & 512 ? r.i8() : 0;
+    const fl = m & 1024 ? r.u8() : 0;
+    e.grant = !!(fl & 1);
+    e.big = !!(fl & 2);
+    e.n = m & 2048 ? r.u8() : 0;
+    if (e.t) ev.push(e);
   }
-  // 爆弾（あるときだけ）: 投げた場所・落ちる場所・投げてからの時間
-  if (s.bombs?.length) {
-    w.u8(s.bombs.length);
-    for (const b of s.bombs) {
-      w.uv(b.id);
-      w.u8(b.o);
-      w.i24(b.sx * 100);
-      w.i24(b.sz * 100);
-      w.i24(b.x * 100);
-      w.i24(b.z * 100);
-      w.u16(b.age * 100);
-      w.u16((b.fu || ITEMS.BOMB_FUSE) * 100);
-    }
+  return ev;
+}
+// ミニゲーム（あるときだけ）: 時計・お手本の拍（ミリ秒）・点数（車ごと。採点前は 0 個）
+function writeMg(w, mg) {
+  w.u16(mg.t * 100);
+  w.u8(mg.pat.length);
+  for (const b of mg.pat) w.u16(b * 1000);
+  const sc = mg.sc || [];
+  w.u8(sc.length);
+  for (const v of sc) w.u8(v);
+}
+function readMg(r) {
+  const t = r.u16() / 100;
+  const np = Math.min(r.u8(), 12);
+  const pat = Array.from({ length: np }, () => r.u16() / 1000);
+  const ns = Math.min(r.u8(), RACE.MAX_KARTS);
+  const sc = Array.from({ length: ns }, () => r.u8());
+  return { t, pat, sc };
+}
+// 爆弾（あるときだけ）: 投げた場所・落ちる場所・投げてからの時間
+function writeBombs(w, list) {
+  w.u8(list.length);
+  for (const b of list) {
+    w.uv(b.id);
+    w.u8(b.o);
+    w.i24(b.sx * 100);
+    w.i24(b.sz * 100);
+    w.i24(b.x * 100);
+    w.i24(b.z * 100);
+    w.u16(b.age * 100);
+    w.u16((b.fu || ITEMS.BOMB_FUSE) * 100);
   }
-  return w.bytes();
+}
+function readBombs(r) {
+  const out = [];
+  const nb = Math.min(r.u8(), ITEMS.BOMB_MAX + 2);
+  for (let i = 0; i < nb; i++) out.push({ id: r.uv(), o: r.u8(), sx: r.i24() / 100, sz: r.i24() / 100, x: r.i24() / 100, z: r.i24() / 100, age: r.u16() / 100, fu: r.u16() / 100 });
+  return out;
 }
 
 /**
@@ -1265,82 +1349,387 @@ export function unpackNetBin(u8, prev = null) {
     if (withSets) {
       snap.boxTaken = r.set(200);
       snap.foodTaken = r.set(400);
-    } else if (prev?.boxTaken && prev?.foodTaken) {
-      snap.boxTaken = prev.boxTaken.slice();
-      snap.foodTaken = prev.foodTaken.slice();
-    } else {
-      snap.boxTaken = [];
-      snap.foodTaken = [];
-      snap.partial = true;
-    }
-    const np = r.u8();
-    snap.proj = [];
-    for (let i = 0; i < np; i++) {
-      const p = { id: r.uv(), o: r.u8(), ...getXZ(r, short), vx: r.i16() / 10, vz: r.i16() / 10, life: r.u16() / 100, age: r.u16() / 100 };
-      const bf = r.u8();
-      Object.assign(p, { b: bf & 15, f: bf & 16 ? 1 : 0, t: r.i8(), d: r.u16() / 10 });
-      snap.proj.push(p);
-    }
-    const nbn = r.u8();
-    snap.bananas = [];
-    for (let i = 0; i < nbn; i++) snap.bananas.push({ id: r.uv(), o: r.u8(), ...getXZ(r, short), life: ITEMS.BANANA_LIFE, age: r.u8() / 10 });
-    if (!withBananas) {
-      // 載っていない: 前に受け取ったバナナの、残り時間を進めて使う（バナナは動かない）
-      const dt = Math.max(0, (snap.tick - (prev?.tick ?? snap.tick)) / 60);
-      if (prev?.bananas) snap.bananas = prev.bananas.map((b) => ({ ...b, age: b.age + dt }));
-      else snap.partial = true;
-    }
-    const nh = r.u8();
-    snap.houses = [];
-    for (let i = 0; i < nh; i++) snap.houses.push({ id: r.uv(), o: r.u8(), t: r.u8(), x: r.i24() / 100, z: r.i24() / 100, age: r.u16() / 100 });
-    if (withLogs) {
-      const nl = Math.min(r.u8(), 255);
-      snap.logs = [];
-      for (let i = 0; i < nl; i++) snap.logs.push({ id: r.uv(), o: r.u8(), s: r.u32() / 100, a: r.i16() / 100, b: r.i16() / 100, x1: r.i24() / 100, z1: r.i24() / 100, x2: r.i24() / 100, z2: r.i24() / 100 });
-      snap.logs = snap.logs.slice(0, ITEMS.LOG_MAX);
-    } else if (prev?.logs) snap.logs = prev.logs.map((l) => ({ ...l }));
-    else {
-      snap.logs = [];
-      snap.partial = true;
-    }
-    const ne = r.u8();
-    const ev = [];
-    for (let i = 0; i < ne; i++) {
-      const e = { id: r.uv(), t: NET_EVENT_TYPES[r.u8()] };
-      const m = r.uv();
-      EV_KART.forEach((f, j) => (e[f] = m & (1 << j) ? r.u8() : -1));
-      e.x = m & 16 ? r.i24() / 100 : 0;
-      e.z = m & 16 ? r.i24() / 100 : 0;
-      e.s = m & 32 ? r.i16() / 10 : 0;
-      e.b = m & 64 ? r.u8() : 0;
-      e.item = m & 128 ? r.u8() : 0;
-      e.lap = m & 256 ? r.u8() : 0;
-      e.q = m & 512 ? r.i8() : 0;
-      const fl = m & 1024 ? r.u8() : 0;
-      e.grant = !!(fl & 1);
-      e.big = !!(fl & 2);
-      e.n = m & 2048 ? r.u8() : 0;
-      if (e.t) ev.push(e);
-    }
-    snap.mg = null;
-    if (flags & 32) {
-      const t = r.u16() / 100;
-      const np2 = Math.min(r.u8(), 12);
-      const pat = Array.from({ length: np2 }, () => r.u16() / 1000);
-      const ns = Math.min(r.u8(), RACE.MAX_KARTS);
-      const sc = Array.from({ length: ns }, () => r.u8());
-      snap.mg = { t, pat, sc };
-    }
-    snap.bombs = [];
-    if (flags & 64) {
-      const nb = Math.min(r.u8(), ITEMS.BOMB_MAX + 2);
-      for (let i = 0; i < nb; i++) snap.bombs.push({ id: r.uv(), o: r.u8(), sx: r.i24() / 100, sz: r.i24() / 100, x: r.i24() / 100, z: r.i24() / 100, age: r.u16() / 100, fu: r.u16() / 100 });
-    }
+    } else fillSets(snap, prev);
+    snap.proj = readProj(r, short);
+    snap.bananas = readBananas(r, short);
+    if (!withBananas) fillBananas(snap, prev);
+    snap.houses = readHouses(r);
+    if (withLogs) snap.logs = readLogs(r);
+    else fillLogs(snap, prev);
+    const ev = readEvents(r);
+    snap.mg = flags & 32 ? readMg(r) : null;
+    snap.bombs = flags & 64 ? readBombs(r) : [];
     snap.proj = snap.proj.slice(0, 32);
     snap.bananas = snap.bananas.slice(0, ITEMS.BANANA_MAX + 2);
     snap.houses = snap.houses.slice(0, 8);
     return { snap, ev };
   } catch {
     return null; // 途中で切れている・壊れている
+  }
+}
+
+function fillBananas(snap, prev) {
+  // 載っていない: 前に受け取ったバナナの、残り時間を進めて使う（バナナは動かない）
+  const dt = Math.max(0, (snap.tick - (prev?.tick ?? snap.tick)) / 60);
+  if (prev?.bananas) snap.bananas = prev.bananas.map((b) => ({ ...b, age: b.age + dt }));
+  else snap.partial = true;
+}
+function fillLogs(snap, prev) {
+  if (prev?.logs) snap.logs = prev.logs.map((l) => ({ ...l }));
+  else {
+    snap.logs = [];
+    snap.partial = true;
+  }
+}
+function fillSets(snap, prev) {
+  if (prev?.boxTaken && prev?.foodTaken) {
+    snap.boxTaken = prev.boxTaken.slice();
+    snap.foodTaken = prev.foodTaken.slice();
+  } else {
+    snap.boxTaken = [];
+    snap.foodTaken = [];
+    snap.partial = true;
+  }
+}
+const takenOf = (a) => a.reduce((o, t, i) => (t > 0 && o.push(i), o), []);
+
+// ---- 差分の配信（v10）: サーバーからの配信用 ----
+// サーバーとの通信（WebSocket）は、順番どおり・取りこぼしなく届く。そこで、毎回すべての値を送る代わりに、
+// 受け取る側が「前の 2 回の配信から、この値はこうなるはず」と予想した値との差（ほとんど 0 か、とても小さい）だけを送る。
+// 走っている車の位置・向き・速さや、一定に減っていくタイマーは予想がほぼ当たるので、1 台あたり約 17 → 3〜6 バイトになる。
+// 予想は送る側と受け取る側でまったく同じ整数の計算をするので、ずれがたまることはない。
+// 途中から受け取り始めた人・取りこぼした人のために、ときどき（と、頼まれたとき・つなぎ直したとき）は予想を使わない「キー」を送る。
+const BIN_DELTA = 10;
+export const DELTA_KEY_EVERY = 160; // 4 秒（毎秒 40 回のとき）。つなぎ直し・取りこぼしのときは、受け取る側から頼まれてすぐ送る
+const DF = { SETS: 1, BANANAS: 2, SHORT: 4, KEY: 8, LOGS: 16, MG: 32, BOMBS: 64, PROJ: 128, HOUSES: 256, EVENTS: 512, COLD: 1024 };
+const U16 = 65536;
+const wrap16 = (v) => ((v % U16) + U16) % U16;
+const wrapS16 = (v) => {
+  const x = wrap16(v);
+  return x >= U16 / 2 ? x - U16 : x;
+};
+// 車の項目: q = 何分の 1 単位で送るか、c = 予想は「前と同じ」（オン・オフや番号）、w = 1 周で戻る角度
+const KDF = [
+  { f: 'x', q: 100 },
+  { f: 'z', q: 100 },
+  { f: 'h', w: true },
+  { f: 'sp', q: 100 },
+  { f: 'st', q: 100 },
+  { f: 'in', q: 1, c: true },
+  ...BIN_DYN.map((f) => {
+    const kind = BIN_COLD_KIND[BIN_COLD.indexOf(f)];
+    return { f, q: kind === 'b' ? 1 : 100, c: kind === 'b', knock: f === 'kx' || f === 'kz' };
+  }),
+];
+// 全体の項目（レースの時計・決着後の残り時間・勝者・雨・順位の印・場面）。このあとに人ごとの「使った操作の番号」が続く
+// 受け取った車の形（項目の並び）
+const KART_SHAPE = Object.fromEntries([...KDF.map((d) => d.f), 'th', ...BIN_SLOW].map((f) => [f, 0]));
+const HDF = [{ q: 1000 }, { q: 100 }, { q: 1, c: true }, { q: 100 }, { q: 1, c: true }, { q: 1, c: true }];
+
+function quantKart(k) {
+  const out = new Array(KDF.length);
+  for (let j = 0; j < KDF.length; j++) {
+    const d = KDF[j];
+    const v = +k[d.f] || 0;
+    if (d.w) out[j] = wrap16(Math.round((((v % TAU) + TAU) % TAU) * (U16 / TAU)));
+    else if (d.knock && Math.abs(v) < 0.15) out[j] = 0;
+    else out[j] = Math.round(v * d.q);
+  }
+  return out;
+}
+function quantHead(s) {
+  return [Math.round(s.t * 1000), Math.round(s.endT * 100), s.winner | 0, Math.round(s.rain * 100), s.rk | 0, Math.max(0, PHASES.indexOf(s.phase)), ...s.acks.map((a) => Math.round(a) || 0)];
+}
+/** 前の 2 回（a1: 1 回前、a2: 2 回前。d1, d0: それぞれの間の tick 数）から、この回の値を予想する */
+function predictVal(a1, a2, d1, d0, c, w) {
+  if (a1 === undefined) return 0;
+  if (c || a2 === undefined || d0 <= 0) return a1;
+  const dv = w ? wrapS16(a1 - a2) : a1 - a2;
+  const p = a1 + Math.round((dv * d1) / d0);
+  return w ? wrap16(p) : p;
+}
+const zz = (r) => (r >= 0 ? r * 2 : -r * 2 - 1);
+const unzz = (u) => (u % 2 ? -(u + 1) / 2 : u / 2);
+
+/** 値の並び vals を、予想との差で書く（差のある項目の印 + 差） */
+function writeVec(w, vals, a1, a2, d1, d0, defs) {
+  let m = 0;
+  const res = [];
+  for (let j = 0; j < vals.length; j++) {
+    const d = defs[Math.min(j, defs.length - 1)];
+    const p = predictVal(a1?.[j], a2?.[j], d1, d0, d.c, d.w);
+    const r = d.w ? wrapS16(vals[j] - p) : vals[j] - p;
+    if (r !== 0) {
+      m += 2 ** j;
+      res.push(r);
+    }
+  }
+  w.uv(m);
+  for (const r of res) w.uv(zz(r));
+}
+function readVec(r, n, a1, a2, d1, d0, defs) {
+  const m = r.uv();
+  // 印を 30 bit ずつに分けて、ビット演算で調べる（項目は 30 個を超える）
+  const lo = m % 1073741824;
+  const hi = (m - lo) / 1073741824;
+  const out = new Array(n);
+  const last = defs.length - 1;
+  for (let j = 0; j < n; j++) {
+    const d = defs[j < last ? j : last];
+    const p = predictVal(a1?.[j], a2?.[j], d1, d0, d.c, d.w);
+    if ((j < 30 ? lo >> j : hi >> (j - 30)) & 1) {
+      const v = p + unzz(r.uv());
+      out[j] = d.w ? wrap16(v) : v;
+    } else out[j] = p;
+  }
+  return out;
+}
+// 全体の項目のうち、操作の番号（7 番目以降）は「一定の速さで増える」予想
+const HDF_ALL = [...HDF, { q: 1 }];
+
+/** タイマーの並び a の「0 より大きいか」が前と同じか（違えば覚え直す） */
+function sameFlags(o, name, a) {
+  let p = o[name];
+  let same = !!p && p.length === a.length;
+  if (!same) p = o[name] = new Uint8Array(a.length);
+  for (let i = 0; i < a.length; i++) {
+    const v = a[i] > 0 ? 1 : 0;
+    if (p[i] !== v) {
+      p[i] = v;
+      same = false;
+    }
+  }
+  return same;
+}
+/** 並び a の id が前と同じか（違えば覚え直す） */
+function sameIds(o, name, a) {
+  const p = o[name];
+  let same = !!p && p.length === a.length;
+  if (same) for (let i = 0; i < a.length; i++) if (p[i] !== a[i].id) same = false;
+  if (!same) o[name] = a.map((x) => x.id);
+  return same;
+}
+
+/** 差分の配信の送り手（サーバーで、全員に同じものを送る） */
+export class NetDeltaEncoder {
+  constructor() {
+    this.reset();
+  }
+  /** 最初からやり直す（次はキー） */
+  reset() {
+    this.n = 0;
+    this.st = null; // 受け取る側が持っているはずの、前の 2 回の値
+    this.keys = [];
+    this.boxF = this.foodF = this.banF = this.logF = null;
+    this._force = true;
+  }
+  /** 次の配信をキーにする（途中から受け取り始めた人がいるとき） */
+  forceKey() {
+    this._force = true;
+  }
+  encode(s, ev = []) {
+    const n = ++this.n;
+    const head = quantHead(s);
+    const karts = s.karts.map(quantKart);
+    const st = this.st;
+    const key = this._force || !st || n % DELTA_KEY_EVERY === 0 || st.nk !== karts.length || st.nh !== head.length;
+    this._force = false;
+    // ゆっくり変わる部分・取られた箱・バナナ・倒木は、変わったときだけ（キーでは全部）
+    // （文字列を作らずに、前の値と並べて比べる）
+    const cold = s.karts.map((k, i) => {
+      const prev = this.keys[i] || (this.keys[i] = new Float64Array(SLOW_IDX.length).fill(NaN));
+      let ch = false;
+      for (let j = 0; j < SLOW_IDX.length; j++) {
+        const ci = SLOW_IDX[j];
+        const v = Math.round((k[BIN_COLD[ci]] || 0) * (BIN_COLD_KIND[ci] === 'f' ? 1000 : 100));
+        if (v !== prev[j]) {
+          prev[j] = v;
+          ch = true;
+        }
+      }
+      return key || ch;
+    });
+    const withSets = sameFlags(this, 'boxF', s.boxes) & sameFlags(this, 'foodF', s.foods) ? key : true;
+    const withBananas = sameIds(this, 'banF', s.bananas) ? key : true;
+    const withLogs = sameIds(this, 'logF', s.logs) ? key : true;
+    const inShort = (o) => Math.abs(o.x) < 655 && Math.abs(o.z) < 655;
+    const short = s.bananas.every(inShort) && s.proj.every(inShort);
+    const evs = netEvents(ev);
+    const anyCold = cold.some(Boolean);
+    let flags = 0;
+    if (withSets) flags |= DF.SETS;
+    if (withBananas) flags |= DF.BANANAS;
+    if (short) flags |= DF.SHORT;
+    if (key) flags |= DF.KEY;
+    if (withLogs) flags |= DF.LOGS;
+    if (s.mg) flags |= DF.MG;
+    if (s.bombs?.length) flags |= DF.BOMBS;
+    if (s.proj.length) flags |= DF.PROJ;
+    if (s.houses.length) flags |= DF.HOUSES;
+    if (evs.length) flags |= DF.EVENTS;
+    if (anyCold) flags |= DF.COLD;
+    const w = new BinWriter(256);
+    w.u8(BIN_DELTA);
+    w.uv(flags);
+    w.u8(n & 255);
+    let d1 = 0;
+    let d0 = 0;
+    if (key) {
+      w.uv(s.tick);
+      w.u8(head.length);
+      w.u8(karts.length);
+    } else {
+      d1 = s.tick - st.tick1;
+      d0 = st.tick2 === undefined ? 0 : st.tick1 - st.tick2;
+      w.uv(Math.max(0, d1));
+    }
+    const B = key ? null : st;
+    writeVec(w, head, B?.h1, B?.h2, d1, d0, HDF_ALL);
+    karts.forEach((v, i) => writeVec(w, v, B?.k1[i], B?.k2?.[i], d1, d0, KDF));
+    if (anyCold) {
+      let cm = 0;
+      cold.forEach((c, i) => c && (cm += 2 ** i));
+      w.uv(cm);
+      s.karts.forEach((k, i) => {
+        if (!cold[i]) return;
+        let sm = 0;
+        SLOW_IDX.forEach((ci, j) => {
+          if (!isDefault(k, ci)) sm += 2 ** j;
+        });
+        w.uv(sm);
+        SLOW_IDX.forEach((ci, j) => Math.floor(sm / 2 ** j) % 2 && putField(w, k, ci));
+      });
+    }
+    if (withSets) {
+      w.set(takenOf(s.boxes), s.boxes.length);
+      w.set(takenOf(s.foods), s.foods.length);
+    }
+    if (flags & DF.PROJ) writeProj(w, s.proj, short);
+    if (withBananas) writeBananas(w, s.bananas, short);
+    if (flags & DF.HOUSES) writeHouses(w, s.houses);
+    if (withLogs) writeLogs(w, s.logs);
+    if (flags & DF.EVENTS) writeEvents(w, evs);
+    if (s.mg) writeMg(w, s.mg);
+    if (flags & DF.BOMBS) writeBombs(w, s.bombs);
+    // 受け取る側と同じ「前の 2 回」を覚える
+    this.st = key
+      ? { tick1: s.tick, tick2: undefined, h1: head, h2: undefined, k1: karts, k2: undefined, nk: karts.length, nh: head.length }
+      : { tick1: s.tick, tick2: st.tick1, h1: head, h2: st.h1, k1: karts, k2: st.k1, nk: st.nk, nh: st.nh };
+    return w.bytes();
+  }
+}
+
+/**
+ * 定期配信の受け手（v9: 全部入り、v10: 差分）。decode は unpackNetBin と同じ { snap, ev } を返す。
+ * 差分なのに元になる前の回を持っていないとき（途中から受け取り始めた・取りこぼした）は null を返し、needKey が true になる
+ */
+export class NetBinDecoder {
+  constructor() {
+    this.st = null;
+    this.needKey = false;
+  }
+  decode(u8, prev = null) {
+    if (!u8 || !u8.length) return null;
+    if (u8[0] !== BIN_DELTA) return unpackNetBin(u8, prev);
+    try {
+      return this._decodeDelta(u8, prev);
+    } catch {
+      this.st = null; // 壊れている: 次のキーまで待つ
+      this.needKey = true;
+      return null;
+    }
+  }
+  _decodeDelta(u8, prev) {
+    const r = new BinReader(u8);
+    r.u8();
+    const flags = r.uv();
+    const fn = r.u8();
+    const key = !!(flags & DF.KEY);
+    const st = this.st;
+    let tick;
+    let nh;
+    let nk;
+    let d1 = 0;
+    let d0 = 0;
+    if (key) {
+      tick = r.uv();
+      nh = r.u8();
+      nk = Math.min(r.u8(), RACE.MAX_KARTS);
+    } else {
+      if (!st || st.fn !== ((fn + 255) & 255)) {
+        this.st = null;
+        this.needKey = true;
+        return null;
+      }
+      d1 = r.uv();
+      d0 = st.tick2 === undefined ? 0 : st.tick1 - st.tick2;
+      tick = st.tick1 + d1;
+      nh = st.nh;
+      nk = st.nk;
+    }
+    const B = key ? null : st;
+    const head = readVec(r, nh, B?.h1, B?.h2, d1, d0, HDF_ALL);
+    const karts = [];
+    for (let i = 0; i < nk; i++) karts.push(readVec(r, KDF.length, B?.k1[i], B?.k2?.[i], d1, d0, KDF));
+    this.st = key
+      ? { fn, tick1: tick, tick2: undefined, h1: head, h2: undefined, k1: karts, k2: undefined, nk, nh }
+      : { fn, tick1: tick, tick2: st.tick1, h1: head, h2: st.h1, k1: karts, k2: st.k1, nk, nh };
+    this.needKey = false;
+    const snap = {
+      tick,
+      t: head[0] / 1000,
+      endT: head[1] / 100,
+      winner: head[2],
+      rain: head[3] / 100,
+      rk: head[4],
+      phase: PHASES[head[5]] || PHASES[0],
+      acks: head.slice(6),
+    };
+    snap.karts = karts.map((v) => {
+      const k = { ...KART_SHAPE }; // 同じ形のオブジェクトから作る（項目を 1 つずつ足すより速い）
+      for (let j = 0; j < KDF.length; j++) {
+        const d = KDF[j];
+        if (d.w) {
+          let h = (v[j] * TAU) / U16;
+          if (h > Math.PI) h -= TAU;
+          k.h = h;
+        } else k[d.f] = v[j] / d.q;
+      }
+      k.th = thOf(k);
+      return k;
+    });
+    // ゆっくり変わる部分: 載っている車だけ。ほかは前の値
+    const cm = flags & DF.COLD ? r.uv() : 0;
+    snap.karts.forEach((k, i) => {
+      if ((cm >> i) & 1) {
+        const sm = r.uv();
+        SLOW_IDX.forEach((ci, j) => (k[BIN_COLD[ci]] = Math.floor(sm / 2 ** j) % 2 ? getField(r, ci) : BIN_COLD_DEFAULT[ci]));
+        return;
+      }
+      const p = prev?.karts?.[i];
+      if (p) for (const f of BIN_SLOW) k[f] = p[f];
+      else {
+        for (const ci of SLOW_IDX) k[BIN_COLD[ci]] = BIN_COLD_DEFAULT[ci];
+        snap.partial = true;
+      }
+    });
+    const short = !!(flags & DF.SHORT);
+    if (flags & DF.SETS) {
+      snap.boxTaken = r.set(200);
+      snap.foodTaken = r.set(400);
+    } else fillSets(snap, prev);
+    snap.proj = flags & DF.PROJ ? readProj(r, short).slice(0, 32) : [];
+    if (flags & DF.BANANAS) snap.bananas = readBananas(r, short).slice(0, ITEMS.BANANA_MAX + 2);
+    else {
+      snap.bananas = [];
+      fillBananas(snap, prev);
+    }
+    snap.houses = flags & DF.HOUSES ? readHouses(r).slice(0, 8) : [];
+    if (flags & DF.LOGS) snap.logs = readLogs(r);
+    else fillLogs(snap, prev);
+    const ev = flags & DF.EVENTS ? readEvents(r) : [];
+    snap.mg = flags & DF.MG ? readMg(r) : null;
+    snap.bombs = flags & DF.BOMBS ? readBombs(r) : [];
+    return { snap, ev };
   }
 }

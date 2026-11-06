@@ -111,9 +111,9 @@ export const ITEMS = {
 };
 
 export const NET = {
-  INPUT_SEND_EVERY: 2, // ゲストは 2 tick ごと（30Hz）に入力をまとめて送る
+  INPUT_SEND_EVERY: 1.5, // ゲストは 1.5 tick ごと（40Hz。1 tick と 2 tick を交互に）に入力をまとめて送る
   INTERP_MAX: 0.3, // 通信が揺れるときに増やす補間遅延の上限
-  INTERP_DELAY: 0.1, // 相手の車の表示遅延（補間用。配信間隔 1/30 秒の 2 倍強）
+  INTERP_DELAY: 0.085, // 相手の車の表示遅延（補間用。配信間隔 1/40 秒の 3 倍強）
   INPUT_REDUNDANCY: 8, // 入力を送るとき直近何 tick 分を重ねて送るか（取りこぼし対策）
   PREDICTION: true, // ゲスト自身の車をクライアント予測する
   SNAP_DIST: 6, // 追いつきなどの見た目の飛びを滑らかにする上限（m）
@@ -122,6 +122,7 @@ export const NET = {
   INPUT_ADJUST_TICKS: 30, // この tick ごとに、入力の届く遅れに合わせて 1 tick 待つ・飛ばすかを決める
   OWN_SMOOTH: 10, // 自分の車の補正を見た目に反映する速さ（同上。操作の手応えのため、ほかの車より速め）
   REMOTE_SMOOTH: 6, // ほかの車の見た目のずれを戻す速さ（ばねの固有角速度 rad/s。大きいほど早く正確に、小さいほど滑らかに）
+  REMOTE_FAR: 70, // ほかの車がこれ（m）より遠いときは、先へ進める計算を簡単にする
   REMOTE_AHEAD_MAX: 45, // ほかの車を先へ計算する上限（tick）。回線がとても遅いときは、これ以上は先へ進めない
   CATCHUP_LEAD: 2, // 自分の操作の番号（seq）は、サーバーが使い終えた番号（ack）より最低これだけ先にいる（遅れたら追いつく）
   CATCHUP_PER_FRAME: 40, // 追いつくとき 1 回の更新で進める上限（tick）

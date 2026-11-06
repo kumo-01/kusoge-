@@ -35,4 +35,3 @@ export function bubbleLayout(nx, ny, nz, W, H, bw, bh, margin = 10, tail = 9) {
   const t = Math.min((bw / 2) / Math.max(1e-6, Math.abs(c)), (bh / 2) / Math.max(1e-6, Math.abs(sn)));
   return { x: sx, y: sy, edge: true, tx: c * (t + tail), ty: sn * (t + tail), a };
 }
-const BOSS_COLOR = '#2b2b3a';

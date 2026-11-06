@@ -6,6 +6,7 @@ import { TouchControls } from './touch.js';
 import { device } from '../../core/device.js';
 import { bubbleLayout } from './bubble.js';
 
+const BOSS_COLOR = '#2b2b3a'; // ミニマップのボス犬の色
 export const KART_COLORS = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#ffc93c', '#22b573', '#8a63ff', '#c0182b', '#ff7a2f', '#2ec4d6', '#a0e05a', '#b07a52', '#e0e4ee', '#ff5fa2', '#3fb8a0', '#4a5fd8'];
 
 export class Hud {

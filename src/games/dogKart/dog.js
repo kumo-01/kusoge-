@@ -260,5 +260,7 @@ export function buildDog(kind) {
   group.traverse((o) => {
     if (o.isGroup || o === group) o.children.length > 1 && mergeStatic(o, keep);
   });
-  return { group, animate };
+  // 動かす部品（それ以外は、毎コマの行列の計算を省いてよい）
+  const live = [group, body, head, tail, tongue, ...eyes, ...tears, ...ears.map((e) => e.pivot), ...arms];
+  return { group, animate, live };
 }

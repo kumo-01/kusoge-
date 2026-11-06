@@ -422,13 +422,24 @@ export class KartView {
     const sph = new THREE.Sphere();
     const ws = new THREE.Vector3();
     this.group.updateMatrixWorld(true);
-    this.group.traverse((o) => {
-      if (!o.isMesh || !o.castShadow) return;
+    const radius = (o) => {
       if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
       sph.copy(o.geometry.boundingSphere);
       o.getWorldScale(ws);
-      o.castShadow = sph.radius * Math.max(ws.x, ws.y, ws.z) > 0.42;
+      return sph.radius * Math.max(ws.x, ws.y, ws.z);
+    };
+    this.group.traverse((o) => {
+      if (!o.isMesh || !o.castShadow) return;
+      o.castShadow = radius(o) > 0.42;
     });
+    // 細かい部品（目・鼻・ネジ・タイヤの飾りなど）。遠くの車では描かない（1 台を描く回数が約半分になる）
+    // 見せる・隠すをほかで決めている部品は対象にしない
+    const managed = new Set([...this._vehObjs, this.dizzy, this.cloud, this.shield, this.aura, this.owner, this.leash, this.revRing, ...this.flames, ...(this.dog.live || [])]);
+    this._details = [];
+    this.group.traverse((o) => {
+      if (o.isMesh && !managed.has(o) && radius(o) < 0.3) this._details.push(o);
+    });
+    this._detail = true;
     this._walking = false;
     // ヘッドライト（トンネルの中で自動でつく）: 光る電球と、前へのびる光の筋
     this.headlights = new THREE.Group();
@@ -449,12 +460,31 @@ export class KartView {
     this.firstPerson = false;
     this.own = false; // 自分の車か
     this._t = 0;
+    // 動かさない部品（車体の飾り・タイヤの中身・犬の体の大部分など）は、毎コマの行列の計算を省く（1 台に約 100 個の部品がある）
+    const live = new Set([this.group, this.body, this.wheel, this.antenna, this.dizzy, ...this.dizzy.children, this.cloud, ...this.drops, this.shield, this.aura, this.owner, ...this.ownerLegs, ...this.ownerArms, this.revRing, ...this.wheels, ...this.frontPivots, ...this.flames, ...(this.dog.live || [])]);
+    this.group.traverse((o) => {
+      if (live.has(o)) return;
+      o.updateMatrix();
+      o.matrixAutoUpdate = false;
+    });
+    // ふだんは隠れている部品（ガード・飼い主・雨雲など）は、隠れている間は行列の計算ごと省く
+    this._opt = [this.shield, this.aura, this.owner, this.leash, this.dizzy, this.cloud, this.revRing, ...this.flames];
+    for (const o of [...this._opt, this.headlights]) o.matrixWorldAutoUpdate = o.visible;
   }
 
   /** ヘッドライトをつける・消す（トンネルの中で自動でつく。歩いている間はつかない） */
   setLights(on) {
     this._lightsOn = on;
     this.headlights.visible = on && !this._walking;
+    this.headlights.matrixWorldAutoUpdate = this.headlights.visible;
+    if (this.headlights.visible) this.headlights.updateMatrixWorld(true);
+  }
+
+  /** 細かい部品を描くか（遠くの車は描かない） */
+  setDetail(on) {
+    if (this._detail === on) return;
+    this._detail = on;
+    for (const o of this._details) o.visible = on;
   }
 
   /** 一人称視点のときは自分の犬を隠す（カメラが頭の中に入らないように） */
@@ -560,6 +590,7 @@ export class KartView {
       this._walking = walking;
       for (const o of this._vehObjs) o.visible = !walking;
       this.headlights.visible = this._lightsOn && !walking;
+      this.headlights.matrixWorldAutoUpdate = this.headlights.visible;
       this.flames.forEach((f) => (f.visible = false));
     }
     if (walking) {
@@ -571,6 +602,7 @@ export class KartView {
       this.dog.group.rotation.z = 0;
     }
     this.dog.animate({ dt, speed: r.sp, steer: r.st, spin: r.spin, boost: boosting ? 1 : 0, bump: r.bump, mood });
+    for (const o of this._opt) o.matrixWorldAutoUpdate = o.visible;
   }
 
   dispose() {
