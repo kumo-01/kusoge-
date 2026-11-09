@@ -1,0 +1,306 @@
+// 画面の表示（照準・体力・残りの輪ゴム・アイテム・時間・点数・お知らせ）と、タッチ操作（左のスティック・右でなぞって視点・ボタン）
+import { h } from '../../core/util.js';
+import { ITEM_INFO, GUN, PLAYER, ROUND } from './constants.js';
+
+export class GomuHud {
+  constructor(root, { touch }) {
+    this.root = h('div.gomu-hud');
+    root.append(this.root);
+    this.cross = h('div.gm-cross', null, h('i'), h('i'), h('i'), h('i'));
+    this.round = h('div.gm-round');
+    this.timer = h('div.gm-timer');
+    this.board = h('div.gm-board');
+    this.feed = h('div.gm-feed');
+    this.hearts = h('div.gm-hearts');
+    this.ammo = h('div.gm-ammo');
+    this.reloadBar = h('div.gm-reload', null, h('i'));
+    this.special = h('div.gm-special');
+    this.itemIcon = h('div.gm-item-ic');
+    this.itemName = h('div.gm-item-name');
+    this.itemBox = h('div.gm-item', { 'data-ctl': '' }, this.itemIcon, this.itemName, h('div.gm-key', null, touch ? 'タップ' : 'E'));
+    this.center = h('div.gm-center');
+    this.status = h('div.gm-status');
+    this.vignette = h('div.gm-vignette');
+    this.smoke = h('div.gm-smoke');
+    this.names = h('div.gm-names');
+    this.hint = h('div.gm-hint');
+    this.table = h('div.gm-table');
+    this.root.append(this.smoke, this.vignette, this.names, this.cross, h('div.gm-top', null, this.round, this.timer), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.status), h('div.gm-br', null, this.special, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.hint);
+    this.touch = touch ? new GomuTouch(this.root) : null;
+    this.root.classList.toggle('is-touch', !!touch);
+    this._nameEls = [];
+    this._feedItems = [];
+    this._key = {};
+  }
+
+  _set(el, key, text) {
+    if (this._key[key] === text) return;
+    this._key[key] = text;
+    el.textContent = text;
+  }
+
+  /** 毎フレーム: me = 自分の状態、s = 試合の状態の要約 */
+  update(v) {
+    // ラウンドと時間
+    this._set(this.round, 'round', `ROUND ${v.round + 1}/${ROUND.COUNT}　${v.arenaName}`);
+    const left = Math.max(0, Math.ceil(ROUND.TIME - Math.max(0, v.t)));
+    this._set(this.timer, 'timer', v.phase === 'play' ? `${left}` : '');
+    this.timer.classList.toggle('is-low', v.phase === 'play' && left <= 10);
+    // 体力
+    const hp = `${'❤️'.repeat(Math.max(0, v.me.hp))}${'🤍'.repeat(Math.max(0, PLAYER.HP - v.me.hp))}`;
+    this._set(this.hearts, 'hp', hp);
+    // 輪ゴム
+    const ammo = v.me.reload > 0 ? '' : '➰'.repeat(Math.max(0, v.me.ammo)) + '・'.repeat(Math.max(0, GUN.AMMO - v.me.ammo));
+    this._set(this.ammo, 'ammo', ammo);
+    this.reloadBar.hidden = !(v.me.reload > 0);
+    if (v.me.reload > 0) this.reloadBar.firstChild.style.width = `${(1 - v.me.reload / GUN.RELOAD) * 100}%`;
+    this._set(this.special, 'sp', v.me.sp ? `${ITEM_INFO[v.me.sp].icon} ${ITEM_INFO[v.me.sp].name} ×${v.me.spN}` : '');
+    // アイテム
+    const it = v.me.item ? ITEM_INFO[v.me.item] : null;
+    this._set(this.itemIcon, 'itic', it ? it.icon : '');
+    this._set(this.itemName, 'itn', it ? it.name : 'アイテムなし');
+    this.itemBox.classList.toggle('has', !!it);
+    // 状態（照準ぶれ・ゴム切れ・ネバネバ）
+    const st = [v.me.shake > 0 ? '🌀 照準ぶれ' : '', v.me.noAmmo > 0 ? '✂️ ゴム切れ' : '', v.me.stuck > 0 ? '🍬 ネバネバ' : '', v.me.inv > 0 ? '✨ 無敵' : ''].filter(Boolean).join('　');
+    this._set(this.status, 'st', st);
+    // 点数表（点の順）
+    const rows = [...v.players].sort((a, b) => b.score - a.score || a.i - b.i);
+    const bk = rows.map((p) => `${p.i}:${p.score}:${p.dead ? 1 : 0}`).join(',');
+    if (this._key.board !== bk) {
+      this._key.board = bk;
+      this.board.replaceChildren(...rows.map((p) => h(`div.gm-row${p.i === v.meIndex ? '.me' : ''}${p.dead ? '.dead' : ''}`, { style: { '--c': p.css } }, h('b'), h('span', null, p.name), h('em', null, String(p.score)))));
+    }
+    // 真ん中の大きな文字
+    let center = '';
+    if (v.phase === 'intro') center = v.t < -0.05 ? String(Math.ceil(-v.t)) : '';
+    else if (v.phase === 'play' && v.t < 0.8) center = 'GO!';
+    else if (v.me.dead > 0) center = `やられた！ ${Math.ceil(v.me.dead)}`;
+    this._set(this.center, 'center', center);
+    this.center.classList.toggle('is-go', center === 'GO!');
+    // ラウンドの終わり: そのラウンドの点の表
+    const showTable = v.phase === 'end' || v.phase === 'done';
+    this.table.hidden = !showTable;
+    if (showTable) {
+      const tk = `${v.round}:${rows.map((p) => `${p.i}:${p.rs.join('/')}`).join(',')}`;
+      if (this._key.table !== tk) {
+        this._key.table = tk;
+        this.table.replaceChildren(
+          h('h3', null, `ROUND ${v.round + 1} おわり！`),
+          h('table', null,
+            h('tr', null, h('th', null, ''), ...Array.from({ length: ROUND.COUNT }, (_, r) => h('th', null, `R${r + 1}`)), h('th', null, '合計')),
+            ...rows.map((p) => h(`tr${p.i === v.meIndex ? '.me' : ''}`, null, h('td', { style: { color: p.css } }, p.name), ...p.rs.map((x, r) => h('td', null, r <= v.round ? String(x) : '-')), h('td', null, h('b', null, String(p.score)))))),
+          h('p', null, v.round + 1 < ROUND.COUNT ? `次は ${v.nextArena}` : '結果発表！'));
+      }
+    }
+    this.cross.classList.toggle('is-shake', v.me.shake > 0);
+    this.cross.classList.toggle('is-off', v.me.noAmmo > 0 || v.me.reload > 0);
+    this.smoke.classList.toggle('on', !!v.inSmoke);
+    // フィードの期限切れ
+    const now = performance.now();
+    if (this._feedItems.length && this._feedItems[0].until < now) {
+      this._feedItems = this._feedItems.filter((x) => x.until >= now);
+      this.feed.replaceChildren(...this._feedItems.map((x) => x.el));
+    }
+  }
+
+  /** 倒した・アイテムを使った などのお知らせ（右上に数秒） */
+  pushFeed(text, cls = '') {
+    const el = h(`div.gm-feed-item${cls ? `.${cls}` : ''}`, null, text);
+    this._feedItems.push({ el, until: performance.now() + 4000 });
+    if (this._feedItems.length > 5) this._feedItems.shift();
+    this.feed.replaceChildren(...this._feedItems.map((x) => x.el));
+  }
+
+  /** 当てた（照準に印） */
+  hitMarker(kill = false) {
+    this.cross.classList.remove('is-hit', 'is-kill');
+    void this.cross.offsetWidth;
+    this.cross.classList.add(kill ? 'is-kill' : 'is-hit');
+  }
+
+  /** 当てられた（画面のふちが赤く） */
+  hurt() {
+    this.vignette.classList.remove('on');
+    void this.vignette.offsetWidth;
+    this.vignette.classList.add('on');
+  }
+
+  setHint(text) {
+    this._set(this.hint, 'hint', text || '');
+    this.hint.hidden = !text;
+  }
+
+  /** ほかの犬の名前（画面の座標。null なら隠す） */
+  setNames(list) {
+    while (this._nameEls.length < list.length) {
+      const el = h('div.gm-name');
+      this.names.append(el);
+      this._nameEls.push(el);
+    }
+    this._nameEls.forEach((el, i) => {
+      const n = list[i];
+      if (!n) {
+        el.hidden = true;
+        return;
+      }
+      el.hidden = false;
+      if (el.textContent !== n.text) el.textContent = n.text;
+      el.style.transform = `translate(${n.x.toFixed(0)}px, ${n.y.toFixed(0)}px) translate(-50%, -100%)`;
+      el.style.setProperty('--c', n.css);
+    });
+  }
+
+  dispose() {
+    this.touch?.dispose();
+    this.root.remove();
+  }
+}
+
+/**
+ * タッチ操作: 左下のスティックで移動、右側をなぞって視点、ボタン（発射・ジャンプ・ダッシュ・伏せ・アイテム）
+ * 複数の指を同時に使える（指ごとに Pointer Events で追う）
+ */
+export class GomuTouch {
+  constructor(root) {
+    this.mx = 0; // 右へ -1..1
+    this.mz = 0; // 前へ -1..1
+    this.lookDX = 0; // たまった視点の動き（ピクセル）
+    this.lookDY = 0;
+    this.fire = false;
+    this.jump = false;
+    this.dash = false;
+    this.crouch = false;
+    this.item = false;
+    this.knob = h('div.gt-knob');
+    this.stick = h('div.gt-stick', { 'data-ctl': '' }, this.knob);
+    this.look = h('div.gt-look', { 'data-ctl': '' });
+    const btn = (cls, text) => h(`div.gt-btn.${cls}`, { 'data-ctl': '' }, text);
+    this.fireBtn = btn('gt-fire', '発射');
+    this.jumpBtn = btn('gt-jump', 'ジャンプ');
+    this.dashBtn = btn('gt-dash', 'ダッシュ');
+    this.crouchBtn = btn('gt-crouch', '伏せ');
+    this.el = h('div.gomu-touch', null, this.look, this.stick, this.fireBtn, this.jumpBtn, this.dashBtn, this.crouchBtn);
+    root.append(this.el);
+    this._bindStick();
+    this._bindLook(this.look);
+    // 発射ボタンは押している間ずっと撃つ。押したまま指を動かすと視点も動く
+    this._hold(this.fireBtn, (on) => (this.fire = on), true);
+    this._press(this.jumpBtn, () => (this.jump = true));
+    this._press(this.dashBtn, () => (this.dash = true));
+    this._press(this.crouchBtn, () => {
+      this.crouch = !this.crouch;
+      this.crouchBtn.classList.toggle('on', this.crouch);
+    });
+  }
+
+  _bindStick() {
+    const el = this.stick;
+    let id = null;
+    let cx = 0;
+    let cy = 0;
+    const R = 50;
+    const move = (e) => {
+      let dx = e.clientX - cx;
+      let dy = e.clientY - cy;
+      const l = Math.hypot(dx, dy);
+      if (l > R) {
+        dx = (dx / l) * R;
+        dy = (dy / l) * R;
+      }
+      this.mx = dx / R;
+      this.mz = -dy / R;
+      this.knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    };
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      id = e.pointerId;
+      el.setPointerCapture?.(id);
+      const r = el.getBoundingClientRect();
+      cx = r.left + r.width / 2;
+      cy = r.top + r.height / 2;
+      move(e);
+    });
+    el.addEventListener('pointermove', (e) => e.pointerId === id && move(e));
+    const end = (e) => {
+      if (e && e.pointerId !== id) return;
+      id = null;
+      this.mx = this.mz = 0;
+      this.knob.style.transform = '';
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+    el.addEventListener('lostpointercapture', () => end(null));
+  }
+
+  /** なぞった分だけ視点を動かす（指ごとに、前の位置との差） */
+  _bindLook(el) {
+    const last = new Map();
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      el.setPointerCapture?.(e.pointerId);
+      last.set(e.pointerId, [e.clientX, e.clientY]);
+    });
+    el.addEventListener('pointermove', (e) => {
+      const p = last.get(e.pointerId);
+      if (!p) return;
+      this.lookDX += e.clientX - p[0];
+      this.lookDY += e.clientY - p[1];
+      last.set(e.pointerId, [e.clientX, e.clientY]);
+    });
+    const end = (e) => last.delete(e.pointerId);
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }
+
+  _hold(el, set, look = false) {
+    const last = new Map();
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      el.setPointerCapture?.(e.pointerId);
+      set(true);
+      el.classList.add('down');
+      last.set(e.pointerId, [e.clientX, e.clientY]);
+    });
+    el.addEventListener('pointermove', (e) => {
+      const p = last.get(e.pointerId);
+      if (!p || !look) return;
+      this.lookDX += e.clientX - p[0];
+      this.lookDY += e.clientY - p[1];
+      last.set(e.pointerId, [e.clientX, e.clientY]);
+    });
+    const up = (e) => {
+      last.delete(e.pointerId);
+      if (last.size) return;
+      set(false);
+      el.classList.remove('down');
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+
+  _press(el, fn) {
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      fn();
+      el.classList.add('down');
+      setTimeout(() => el.classList.remove('down'), 120);
+    });
+  }
+
+  /** 押した瞬間のもの（ジャンプ・ダッシュ・アイテム）を 1 回だけ取り出す */
+  take() {
+    const r = { jump: this.jump, dash: this.dash, item: this.item };
+    this.jump = this.dash = this.item = false;
+    return r;
+  }
+
+  takeLook() {
+    const r = [this.lookDX, this.lookDY];
+    this.lookDX = this.lookDY = 0;
+    return r;
+  }
+
+  dispose() {
+    this.el.remove();
+  }
+}

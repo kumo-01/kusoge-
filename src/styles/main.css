@@ -3391,3 +3391,456 @@ canvas {
   border-top: 1px solid #1d252c;
   padding-top: 4px;
 }
+
+/* ---------- いぬいぬゴム鉄砲バトル ---------- */
+.gomu-canvas {
+  cursor: crosshair;
+  touch-action: none;
+}
+.gomu-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--font);
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35), 0 0 6px rgba(0, 0, 0, 0.35);
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+.gm-cross {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+}
+.gm-cross i {
+  position: absolute;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+}
+.gm-cross i:nth-child(1),
+.gm-cross i:nth-child(2) {
+  width: 3px;
+  height: 8px;
+  left: 11.5px;
+}
+.gm-cross i:nth-child(1) {
+  top: 0;
+}
+.gm-cross i:nth-child(2) {
+  bottom: 0;
+}
+.gm-cross i:nth-child(3),
+.gm-cross i:nth-child(4) {
+  height: 3px;
+  width: 8px;
+  top: 11.5px;
+}
+.gm-cross i:nth-child(3) {
+  left: 0;
+}
+.gm-cross i:nth-child(4) {
+  right: 0;
+}
+.gm-cross.is-off i {
+  background: #9aa0a6;
+}
+.gm-cross.is-shake {
+  animation: gm-wobble 0.5s linear infinite;
+}
+.gm-cross.is-hit i {
+  animation: gm-hit 0.3s ease-out;
+}
+.gm-cross.is-kill i {
+  animation: gm-kill 0.6s ease-out;
+}
+@keyframes gm-hit {
+  0% {
+    background: #ffd23f;
+    transform: scale(1.6);
+  }
+}
+@keyframes gm-kill {
+  0% {
+    background: #ff4d5e;
+    transform: scale(2.2);
+  }
+}
+@keyframes gm-wobble {
+  25% {
+    transform: translate(-46%, -55%) rotate(8deg);
+  }
+  75% {
+    transform: translate(-54%, -45%) rotate(-8deg);
+  }
+}
+.gm-top {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+}
+.gm-round {
+  font-weight: 900;
+  font-size: 0.95rem;
+  background: rgba(40, 30, 60, 0.55);
+  padding: 3px 12px;
+  border-radius: 999px;
+}
+.gm-timer {
+  font-weight: 900;
+  font-size: 2rem;
+  line-height: 1.1;
+}
+.gm-timer.is-low {
+  color: #ffd23f;
+}
+.gm-board {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: grid;
+  gap: 3px;
+  min-width: 150px;
+}
+.gm-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  background: rgba(40, 30, 60, 0.5);
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.gm-row b {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c);
+}
+.gm-row.me {
+  outline: 2px solid #ffd23f;
+}
+.gm-row.dead {
+  opacity: 0.55;
+}
+.gm-row em {
+  font-style: normal;
+}
+.gm-feed {
+  position: absolute;
+  top: 62px;
+  right: 10px;
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  max-width: 46vw;
+}
+.gm-feed-item {
+  background: rgba(40, 30, 60, 0.55);
+  border-radius: 8px;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+.gm-feed-item.mine {
+  background: rgba(226, 103, 28, 0.8);
+}
+.gm-feed-item.bad {
+  background: rgba(200, 40, 60, 0.75);
+}
+.gm-bl {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+}
+.gm-hearts {
+  font-size: 1.6rem;
+  letter-spacing: 2px;
+}
+.gm-status {
+  font-weight: 900;
+  font-size: 0.9rem;
+}
+.gm-br {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  text-align: right;
+}
+.gm-ammo {
+  font-size: 1.5rem;
+  font-weight: 900;
+  min-height: 1.6em;
+}
+.gm-special {
+  font-weight: 900;
+  font-size: 0.95rem;
+  color: #ffd23f;
+}
+.gm-reload {
+  width: 120px;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.3);
+  overflow: hidden;
+  margin-left: auto;
+}
+.gm-reload i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #ffd23f;
+}
+.gm-reload[hidden] {
+  display: none;
+}
+.gm-item {
+  position: absolute;
+  right: 14px;
+  bottom: 96px;
+  width: 92px;
+  padding: 6px 4px;
+  border-radius: 14px;
+  background: rgba(40, 30, 60, 0.55);
+  text-align: center;
+  pointer-events: auto;
+  touch-action: none;
+}
+.gm-item.has {
+  background: rgba(226, 103, 28, 0.85);
+  box-shadow: 0 0 0 3px #ffd23f;
+}
+.gm-item-ic {
+  font-size: 1.8rem;
+  min-height: 1.2em;
+  line-height: 1.2;
+}
+.gm-item-name {
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+.gm-key {
+  font-size: 0.65rem;
+  opacity: 0.85;
+}
+.gm-center {
+  position: absolute;
+  left: 50%;
+  top: 36%;
+  transform: translate(-50%, -50%);
+  font-size: 3.4rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.gm-center.is-go {
+  color: #ffd23f;
+  font-size: 4.4rem;
+}
+.gm-table {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(40, 30, 60, 0.82);
+  border-radius: 18px;
+  padding: 14px 20px;
+  text-align: center;
+  min-width: 280px;
+}
+.gm-table[hidden] {
+  display: none;
+}
+.gm-table h3 {
+  margin: 0 0 8px;
+}
+.gm-table table {
+  margin: 0 auto;
+  border-collapse: collapse;
+}
+.gm-table td,
+.gm-table th {
+  padding: 3px 10px;
+  font-weight: 800;
+}
+.gm-table tr.me td {
+  color: #ffd23f;
+}
+.gm-table p {
+  margin: 8px 0 0;
+}
+.gm-vignette {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 90px 30px rgba(255, 40, 60, 0.75);
+  opacity: 0;
+}
+.gm-vignette.on {
+  animation: gm-hurt 0.5s ease-out;
+}
+@keyframes gm-hurt {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.gm-smoke {
+  position: absolute;
+  inset: 0;
+  background: rgba(240, 240, 240, 0.94);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.gm-smoke.on {
+  opacity: 1;
+}
+.gm-names {
+  position: absolute;
+  inset: 0;
+}
+.gm-name {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 900;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--c);
+  color: #fff;
+}
+.gm-name[hidden] {
+  display: none;
+}
+.gm-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 22%;
+  transform: translateX(-50%);
+  background: rgba(40, 30, 60, 0.7);
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+.gm-hint[hidden] {
+  display: none;
+}
+/* タッチ操作 */
+.gomu-touch {
+  display: none;
+}
+.gomu-hud.is-touch .gomu-touch {
+  display: block;
+}
+.gomu-hud.is-touch .gm-top {
+  top: 54px; /* 上の音・一時停止のボタンと重ならないように */
+}
+.gomu-hud.is-touch .gm-round {
+  font-size: 0.8rem;
+}
+.gomu-hud.is-touch .gm-br {
+  bottom: auto;
+  top: 58px;
+  right: 116px;
+}
+.gomu-hud.is-touch .gm-item {
+  bottom: auto;
+  top: 58px;
+  right: 14px;
+}
+.gomu-hud.is-touch .gm-feed {
+  top: 150px;
+}
+.gomu-hud.is-touch .gm-bl {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 8px;
+  text-align: center;
+}
+.gt-look {
+  position: absolute;
+  left: 40%;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: auto;
+  touch-action: none;
+}
+.gt-stick {
+  position: absolute;
+  left: max(18px, env(safe-area-inset-left));
+  bottom: 22px;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  border: 3px solid rgba(255, 255, 255, 0.55);
+  pointer-events: auto;
+  touch-action: none;
+}
+.gt-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+}
+.gt-btn {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 900;
+  font-size: 0.78rem;
+  color: #fff;
+  background: rgba(40, 30, 60, 0.55);
+  border: 3px solid rgba(255, 255, 255, 0.6);
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+.gt-btn.down,
+.gt-btn.on {
+  background: rgba(226, 103, 28, 0.9);
+}
+.gt-fire {
+  right: max(24px, env(safe-area-inset-right));
+  bottom: 30px;
+  width: 96px;
+  height: 96px;
+  font-size: 1rem;
+  background: rgba(230, 57, 70, 0.7);
+}
+.gt-jump {
+  right: calc(max(24px, env(safe-area-inset-right)) + 104px);
+  bottom: 20px;
+  width: 66px;
+  height: 66px;
+}
+.gt-dash {
+  right: calc(max(24px, env(safe-area-inset-right)) + 100px);
+  bottom: 96px;
+  width: 60px;
+  height: 60px;
+}
+.gt-crouch {
+  right: calc(max(24px, env(safe-area-inset-right)) + 24px);
+  bottom: 136px;
+  width: 58px;
+  height: 58px;
+}
