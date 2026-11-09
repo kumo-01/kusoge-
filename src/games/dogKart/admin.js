@@ -18,21 +18,21 @@ export class AdminPanel {
     this.mode = 'give'; // 'give' = 渡してすぐ使う / 'set1' = 1 つ目に入れる / 'set2' = 2 つ目に入れる
     this.rows = [];
     this.list = h('div.adm-list');
-    const modeBtn = (m, label) => h(`button.adm-mode${m === this.mode ? '.on' : ''}`, { type: 'button', 'data-m': m, onclick: () => this._setMode(m) }, label);
+    const modeBtn = (m, label) => h(`button.adm-mode${m === this.mode ? '.on' : ''}`, { type: 'button', 'data-m': m, ontap: () => this._setMode(m) }, label);
     this.modes = h('div.adm-modes', null, modeBtn('give', '渡して使う'), modeBtn('set1', '枠1に入れる'), modeBtn('set2', '枠2に入れる'));
     this.items = h('div.adm-items',
       null,
       Object.keys(ITEM_INFO)
         .map(Number)
         .filter((i) => i > 0 && i < ITEMS.COUNT)
-        .map((i) => h('button.adm-item', { type: 'button', title: ITEM_INFO[i].name, onclick: () => this._pick(i) }, h('span.ic', null, ITEM_INFO[i].icon), h('small', null, ITEM_INFO[i].name))));
+        .map((i) => h('button.adm-item', { type: 'button', title: ITEM_INFO[i].name, ontap: () => this._pick(i) }, h('span.ic', null, ITEM_INFO[i].icon), h('small', null, ITEM_INFO[i].name))));
     this.actions = h('div.adm-actions', null,
-      h('button.adm-act', { type: 'button', onclick: () => this._do('use', '持っているのを使用') }, '持ち物を使わせる'),
-      h('button.adm-act.danger', { type: 'button', onclick: () => this._do('clear', '持ち物を消去') }, '持ち物を消す'));
+      h('button.adm-act', { type: 'button', ontap: () => this._do('use', '持っているのを使用') }, '持ち物を使わせる'),
+      h('button.adm-act.danger', { type: 'button', ontap: () => this._do('clear', '持ち物を消去') }, '持ち物を消す'));
     this.log = h('div.adm-log', null, '> 待機中');
-    this.head = h('div.adm-head', null, h('span', null, h('b', null, 'ADMIN'), ' 管理モード'), (this.minBtn = h('button.adm-min', { type: 'button', title: 'たたむ', onclick: () => this._toggleMin() }, '－')));
+    this.head = h('div.adm-head', null, h('span', null, h('b', null, 'ADMIN'), ' 管理モード'), (this.minBtn = h('button.adm-min', { type: 'button', title: 'たたむ', ontap: () => this._toggleMin() }, '－')));
     const cap = (t) => h('div.adm-cap', null, t);
-    const selBtn = (label, pick) => h('button.adm-sel', { type: 'button', onclick: () => this._selectWhere(pick) }, label);
+    const selBtn = (label, pick) => h('button.adm-sel', { type: 'button', ontap: () => this._selectWhere(pick) }, label);
     this.selBar = h('div.adm-selbar', null, selBtn('全員', () => true), selBtn('人だけ', (k) => !k.npc), selBtn('NPCだけ', (k) => k.npc), selBtn('解除', () => false));
     this.body = h('div.adm-body', null, h('div.adm-cap', null, '対象（何台でも） ', (this.selCount = h('b.adm-cnt', null, '1台を選択中'))), this.selBar, this.list, cap('アイテムの操作'), this.modes, this.items, this.actions, this.log);
     this.names = [];
@@ -90,7 +90,7 @@ export class AdminPanel {
       this.rows = karts.map((_, i) => {
         const name = h('span.adm-name');
         const it = h('span.adm-its');
-        const row = h('button.adm-row', { type: 'button', onclick: () => this._toggle(i) }, h('span.adm-no', null, String(i + 1).padStart(2, '0')), name, it);
+        const row = h('button.adm-row', { type: 'button', ontap: () => this._toggle(i) }, h('span.adm-no', null, String(i + 1).padStart(2, '0')), name, it);
         return { row, name, it, key: '' };
       });
       this.list.replaceChildren(...this.rows.map((r) => r.row));

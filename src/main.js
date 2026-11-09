@@ -232,13 +232,17 @@ class App {
 const app = new App(document.getElementById('app'));
 // iOS Safari のピンチ拡大・縮小はゲーム中は止める（画面が勝手に拡大されないように）
 document.addEventListener('gesturestart', (e) => e.preventDefault());
-// ダブルタップでの拡大を止める（連続タップを検出して既定動作を止める。入力欄は除く）
+// ダブルタップでの拡大を止める（連続タップを検出して既定動作を止める）。
+// ボタン・リンク・入力欄・操作ボタンの上は止めない（止めると、続けて素早くタップしたときにボタンが反応しなくなる。
+// これらは CSS の touch-action: manipulation で拡大だけを止めている）
 let lastTouchEnd = 0;
+const TAPPABLE = 'button, a, input, textarea, select, label, summary, [role="button"], [data-ctl], [data-tap]';
 document.addEventListener(
   'touchend',
   (e) => {
     const t = performance.now();
-    if (t - lastTouchEnd < 350 && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) e.preventDefault();
+    const tappable = e.target instanceof Element && e.target.closest(TAPPABLE);
+    if (t - lastTouchEnd < 350 && !tappable) e.preventDefault();
     lastTouchEnd = t;
   },
   { passive: false },

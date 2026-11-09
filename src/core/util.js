@@ -62,7 +62,8 @@ export function h(tagSpec, attrs, ...children) {
   if (attrs) {
     for (const [k, v] of Object.entries(attrs)) {
       if (v == null || v === false) continue;
-      if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
+      if (k === 'ontap' && typeof v === 'function') onTap(node, v);
+      else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
       else if (k === 'class') node.className += (node.className ? ' ' : '') + v;
       else if (k === 'html') node.innerHTML = v;
       else if (k === 'dataset') Object.assign(node.dataset, v);
@@ -81,6 +82,44 @@ export function h(tagSpec, attrs, ...children) {
     node.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
   return node;
+}
+
+/**
+ * タップ（押して、ほとんど動かさずに離す）で fn を呼ぶ。click を待たないので、
+ * iPad などで続けて素早くタップしても、1 回も取りこぼさない（click は連続タップのときに出ないことがある）。
+ * 指が動いた（スクロールした）ときは呼ばない。キーボード（Enter・スペース）で押したときは click で呼ぶ。
+ * 押している間は is-pressed の印がつく（iOS は :active が効きにくいので、見た目はこれで）
+ */
+export function onTap(el, fn) {
+  let id = null;
+  let sx = 0;
+  let sy = 0;
+  let last = -1e9;
+  const reset = () => {
+    id = null;
+    el.classList.remove('is-pressed');
+  };
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    id = e.pointerId;
+    sx = e.clientX;
+    sy = e.clientY;
+    el.classList.add('is-pressed');
+  });
+  el.addEventListener('pointerup', (e) => {
+    if (e.pointerId !== id) return;
+    const moved = Math.hypot(e.clientX - sx, e.clientY - sy) > 14;
+    reset();
+    if (moved || el.disabled) return;
+    last = performance.now();
+    fn(e);
+  });
+  el.addEventListener('pointercancel', reset);
+  el.addEventListener('pointerleave', (e) => e.pointerId === id && e.pointerType === 'mouse' && reset());
+  el.addEventListener('click', (e) => {
+    // タップのあとに来る click は無視（2 回動かないように）。キーボードの押下（detail 0）だけ
+    if (e.detail === 0 && performance.now() - last > 400 && !el.disabled) fn(e);
+  });
 }
 
 export const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);

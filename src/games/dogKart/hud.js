@@ -31,13 +31,13 @@ export class Hud {
     this.warn = h('div.hud-warn', { hidden: true }, '⚠ 逆走してるワン！');
     this.boostEdge = h('div.hud-boost-edge');
     this.speedLines = h('div.hud-speedlines');
-    this.camBtn = h('button.hud-cam-btn', { onclick: () => this.onCameraToggle?.(), title: 'カメラ切り替え（C）' }, '');
+    this.camBtn = h('button.hud-cam-btn', { ontap: () => this.onCameraToggle?.(), title: 'カメラ切り替え（C）' }, '');
     this.camBtn.append(h('span.ic', null, '🎥'), (this.camLabel = h('span.lb', null, '三人称')));
     this.rankTotal = h('div.hud-rank-total', null, '/2');
     this.round = series.races > 1 ? h('div.hud-round', null, `第${series.round || 1}戦 / 全${series.races}戦`) : null;
     this.foodNum = h('b', null, '0');
     this.food = h('div.hud-food', { title: 'ドッグフード（多いほど少し速い）' }, h('span.hud-food-ic', null, '🍖'), this.foodNum, h('small', null, `/${FOOD.MAX}`));
-    this.qualityBtn = h('button.hud-cam-btn.hud-quality-btn', { onclick: () => this.onQuality?.(), title: '画質の切り替え' }, '');
+    this.qualityBtn = h('button.hud-cam-btn.hud-quality-btn', { ontap: () => this.onQuality?.(), title: '画質の切り替え' }, '');
     this.qualityBtn.append(h('span.ic', null, '⚙'), (this.qualityLabel = h('span.lb', null, '画質: 自動')));
     this.fsBtn = document.fullscreenEnabled || document.webkitFullscreenEnabled
       ? h('button.hud-cam-btn.hud-fs-btn', { onclick: () => this._toggleFullscreen(), title: '全画面' }, h('span.ic', null, '⛶'), h('span.lb', null, '全画面'))

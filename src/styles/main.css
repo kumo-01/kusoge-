@@ -25,6 +25,15 @@
   box-sizing: border-box;
 }
 
+/* ボタンなどはダブルタップでの拡大だけを止める（続けて素早くタップしても毎回反応する）。個別に none を指定したものはそちらが優先 */
+button,
+a,
+label,
+select,
+summary,
+[role='button'] {
+  touch-action: manipulation;
+}
 html,
 body {
   margin: 0;
@@ -3200,6 +3209,8 @@ canvas {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
   text-shadow: none;
 }
 .adm-panel button {
@@ -3354,7 +3365,8 @@ canvas {
 .adm-panel button:hover {
   border-color: var(--adm-acc);
 }
-.adm-panel button:active {
+.adm-panel button:active,
+.adm-panel button.is-pressed {
   background: rgba(79, 209, 165, 0.3);
 }
 .adm-actions {
