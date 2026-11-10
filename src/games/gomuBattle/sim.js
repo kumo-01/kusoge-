@@ -4,7 +4,7 @@
 
 import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOT } from './constants.js';
 import { ARENAS, segmentHit } from './arena.js';
-import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf } from './physics.js';
+import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits } from './physics.js';
 import { botThink } from './bot.js';
 
 /** 決定的な乱数（状態に種を持つ） */
@@ -42,6 +42,12 @@ export class GomuSim {
 
   get arena() {
     return ARENAS[this.s.round % ARENAS.length];
+  }
+
+  /** ぶつかる物すべて（家具 + 押せるもの）。押せるものは試合の状態 s.mov の箱そのもの */
+  get cw() {
+    if (!this._cw || this._cw.mov !== this.s.mov) this._cw = { boxes: [...this.arena.boxes, ...(this.s.mov || [])], mov: this.s.mov };
+    return this._cw;
   }
 
   _newPlayer(i) {
@@ -85,6 +91,7 @@ export class GomuSim {
     s.gums = [];
     s.smokes = [];
     s.boxes = this.arena.items.map(() => 0);
+    s.mov = (this.arena.movables || []).map(movableBox); // 押せるものはラウンドの始めの場所へ
     this.events.push({ t: 'round', r });
     // 出発地点はばらばらに
     const spots = this.arena.spawns.map((_, k) => k);
@@ -116,6 +123,7 @@ export class GomuSim {
     p.crouch = !!st.crouch;
     p.moving = !!st.moving;
     p.ground = st.ground !== false;
+    shoveMovables(this.cw, p); // 押せるものに重なっていたら、押し出す（その人の端末で押した分）
   }
 
   drainEvents() {
@@ -148,7 +156,7 @@ export class GomuSim {
       return;
     }
     if (s.phase !== 'play') {
-      for (const p of s.players) if (p.bot) stepMove(p, {}, dt, this.arena, 0); // 着地だけ
+      for (const p of s.players) if (p.bot) stepMove(p, {}, dt, this.cw, 0); // 着地だけ
       return;
     }
     for (const p of s.players) this._stepPlayer(p, dt);
@@ -170,7 +178,7 @@ export class GomuSim {
     if (!p.bot) return; // 人の犬はその人の端末が動かす
     const inp = botThink(this, p, dt);
     const slow = p.stuck > 0 ? 0 : p.stun > 0 ? PLAYER.STUN_SPEED : 1;
-    stepMove(p, inp, dt, this.arena, slow);
+    stepMove(p, inp, dt, this.cw, slow);
     p.moving = Math.hypot(p.vx, p.vz) > 0.5;
   }
 
@@ -180,6 +188,7 @@ export class GomuSim {
     let best = this.arena.spawns[0];
     let bd = -1;
     for (const sp of this.arena.spawns) {
+      if (!fits(this.cw, sp[0], 0, sp[1], PLAYER.HEIGHT)) continue; // 押せるものが置かれている
       const d = others.length ? Math.min(...others.map((q) => Math.hypot(q.x - sp[0], q.z - sp[1]))) : 0;
       if (d > bd) {
         bd = d;
@@ -272,7 +281,7 @@ export class GomuSim {
 
   _stepBands(dt) {
     const s = this.s;
-    const arena = this.arena;
+    const arena = this.cw;
     const tgt = (b) => this._target(b);
     for (let n = s.bands.length - 1; n >= 0; n--) {
       const b = s.bands[n];
@@ -419,7 +428,7 @@ export class GomuSim {
       const oz = ok ? o[2] : p.z;
       const v = ok ? d : aimDir(p.yaw, p.pitch);
       const R = ITEMS.SMOKE_RANGE;
-      const t = segmentHitSafe(this.arena, ox, oy, oz, ox + v[0] * R, oy + v[1] * R, oz + v[2] * R);
+      const t = segmentHitSafe(this.cw, ox, oy, oz, ox + v[0] * R, oy + v[1] * R, oz + v[2] * R);
       const sm = { id: s.nextId++, o: i, x: ox + v[0] * R * t, y: Math.max(0.6, oy + v[1] * R * t), z: oz + v[2] * R * t, age: 0 };
       s.smokes.push(sm);
       this.events.push({ t: 'smoke', id: sm.id, o: i, x: sm.x, y: sm.y, z: sm.z });

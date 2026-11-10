@@ -3,7 +3,7 @@
 
 export const ROUND = {
   COUNT: 3, // ラウンド数
-  TIME: 60, // 1 ラウンドの長さ（秒）
+  TIME: 180, // 1 ラウンドの長さ（秒）
   INTRO: 3, // 始まる前の 3・2・1
   END: 4, // ラウンドの終わりの結果表示
 };
@@ -24,6 +24,7 @@ export const PLAYER = {
   JUMP: 7.4, // ジャンプの初速（約 1.25 の高さまで。ソファの座面に乗れる）
   GRAVITY: 22,
   STEP: 0.32, // これより低い段差は歩いて上がれる（ラグ・低いクッション）
+  PUSH_SPEED: 2.4, // 押せるもの（段ボールなど）を押して進む速さ（ズルズル）
   HP: 3,
   RESPAWN: 3, // 倒れてから復活するまで（秒）
   INVINCIBLE: 2, // 復活してから無敵の時間
@@ -39,7 +40,7 @@ export const GUN = {
   FIRE_GAP: 0.18, // 連射の間隔
   SPEED: 28, // 輪ゴムの速さ
   GRAVITY: 5, // 少し落ちる
-  LIFE: 1.4, // 飛んでいられる時間
+  LIFE: 1.8, // 飛んでいられる時間（約 50 先まで）
   RADIUS: 0.08,
   MUZZLE: 0.55, // 目から銃口までの距離
 };
@@ -70,11 +71,11 @@ export const ITEMS = {
   THICK_DAMAGE: 2,
   TRIPLE_SPREAD: 0.14, // 3 方向の開き（ラジアン）
   BOUNCES: 2,
-  BOUNCE_LIFE: 2.2,
+  BOUNCE_LIFE: 2.6,
   HOMING_TURN: 3.2, // 追いかけゴムの曲がる速さ（ラジアン/秒）
   HOMING_CONE: 0.9, // 進む向きからこの角度（ラジアン）以内の相手を追う
-  HOMING_RANGE: 22,
-  SMOKE_RANGE: 13, // 煙幕を投げられる距離
+  HOMING_RANGE: 30,
+  SMOKE_RANGE: 18, // 煙幕を投げられる距離
   SMOKE_RADIUS: 3.2,
   SMOKE_TIME: 6,
   SHAKE_TIME: 3,
@@ -91,7 +92,7 @@ export const SCORE = {
 
 export const BOT = {
   MAX: 5,
-  VIEW: 24, // 見える距離
+  VIEW: 40, // 見える距離
   AIM_ERROR: 0.12, // 狙いのぶれ（ラジアン）
   REACT: 0.7, // 相手を見つけてから撃ち始めるまで
   FIRE_GAP: 0.5, // CPU の連射の間隔（人より遅い）

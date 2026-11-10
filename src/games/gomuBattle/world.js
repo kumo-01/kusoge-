@@ -91,10 +91,11 @@ export class GomuWorld {
     scene.add(new THREE.HemisphereLight(0xfff8ee, 0xb59d86, 1.5));
     scene.add(new THREE.AmbientLight(0xffffff, 0.55));
     const sun = new THREE.DirectionalLight(0xfff1d8, 1.25);
-    sun.position.set(-7, 16, -11);
+    sun.position.set(-12, 30, -20);
     sun.castShadow = !device.low;
     sun.shadow.mapSize.set(1024, 1024);
-    Object.assign(sun.shadow.camera, { left: -15, right: 15, top: 15, bottom: -15, near: 1, far: 50 });
+    Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 80 });
+    sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.bias = -0.0015;
     scene.add(sun, sun.target);
     this.sun = sun;
@@ -167,7 +168,7 @@ export class GomuWorld {
     G.add(ceil);
     // 天井の照明（丸い光）
     const lampMat = new THREE.MeshBasicMaterial({ color: 0xfffbe6 });
-    for (const [lx, lz] of [[-6, 0], [6, 0]]) {
+    for (const [lx, lz] of [[-13, -8], [13, -8], [-13, 8], [13, 8]]) {
       const l = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.2, 24), lampMat);
       l.position.set(lx, H - 0.1, lz);
       G.add(l);
@@ -204,6 +205,7 @@ export class GomuWorld {
     });
     for (const g of this.itemBoxes) g.traverse((o) => (o.matrixAutoUpdate = true));
     this.renderer.shadowMap.needsUpdate = true;
+    this.movMeshes = null; // 押せるものは新しい会場で作り直す
     // 前の会場の煙・ガム・輪ゴムは消す
     for (const id of [...this.smokes.keys()]) this.removeSmoke(id);
     for (const id of [...this.gums.keys()]) this.removeGum(id);
@@ -344,6 +346,51 @@ export class GomuWorld {
       return g;
     }
     return null;
+  }
+
+  /** 押せるもの（段ボール・洗濯かご・おもちゃ箱）。list: 箱（位置は毎フレーム合わせる） */
+  updateMovables(list) {
+    if (this._movSrc !== list.length || !this.movMeshes) {
+      for (const m of this.movMeshes || []) this.arenaGroup?.remove(m);
+      this._movSrc = list.length;
+      this.movMeshes = list.map((b) => {
+        const w = b.x1 - b.x0;
+        const d = b.z1 - b.z0;
+        const h = b.y1 - b.y0;
+        const g = new THREE.Group();
+        const body = new THREE.Mesh(b.k === 'basket' ? new THREE.CylinderGeometry(Math.min(w, d) / 2, Math.min(w, d) / 2.3, h, 16, 1, true) : new RoundedBoxGeometry(w, h, d, 2, 0.05), toon(b.c, { side: THREE.DoubleSide }));
+        body.castShadow = true;
+        g.add(body);
+        if (b.k === 'cardboard') {
+          const tape = new THREE.Mesh(new THREE.BoxGeometry(w + 0.02, 0.03, 0.35), toon(0xe9d8a6));
+          tape.position.y = h / 2;
+          const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.4, 3), toon(0x7f5539));
+          arrow.rotation.x = Math.PI / 2;
+          arrow.position.set(0, 0.1, d / 2 + 0.02);
+          g.add(tape, arrow);
+        } else if (b.k === 'basket') {
+          const bottom = new THREE.Mesh(new THREE.CircleGeometry(Math.min(w, d) / 2.3, 16), toon(b.c));
+          bottom.rotation.x = -Math.PI / 2;
+          bottom.position.y = -h / 2 + 0.02;
+          const cloth = new THREE.Mesh(new THREE.SphereGeometry(Math.min(w, d) / 2.6, 10, 6), toon(0xffffff));
+          cloth.scale.y = 0.4;
+          cloth.position.y = h / 2 - 0.1;
+          g.add(bottom, cloth);
+        } else {
+          const lid = new THREE.Mesh(new THREE.BoxGeometry(w + 0.08, 0.12, d + 0.08), toon(0xff006e));
+          lid.position.y = h / 2;
+          g.add(lid);
+        }
+        g.userData.h = h;
+        (this.arenaGroup || this.scene).add(g);
+        return g;
+      });
+    }
+    list.forEach((b, k) => {
+      const g = this.movMeshes[k];
+      if (!g) return;
+      g.position.set((b.x0 + b.x1) / 2, g.userData.h / 2, (b.z0 + b.z1) / 2);
+    });
   }
 
   /** アイテムの箱（出ているか）。くるくる回す */

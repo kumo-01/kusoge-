@@ -87,6 +87,19 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
       m.z = nz;
       continue;
     }
+    // 押せるもの（段ボールなど）だけにぶつかったときは、ゆっくり押して進む
+    const step = Math.max(-PLAYER.PUSH_SPEED * dt, Math.min(PLAYER.PUSH_SPEED * dt, v * dt));
+    if (pushMovables(arena, m, h, axis === 'x' ? step : 0, axis === 'z' ? step : 0)) {
+      if (axis === 'x') {
+        m.x += step;
+        m.vx = step / dt;
+      } else {
+        m.z += step;
+        m.vz = step / dt;
+      }
+      res.pushed = true;
+      continue;
+    }
     // 段差: 少しだけ上なら乗る
     let top = -1;
     for (const b of arena.boxes) if (overlapXZ(b, nx, nz, r) && m.y < b.y1 && m.y + h > b.y0) top = Math.max(top, b.y1);
@@ -141,6 +154,76 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
     m.ground = false;
   }
   return res;
+}
+
+/** 押せるもの b を (dx, dz) だけ動かせるか（壁・家具・ほかの押せるものに、めりこまないか） */
+function canShift(world, b, dx, dz) {
+  const x0 = b.x0 + dx;
+  const x1 = b.x1 + dx;
+  const z0 = b.z0 + dz;
+  const z1 = b.z1 + dz;
+  if (x0 < -ROOM.W / 2 || x1 > ROOM.W / 2 || z0 < -ROOM.D / 2 || z1 > ROOM.D / 2) return false;
+  for (const o of world.boxes) {
+    if (o === b) continue;
+    if (x1 > o.x0 && x0 < o.x1 && z1 > o.z0 && z0 < o.z1 && b.y1 > o.y0 + 1e-4 && b.y0 < o.y1 - 1e-4) return false;
+  }
+  return true;
+}
+
+/**
+ * 体 m を (dx, dz) へ動かすとき、ぶつかるのが押せるものだけなら、それを同じだけ押す。押せたら true
+ */
+export function pushMovables(world, m, h, dx, dz) {
+  const r = PLAYER.RADIUS;
+  const nx = m.x + dx;
+  const nz = m.z + dz;
+  const hits = [];
+  for (const b of world.boxes) {
+    if (overlapXZ(b, nx, nz, r) && m.y < b.y1 - 1e-4 && m.y + h > b.y0 + 1e-4) {
+      if (!b.mv) return false; // 動かないものにもぶつかる
+      hits.push(b);
+    }
+  }
+  if (!hits.length || !hits.every((b) => canShift(world, b, dx, dz))) return false;
+  for (const b of hits) {
+    b.x0 += dx;
+    b.x1 += dx;
+    b.z0 += dz;
+    b.z1 += dz;
+  }
+  return true;
+}
+
+/**
+ * 人の犬の位置（その人の端末が計算したもの）が押せるものに重なっていたら、押せるものを押し出す（ホスト）
+ */
+export function shoveMovables(world, m) {
+  const r = PLAYER.RADIUS;
+  const h = heightOf(m);
+  for (const b of world.boxes) {
+    if (!b.mv || !overlapXZ(b, m.x, m.z, r) || !(m.y < b.y1 - 1e-4 && m.y + h > b.y0 + 1e-4)) continue;
+    // いちばん浅い向きへ押し出す
+    const cand = [
+      [m.x + r - b.x0, 0],
+      [-(b.x1 - (m.x - r)), 0],
+      [0, m.z + r - b.z0],
+      [0, -(b.z1 - (m.z - r))],
+    ].sort((a, c) => Math.abs(a[0] + a[1]) - Math.abs(c[0] + c[1]));
+    for (const [dx, dz] of cand) {
+      if (canShift(world, b, dx, dz)) {
+        b.x0 += dx;
+        b.x1 += dx;
+        b.z0 += dz;
+        b.z1 += dz;
+        break;
+      }
+    }
+  }
+}
+
+/** 押せるものの、中心 (x, z) を持つ箱（位置は配信で x, z だけ送る） */
+export function movableBox(d) {
+  return { x0: d.x - d.w / 2, x1: d.x + d.w / 2, z0: d.z - d.d / 2, z1: d.z + d.d / 2, y0: 0, y1: d.h, c: d.c, k: d.k, mv: true };
 }
 
 /** 向き (yaw, pitch) の向きベクトル */

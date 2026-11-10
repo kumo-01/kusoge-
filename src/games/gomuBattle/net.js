@@ -66,6 +66,7 @@ export function packState(s) {
     bx: s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0),
     sm: s.smokes.map((x) => [x.id, r2(x.x), r2(x.y), r2(x.z), r2(x.age)]),
     gm: s.gums.map((x) => [x.id, r2(x.x), r2(x.y), r2(x.z)]),
+    mv: (s.mov || []).map((b) => [r2((b.x0 + b.x1) / 2), r2((b.z0 + b.z1) / 2)]), // 押せるものの位置
   };
 }
 
@@ -110,5 +111,6 @@ export function unpackState(o, n) {
     boxes: num(o.bx) | 0,
     smokes: Array.isArray(o.sm) ? o.sm.filter(Array.isArray).map((x) => ({ id: num(x[0]), x: num(x[1]), y: num(x[2]), z: num(x[3]), age: num(x[4]) })) : [],
     gums: Array.isArray(o.gm) ? o.gm.filter(Array.isArray).map((x) => ({ id: num(x[0]), x: num(x[1]), y: num(x[2]), z: num(x[3]) })) : [],
+    mov: Array.isArray(o.mv) ? o.mv.slice(0, 16).map((x) => (Array.isArray(x) ? [num(x[0]), num(x[1])] : [0, 0])) : [],
   };
 }

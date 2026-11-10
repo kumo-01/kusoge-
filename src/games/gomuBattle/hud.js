@@ -232,13 +232,15 @@ export class GomuTouch {
     el.addEventListener('lostpointercapture', () => end(null));
   }
 
-  /** なぞった分だけ視点を動かす（指ごとに、前の位置との差） */
+  /** なぞった分だけ視点を動かす（指ごとに、前の位置との差）。ほとんど動かさずに短く触れたら「タップ」= 1 発撃つ */
   _bindLook(el) {
     const last = new Map();
+    const start = new Map();
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       el.setPointerCapture?.(e.pointerId);
       last.set(e.pointerId, [e.clientX, e.clientY]);
+      start.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 });
     });
     el.addEventListener('pointermove', (e) => {
       const p = last.get(e.pointerId);
@@ -246,8 +248,15 @@ export class GomuTouch {
       this.lookDX += e.clientX - p[0];
       this.lookDY += e.clientY - p[1];
       last.set(e.pointerId, [e.clientX, e.clientY]);
+      const s = start.get(e.pointerId);
+      if (s) s.moved = Math.max(s.moved, Math.hypot(e.clientX - s.x, e.clientY - s.y));
     });
-    const end = (e) => last.delete(e.pointerId);
+    const end = (e) => {
+      last.delete(e.pointerId);
+      const s = start.get(e.pointerId);
+      start.delete(e.pointerId);
+      if (e.type === 'pointerup' && s && s.moved < 14 && performance.now() - s.t < 350) this.tap = true;
+    };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
   }
@@ -292,6 +301,13 @@ export class GomuTouch {
     const r = { jump: this.jump, dash: this.dash, item: this.item };
     this.jump = this.dash = this.item = false;
     return r;
+  }
+
+  /** 画面をタップした（1 回だけ取り出す） */
+  takeTap() {
+    const r = this.tap;
+    this.tap = false;
+    return !!r;
   }
 
   takeLook() {

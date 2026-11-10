@@ -27,7 +27,7 @@ export function botThink(sim, p, dt) {
   const b = (p.bot2 ||= { tgt: -1, see: 0, look: 0, goal: null, strafe: 1, strafeT: 0, chk: 0, lastX: p.x, lastZ: p.z, blocked: 0, err: [0, 0], errT: 0, jumpCd: 0, crouchT: 0, seenAt: null, prevT: {} });
   const inp = { fx: 0, fz: 0, jump: false, dash: false, crouch: false };
   if (p.dead > 0) return inp;
-  const arena = sim.arena;
+  const arena = sim.cw;
   const ex = p.x;
   const ey = p.y + eyeOf(p);
   const ez = p.z;

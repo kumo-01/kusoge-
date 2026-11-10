@@ -8,14 +8,14 @@ import { PLAYERS } from '../../screens/common.js';
 import { device } from '../../core/device.js';
 import { GomuSim } from './sim.js';
 import { ARENAS } from './arena.js';
-import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf } from './physics.js';
+import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox } from './physics.js';
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState } from './net.js';
 import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT } from './constants.js';
 import { canSee } from './arena.js';
 
-const SLOT_CSS = ['#ff4d5e', '#3d8bff', '#ff5fb0'];
+const SLOT_CSS = ['#ff4d5e', '#3d8bff', '#ff5fb0', '#22b573'];
 const BOT_DOGS = [
   { kind: 'pug', name: 'パグ', css: '#ffb703' },
   { kind: 'dachs', name: 'ダックス', css: '#8338ec' },
@@ -23,7 +23,9 @@ const BOT_DOGS = [
   { kind: 'beagle', name: 'ビーグル', css: '#fb8500' },
   { kind: 'golden', name: 'ゴールデン', css: '#8d99ae' },
 ];
-const FUR = { shiba: 0xf2a04b, corgi: 0xe8893a, poodle: 0xfff3f6 };
+const FUR = { shiba: 0xf2a04b, corgi: 0xe8893a, poodle: 0xfff3f6, pug: 0xead1a4 };
+const KEY_TURN = 2.6; // キーボードで向きを変える速さ（ラジアン/秒）
+const KEY_PITCH = 1.6;
 const LOOK = 0.0024; // マウスの感度（ラジアン / ピクセル）
 const TOUCH_LOOK = 0.006;
 const PITCH_MAX = 1.35;
@@ -144,11 +146,24 @@ class GomuGame {
     return ARENAS[Math.max(0, this.round) % ARENAS.length];
   }
 
+  /** ぶつかる物すべて（家具 + 押せるもの）。ホストは計算の正本、ゲストは自分の手元の写し */
+  get cw() {
+    if (this.isHost) return this.sim.cw;
+    return (this._gcw ||= { boxes: [...this.arena.boxes, ...this.mov] });
+  }
+
+  /** 押せるもの（ホストは計算の正本、ゲストは手元の写し） */
+  get movList() {
+    return this.isHost ? this.sim.s.mov || [] : this.mov;
+  }
+
   _setRound(r) {
     if (r === this.round) return;
     this.round = r;
     this.bands = [];
     this.buffer = [];
+    this.mov = (this.arena.movables || []).map(movableBox);
+    this._gcw = null;
     this.world?.setArena(ARENAS[r % ARENAS.length]);
   }
 
@@ -171,8 +186,14 @@ class GomuGame {
     const act = phase === 'play' && !dead;
     const p = this.pilot;
     // 移動
-    const fx = (i.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (i.isDown('KeyA', 'ArrowLeft') ? 1 : 0) + (t ? t.mx : 0);
-    const fz = (i.isDown('KeyW', 'ArrowUp') ? 1 : 0) - (i.isDown('KeyS', 'ArrowDown') ? 1 : 0) + (t ? t.mz : 0);
+    const fx = (i.isDown('KeyD') ? 1 : 0) - (i.isDown('KeyA') ? 1 : 0) + (t ? t.mx : 0);
+    const fz = (i.isDown('KeyW') ? 1 : 0) - (i.isDown('KeyS') ? 1 : 0) + (t ? t.mz : 0);
+    // キーボードだけでも遊べるように: 矢印キーで向き（← → で左右、↑ ↓ で上下）
+    if (!this.paused) {
+      const kx = (i.isDown('ArrowRight') ? 1 : 0) - (i.isDown('ArrowLeft') ? 1 : 0);
+      const ky = (i.isDown('ArrowDown') ? 1 : 0) - (i.isDown('ArrowUp') ? 1 : 0);
+      if (kx || ky) this._turn(kx * KEY_TURN * dt, ky * KEY_PITCH * dt);
+    }
     const jump = i.consume('Space') || tk.jump;
     const dash = i.consume('ShiftLeft', 'ShiftRight', 'KeyQ') || tk.dash;
     const crouch = i.isDown('KeyC') || !!t?.crouch;
@@ -180,7 +201,7 @@ class GomuGame {
     this._wantItem = false;
     const slow = !act ? 0 : rec?.stuck > 0 ? 0 : rec?.stun > 0 ? PLAYER.STUN_SPEED : 1;
     this.prevPos = { x: p.x, y: p.y, z: p.z, crouch: p.crouch };
-    const mv = stepMove(p, act ? { fx, fz, jump, dash, crouch } : { crouch: false }, dt, this.arena, slow);
+    const mv = stepMove(p, act ? { fx, fz, jump, dash, crouch } : { crouch: false }, dt, this.cw, slow);
     if (mv.dashed) this.ctx.sound.play('boost');
     p.moving = Math.hypot(p.vx, p.vz) > 0.6;
     // 輪ゴム（弾数は自分の端末で数える）
@@ -189,8 +210,15 @@ class GomuGame {
       p.reload = Math.max(0, p.reload - dt);
       if (p.reload === 0) p.ammo = GUN.AMMO;
     }
-    const firing = this.fireHeld || !!t?.fire || i.isDown('KeyF');
-    if (firing && act && !(rec?.noAmmo > 0) && p.reload <= 0 && p.fireCd <= 0 && p.ammo > 0) this._fire();
+    // 撃つ: クリック（マウス固定中）・発射ボタン・F / Enter キー、または画面のタップ（1 発。すぐ撃てないときは少しだけ待つ）
+    if (t?.takeTap()) this._tapFire = 0.3;
+    if (i.consume('Enter', 'NumpadEnter')) this._tapFire = 0.3;
+    this._tapFire = Math.max(0, (this._tapFire || 0) - dt);
+    const firing = this.fireHeld || !!t?.fire || i.isDown('KeyF') || this._tapFire > 0;
+    if (firing && act && !(rec?.noAmmo > 0) && p.reload <= 0 && p.fireCd <= 0 && p.ammo > 0) {
+      this._fire();
+      this._tapFire = 0;
+    }
     if (i.consume('KeyR') && p.ammo < GUN.AMMO && p.reload <= 0) p.reload = GUN.RELOAD; // 自分で補充
     if (wantItem && act && rec?.item) this._useItem();
     this.shakeT += dt;
@@ -286,7 +314,7 @@ class GomuGame {
     };
     for (let n = this.bands.length - 1; n >= 0; n--) {
       const b = this.bands[n];
-      if (stepBand(b, dt, this.arena, target) === 'end' || b.age > b.life + 0.5) {
+      if (stepBand(b, dt, this.cw, target) === 'end' || b.age > b.life + 0.5) {
         if (b.age < b.life) this.world?.burst(b.x, b.y, b.z, 0xffffff, 4, 1.5, 0.04);
         this.bands.splice(n, 1);
       }
@@ -488,6 +516,21 @@ class GomuGame {
     // 復活の知らせを取りこぼしたとき: 要約の位置に合わせる
     const mine = st.players[this.me];
     if (mine && mine.g !== this.pilot.g && !(mine.dead > 0)) this._placePilot(mine.x, mine.y, mine.z, mine.yaw, mine.g);
+    // 押せるもの: ホストの位置に合わせる。ただし自分が押している（すぐ近くの）ものは、手元で押した位置のまま
+    if (st.round === this.round && this.mov) {
+      st.mov.forEach(([x, z], k) => {
+        const b = this.mov[k];
+        if (!b) return;
+        const cx = (b.x0 + b.x1) / 2;
+        const cz = (b.z0 + b.z1) / 2;
+        const near = Math.hypot(this.pilot.x - cx, this.pilot.z - cz) < Math.max(b.x1 - b.x0, b.z1 - b.z0) / 2 + 1.2;
+        if (near && Math.hypot(x - cx, z - cz) < 1.5) return;
+        b.x0 += x - cx;
+        b.x1 += x - cx;
+        b.z0 += z - cz;
+        b.z1 += z - cz;
+      });
+    }
   }
 
   getSnapshot() {
@@ -588,6 +631,7 @@ class GomuGame {
       w.updateBands(bands, dt);
       const boxes = this.isHost ? this.sim.s.boxes.map((x) => x <= 0) : this.arena.items.map((_, k) => !!((this.last?.boxes ?? 0) & (1 << k)));
       w.updateItemBoxes(boxes, dt);
+      w.updateMovables(this.movList);
       // 煙・ガム（知らせを取りこぼしても、要約に合わせる）
       const smokes = this.isHost ? this.sim.s.smokes : this.last?.smokes || [];
       for (const s of smokes) if (!w.smokes.has(s.id)) w.addSmoke(s.id, s.x, s.y, s.z);
@@ -606,7 +650,7 @@ class GomuGame {
       this._frame++;
       const names = views.map((q, i) => {
         if (i === this.me || q.dead > 0) return null;
-        if (this._frame % 8 === i % 8) this._los[i] = canSee(this.arena, cx, cy + ey, cz, q.x, q.y + heightOf(q) * 0.8, q.z) && Math.hypot(q.x - cx, q.z - cz) < 28;
+        if (this._frame % 8 === i % 8) this._los[i] = canSee(this.cw, cx, cy + ey, cz, q.x, q.y + heightOf(q) * 0.8, q.z) && Math.hypot(q.x - cx, q.z - cz) < 45;
         if (!this._los[i]) return null;
         const s = w.project(q.x, q.y + heightOf(q) + 0.35, q.z);
         return s ? { x: s.x, y: s.y, text: `${this.idents[i].name}${q.hp != null ? ' ' + '♥'.repeat(Math.max(0, q.hp)) : ''}`, css: this.idents[i].css } : null;
