@@ -229,6 +229,9 @@ p {
 .role-badge.pink {
   background: #e0679f;
 }
+.role-badge.green {
+  background: #22b573;
+}
 .status-group {
   font-size: 0.85rem;
   display: inline-flex;
@@ -507,13 +510,17 @@ p {
   border-color: #f6c3dc;
   background: linear-gradient(180deg, #fff 60%, #fff0f8);
 }
+.player-card.player-green {
+  border-color: #b7e4c7;
+  background: linear-gradient(180deg, #fff 60%, #effaf3);
+}
 .player-card.is-empty {
   opacity: 0.6;
   filter: grayscale(0.4);
 }
-/* 3 人分のカードは少し小さくして横に並べる */
+/* 4 人分のカードは少し小さくして横に並べる（せまい画面では 2 × 2） */
 .players-row.three .player-card {
-  width: 190px;
+  width: 172px;
 }
 .players-row.compact.three {
   flex-wrap: nowrap;
@@ -786,13 +793,15 @@ kbd {
 .result-row {
   display: flex;
   justify-content: center;
-  gap: 22px;
+  gap: 16px;
   flex-wrap: wrap;
   margin: 18px 0;
 }
 .result-player {
   position: relative;
-  width: 260px;
+  /* 4 人まで横に並ぶ（せまい画面では折り返す） */
+  width: min(260px, calc((100% - 48px) / 4));
+  min-width: 190px;
   background: #fff;
   border-radius: var(--radius);
   padding: 20px 14px;
@@ -811,6 +820,9 @@ kbd {
 }
 .result-player.player-pink {
   border-color: #f6c3dc;
+}
+.result-player.player-green {
+  border-color: #b7e4c7;
 }
 .result-player.is-winner {
   transform: scale(1.05);

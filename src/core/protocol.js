@@ -4,13 +4,13 @@
 // PeerJS の DataConnection は serialization: 'raw' で使い、文字列の長さを
 // パース前に確認してから JSON.parse する（巨大データでクラッシュさせないため）。
 
-export const PROTOCOL_VERSION = 8; // 8: 位置の定期配信・操作をバイナリに（サーバー計算と P2P） / 7: 7: 車ごとの今の操作（in）を配信に入れた / 6: 6: 配信の形を小さく（車は変わった項目だけ）/ 5: 3 人対戦（部屋の状態・結果の形が変わった） / 4: 飼い主・豪雨・犬小屋のアイテム化で状態の形が変わった（3: ドッグフード・ボス犬・連戦）（古いページとは遊べないように）
+export const PROTOCOL_VERSION = 9; // 9: 4 人対戦（席が 4 つ） / 8: 位置の定期配信・操作をバイナリに（サーバー計算と P2P） / 7: 7: 車ごとの今の操作（in）を配信に入れた / 6: 6: 配信の形を小さく（車は変わった項目だけ）/ 5: 3 人対戦（部屋の状態・結果の形が変わった） / 4: 飼い主・豪雨・犬小屋のアイテム化で状態の形が変わった（3: ドッグフード・ボス犬・連戦）（古いページとは遊べないように）
 
 /** 1 メッセージの最大文字数 */
 export const MAX_MESSAGE_CHARS = 60000;
 
-/** 部屋の人数（席 0 = ホスト, 1・2 = ゲスト） */
-export const MAX_PLAYERS = 3;
+/** 部屋の人数（席 0 = ホスト, 1〜3 = ゲスト） */
+export const MAX_PLAYERS = 4; // ホスト + ゲスト 3 人
 
 export const MSG = Object.freeze({
   // 接続・入室
@@ -43,7 +43,7 @@ export const MSG = Object.freeze({
 export const REJECT_REASONS = Object.freeze({
   version: 'アプリのバージョンが異なります。ページを再読み込みしてください。',
   bad_key: '招待URLが正しくありません。ホストに新しいURLをもらってください。',
-  room_full: 'この部屋はすでに3人そろっています。',
+  room_full: 'この部屋はすでに4人そろっています。',
   bad_request: '参加リクエストが不正です。',
 });
 
@@ -84,7 +84,7 @@ const SCHEMAS = {
   presence: { hidden: bool },
   // ---- サーバー計算（試合ごとの Cloudflare Durable Object）との通信 ----
   // ホスト → サーバー（部屋の管理者だけが送れる）
-  e_start: { matchId: id, gen: int(0, 1e9), options: obj, players: arr(3, int(0, 2)), tickets: arr(3, str(64)) },
+  e_start: { matchId: id, gen: int(0, 1e9), options: obj, players: arr(4, int(0, 3)), tickets: arr(4, str(64)) },
   e_sync: { gen: int(0, 1e9) }, // 状態を揃える: 計算を止めて、全員に完全な状態を送る
   e_pause: {},
   e_resume: { gen: int(0, 1e9), delayMs: num(0, 10000) },

@@ -20,7 +20,7 @@ export function mount(el, app) {
         h('div.hero-dog.bounce-a', { html: dogAvatar('shiba', 110) }),
         h('div.hero-vs', null, 'VS'),
         h('div.hero-dog.bounce-b', { html: dogAvatar('corgi', 110) })),
-      h('h1.logo', null, h('span.logo-sub', null, '2〜3人で遊ぶミニゲーム集'), 'わんわんパーティー'),
+      h('h1.logo', null, h('span.logo-sub', null, '2〜4人で遊ぶミニゲーム集'), 'わんわんパーティー'),
       h('p.lead', null, '招待URLを送るだけで、友だちとオンライン対戦！'),
       h('p.app-version', null, typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'),
     );
@@ -67,7 +67,7 @@ export function mount(el, app) {
         null,
         h('h2', null, '🎉 部屋ができました！'),
         h('p.small.muted', null, room.net?.transport === 'relay' ? '通信モード: ☁ サーバー' : '通信モード: ⚡ P2P（直接）'),
-        h('p', null, 'この招待URLを相手に送ってください。最大3人（ホスト + ゲスト2人）で遊べます。'),
+        h('p', null, 'この招待URLを相手に送ってください。最大4人（ホスト + ゲスト3人）で遊べます。'),
         h('div.invite-row', null,
           input,
           h('button.btn.btn-secondary', { onclick: () => app.copyText(url) }, '📋 コピー')),
@@ -75,7 +75,7 @@ export function mount(el, app) {
         signalingNote(room),
         h('details.hint', null,
           h('summary', null, '1台のPCでテストするには？'),
-          h('p', null, '別のブラウザ、またはシークレットウィンドウでこのURLを開くと、2人目として参加できます（3人目も同じ方法です）。同じブラウザの別タブでも参加できます。')),
+          h('p', null, '別のブラウザ、またはシークレットウィンドウでこのURLを開くと、2人目として参加できます（3人目・4人目も同じ方法です）。同じブラウザの別タブでも参加できます。')),
         h('button.btn.btn-ghost', { onclick: () => app.disband() }, '部屋を閉じる'),
       ),
     );

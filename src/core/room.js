@@ -2,7 +2,7 @@
 //
 // room state（ゲストへ room_state で配信）:
 //   screen: 'lobby'（ゲスト待ち） | 'home' | 'select' | 'ready' | 'game' | 'result'
-//   players: 席ごとの [{ link, ready }]（席 0 = ホスト, 1・2 = ゲスト）。
+//   players: 席ごとの [{ link, ready }]（席 0 = ホスト, 1〜3 = ゲスト）。
 //            link: 'none'（空き） | 'connected' | 'waiting'（復帰待ち） | 'syncing'（状態復元中）
 //   gameId, match: { matchId, gen, status: 'loading'|'running'|'paused'|'resuming', reason, synced, started, players（参加する席）, opts }
 //   series: 連戦の途中経過 { total, round, scores（席ごと）, final, history } または null（1 レースだけのとき）
@@ -264,7 +264,7 @@ export class HostRoom extends Emitter {
   /** サーバー計算にするか。中継（Cloudflare）でつながっていて、サーバー計算が無効でなければ使う */
   _serverPlan(def) {
     if (!def?.serverSim || this.net.transport !== 'relay' || !relayBase() || import.meta.env?.VITE_SERVER_SIM === '0') return null;
-    return { base: relayBase(), gid: randomHex(12), ak: randomToken(18), tickets: ['', randomToken(18), randomToken(18)] };
+    return { base: relayBase(), gid: randomHex(12), ak: randomToken(18), tickets: ['', randomToken(18), randomToken(18), randomToken(18)] };
   }
 
   /** サーバー計算: サーバーから届いた完全な状態をホスト自身が読み込む */
@@ -668,7 +668,7 @@ export class GuestRoom extends Emitter {
   constructor({ invite, token, sound, music, input, layer }) {
     super();
     this.role = 'guest';
-    this.slot = null; // 部屋の席（join_accepted で決まる。1・2）
+    this.slot = null; // 部屋の席（join_accepted で決まる。1〜3）
     this.sound = sound;
     this.state = null; // ホストから受け取った部屋の状態
     this.linkState = 'connecting'; // 'connecting' | 'connected' | 'reconnecting' | 'failed'

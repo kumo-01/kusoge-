@@ -78,12 +78,12 @@ export class ScreenRouter {
     let status;
     if (isHost) {
       // ゲストの席ごとの状態（空いている席は「未参加」）
-      status = h('span.status-group', null, ...[1, 2].flatMap((slot) => [`${PLAYERS[slot].role}: `, statusPill(room.state.players[slot].link, room.state.players[slot].link === 'connected' ? (room.net.rttOf(slot) != null ? `${Math.round(room.net.rttOf(slot))}ms` : '') : '')]));
+      status = h('span.status-group', null, ...[1, 2, 3].flatMap((slot) => [`${PLAYERS[slot].role}: `, statusPill(room.state.players[slot].link, room.state.players[slot].link === 'connected' ? (room.net.rttOf(slot) != null ? `${Math.round(room.net.rttOf(slot))}ms` : '') : '')]));
     } else {
       status = h('span.status-group', null, 'ホスト: ', statusPill(room.linkState === 'connected' ? 'connected' : room.linkState, room.linkState === 'connected' ? rtt : ''));
     }
     const mine = PLAYERS[room.slot ?? 1] || PLAYERS[1];
-    const waiting = isHost ? [1, 2].filter((slot) => room.state.players[slot].link === 'waiting') : [];
+    const waiting = isHost ? [1, 2, 3].filter((slot) => room.state.players[slot].link === 'waiting') : [];
 
     this.header.replaceChildren(
       h('div.header-left', null,

@@ -34,7 +34,7 @@ export class GameManager extends Emitter {
   constructor({ role, slot = null, net, input, sound, music, layer }) {
     super();
     this.role = role;
-    this.slot = slot; // 部屋の席（ホスト 0 / ゲスト 1・2）
+    this.slot = slot; // 部屋の席（ホスト 0 / ゲスト 1〜3）
     this.net = net;
     this.input = input;
     this.sound = sound;

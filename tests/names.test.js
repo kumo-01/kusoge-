@@ -11,8 +11,8 @@ test('プレイヤー名: 前後の空白・制御文字を除き、10 文字ま
   assert.equal(cleanName('🐶🐶🐶🐶🐶🐶🐶🐶🐶🐶🐶🐶'), '🐶'.repeat(10), '絵文字は 1 文字として数える');
   assert.equal(cleanName(12), '');
   assert.equal(cleanName(null), '');
-  const room = sanitizeRoomState({ rev: 1, screen: 'ready', players: [{ link: 'connected', ready: false, name: ' たろう ' }, { link: 'connected', ready: true, name: 5 }, { link: 'none', ready: false }], options: {} });
-  assert.deepEqual(room.players.map((p) => p.name), ['たろう', '', '']);
+  const room = sanitizeRoomState({ rev: 1, screen: 'ready', players: [{ link: 'connected', ready: false, name: ' たろう ' }, { link: 'connected', ready: true, name: 5 }, { link: 'none', ready: false }, { link: 'none', ready: false }], options: {} });
+  assert.deepEqual(room.players.map((p) => p.name), ['たろう', '', '', '']);
 });
 
 test('吹き出し: 画面の中なら頭の上、外なら画面のはし（はみ出さない）。カメラの後ろは反対側のはし', () => {

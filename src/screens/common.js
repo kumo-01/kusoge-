@@ -1,16 +1,18 @@
 // 画面共通のパーツ（犬のアバター、プレイヤーカードなど）
 import { h } from '../core/util.js';
 
-/** 席ごとの見た目（席 0 = ホスト, 1・2 = ゲスト）。ゲーム中の車の見た目・名前と同じ */
+/** 席ごとの見た目（席 0 = ホスト, 1〜3 = ゲスト）。ゲーム中の車の見た目・名前と同じ */
 export const PLAYERS = [
   { name: '柴犬', role: 'ホスト', kind: 'shiba', color: 'red', colorName: '赤', icon: '🔴' },
   { name: 'コーギー', role: 'ゲスト1', kind: 'corgi', color: 'blue', colorName: '青', icon: '🔵' },
   { name: 'プードル', role: 'ゲスト2', kind: 'poodle', color: 'pink', colorName: 'ピンク', icon: '🩷' },
+  { name: 'パグ', role: 'ゲスト3', kind: 'pug', color: 'green', colorName: '緑', icon: '🟢' },
 ];
 
 /** 犬の顔の SVG（外部画像なし） */
 export function dogAvatar(kind, size = 96) {
   if (kind === 'poodle') return poodleAvatar(size);
+  if (kind === 'pug') return pugAvatar(size);
   const shiba = kind === 'shiba';
   const fur = shiba ? '#f2a04b' : '#e8893a';
   const furDark = shiba ? '#d9822e' : '#c96d22';
@@ -41,6 +43,28 @@ export function dogAvatar(kind, size = 96) {
     ${tongue}
     <ellipse cx="31" cy="77" rx="6" ry="3.6" fill="#ff9aa8" opacity=".75"/>
     <ellipse cx="89" cy="77" rx="6" ry="3.6" fill="#ff9aa8" opacity=".75"/>
+  </svg>`;
+}
+
+/** パグ（クリーム色の顔に黒いマズル・たれ耳） */
+function pugAvatar(size) {
+  const fur = '#ead1a4';
+  const furDark = '#c9a874';
+  const black = '#3b2f2a';
+  return `<svg viewBox="0 0 120 120" width="${size}" height="${size}" aria-hidden="true">
+    <path d="M14 34 Q10 56 30 52 L38 34 Z" fill="${black}"/>
+    <path d="M106 34 Q110 56 90 52 L82 34 Z" fill="${black}"/>
+    <ellipse cx="60" cy="64" rx="42" ry="38" fill="${fur}" stroke="${furDark}" stroke-width="2"/>
+    <path d="M44 40 Q60 34 76 40" stroke="${furDark}" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+    <path d="M48 46 Q60 41 72 46" stroke="${furDark}" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <ellipse cx="60" cy="80" rx="24" ry="18" fill="${black}"/>
+    <ellipse cx="42" cy="60" rx="7" ry="7.5" fill="#2b2118"/><circle cx="44.5" cy="57.5" r="2.4" fill="#fff"/>
+    <ellipse cx="78" cy="60" rx="7" ry="7.5" fill="#2b2118"/><circle cx="80.5" cy="57.5" r="2.4" fill="#fff"/>
+    <ellipse cx="60" cy="74" rx="8" ry="5.5" fill="#1a1411"/><circle cx="57.6" cy="72.4" r="1.6" fill="#fff"/>
+    <path d="M60 79 Q60 86 53 86 M60 79 Q60 86 67 86" stroke="${fur}" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    <path d="M56 90 Q60 101 64 90 Z" fill="#ff7a93"/>
+    <ellipse cx="29" cy="76" rx="6" ry="3.6" fill="#ff9aa8" opacity=".75"/>
+    <ellipse cx="91" cy="76" rx="6" ry="3.6" fill="#ff9aa8" opacity=".75"/>
   </svg>`;
 }
 
@@ -80,7 +104,7 @@ export function statusPill(state, extra) {
   return h(`span.pill.pill-${tone}`, null, h('span.dot'), label, extra ? ` ${extra}` : '');
 }
 
-/** プレイヤーカード。slot: 席（0 = ホスト, 1・2 = ゲスト）。colorWord: 色のあとにつける言葉（カートのゲームなら「のカート」） */
+/** プレイヤーカード。slot: 席（0 = ホスト, 1〜3 = ゲスト）。colorWord: 色のあとにつける言葉（カートのゲームなら「のカート」） */
 export function playerCard(slot, { me = false, status = 'connected', ready = null, extra = null, colorWord = '', nick = '' } = {}) {
   const p = PLAYERS[slot];
   const empty = status === 'none';

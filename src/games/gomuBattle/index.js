@@ -17,7 +17,7 @@ import { canSee } from './arena.js';
 
 const SLOT_CSS = ['#ff4d5e', '#3d8bff', '#ff5fb0', '#22b573'];
 const BOT_DOGS = [
-  { kind: 'pug', name: 'パグ', css: '#ffb703' },
+  { kind: 'chihuahua', name: 'チワワ', css: '#ffb703' },
   { kind: 'dachs', name: 'ダックス', css: '#8338ec' },
   { kind: 'husky', name: 'ハスキー', css: '#06d6a0' },
   { kind: 'beagle', name: 'ビーグル', css: '#fb8500' },

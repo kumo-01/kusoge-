@@ -27,7 +27,7 @@ export class RaceSim {
     this.seed = options.seed; // テスト用: 乱数の種（なければ毎回ちがうレース）
     this.boxPos = track.itemBoxes();
     this.events = [];
-    // 人間の席（部屋の 0 = ホスト, 1・2 = ゲスト）。車の番号 i の人間は slots[i] の席
+    // 人間の席（部屋の 0 = ホスト, 1〜3 = ゲスト）。車の番号 i の人間は slots[i] の席
     const slots = Array.isArray(options.players) ? options.players.filter((v, i, a) => Number.isInteger(v) && v >= 0 && v < RACE.MAX_HUMANS && a.indexOf(v) === i).slice(0, RACE.MAX_HUMANS) : [];
     this.slots = slots.length >= 2 ? slots : [0, 1];
     this.realHumans = slots.length === 1 ? 1 : this.slots.length; // 実際にいる人の数（ひとりモードでは 1。2 台目は誰も操作しない）
@@ -405,9 +405,9 @@ export class RaceSim {
     }
   }
 
-  /** レースを終わらせるのに必要な、ゴールした人間の数（3 人のときは 2 人） */
+  /** レースを終わらせるのに必要な、ゴールした人間の数（3 人のときは 2 人、4 人のときは 3 人。最下位が決まったら終わり） */
   get finishNeed() {
-    return this.realHumans >= 3 ? 2 : 1;
+    return this.realHumans >= 3 ? this.realHumans - 1 : 1;
   }
 
   humansFinished() {
@@ -533,7 +533,7 @@ export class RaceSim {
 
   /**
    * 結果画面用の成績。players / stats / score の values は、人間の順（車の番号の順）。
-   * players[i].slot はその人の席（部屋の 0 = ホスト, 1・2 = ゲスト）
+   * players[i].slot はその人の席（部屋の 0 = ホスト, 1〜3 = ゲスト）
    */
   buildResult() {
     const s = this.s;
@@ -683,7 +683,8 @@ export function sanitizeSnapshot(r, prev, boxCount) {
     bananas: [],
     nextId: int(r.nextId, 1),
     rng: int(r.rng, 1, 0, 4294967295) >>> 0,
-    acks: Array.from({ length: Math.min(RACE.MAX_HUMANS, r.karts.length) }, (_, i) => int(Array.isArray(r.acks) ? r.acks[i] : 0, 0)),
+    // 人ごとの「使った操作の番号」（人の数だけ。届いた数に合わせる）
+    acks: Array.from({ length: Math.min(RACE.MAX_HUMANS, r.karts.length, Array.isArray(r.acks) && r.acks.length ? r.acks.length : RACE.MAX_HUMANS) }, (_, i) => int(Array.isArray(r.acks) ? r.acks[i] : 0, 0)),
     tc: Array.isArray(r.tc) ? r.tc.slice(0, 2).map((v) => num(v, 0, 0, 1e5)) : prev.tc || [],
     rain: num(r.rain, 0, 0, RAIN.DURATION),
     rk: Number.isInteger(r.rk) && r.rk >= 0 && r.rk < r.karts.length ? r.rk : -1,

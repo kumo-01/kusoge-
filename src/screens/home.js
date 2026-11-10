@@ -25,7 +25,7 @@ export function mount(el, app) {
           isHost
             ? [
                 h('button.btn.btn-primary.btn-xl', { onclick: () => room.goSelect() }, '🎮 ゲームを選ぶ'),
-                !sum.enough || !sum.allConnected ? h('p.small.warn-text', null, '相手がいなくてもゲームは選べますが、対戦開始には2人以上そろう必要があります（最大3人）。') : null,
+                !sum.enough || !sum.allConnected ? h('p.small.warn-text', null, '相手がいなくてもゲームは選べますが、対戦開始には2人以上そろう必要があります（最大4人）。') : null,
                 h('p.small.muted', null, '招待URLは2人まで使えます（ヘッダーの「招待URL」から確認できます）。'),
               ]
             : h('div.waiting', null, h('span.paw-spinner', null, '🐾'), 'ホストがゲームを選ぶのを待っています…'),

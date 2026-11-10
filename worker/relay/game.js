@@ -4,8 +4,8 @@
 // この Durable Object は試合の間だけ、ホストの「開始」の指示で作られて、計算と配信だけをする。
 // 試合の名前（gid）はホストが決めた推測できない値で、参加者にだけ伝わる。
 //
-// つなぎ方: wss://<Worker>/game?gid=<試合ID>&slot=<席 0〜2>&key=<鍵>
-//   席 0（ホスト）の鍵 = 管理用の鍵（最初につないだホストが決める）。席 1・2 の鍵 = ホストが開始のときに渡したチケット。
+// つなぎ方: wss://<Worker>/game?gid=<試合ID>&slot=<席 0〜3>&key=<鍵>
+//   席 0（ホスト）の鍵 = 管理用の鍵（最初につないだホストが決める）。席 1〜3 の鍵 = ホストが開始のときに渡したチケット。
 // メッセージは src/core/protocol.js の e_*（JSON の文字列）と、位置の定期配信・操作（バイナリの枠。src/core/binframe.js）。
 
 import { DogKartEngine } from '../../src/games/dogKart/engine.js';
@@ -20,6 +20,7 @@ const TICK_MS = 16;
 const MAX_MATCH_MS = 20 * 60 * 1000; // 1 試合の上限（止め忘れの保険）
 const IDLE_STOP_MS = 30 * 1000; // 誰もつながっていない時間がこれを超えたら計算をやめる
 const KEY_RE = /^[A-Za-z0-9_-]{8,64}$/;
+const MAX_SLOT = 3; // 席は 0（ホスト）〜 3（4 人まで）
 
 export class Game {
   constructor(state, env) {
@@ -59,7 +60,7 @@ export class Game {
       }
       return new Response(null, { status: 101, webSocket: client });
     };
-    if (!Number.isInteger(slot) || slot < 0 || slot > 2 || !KEY_RE.test(key)) return refuse('bad-request');
+    if (!Number.isInteger(slot) || slot < 0 || slot > MAX_SLOT || !KEY_RE.test(key)) return refuse('bad-request');
     if (slot === 0) {
       // ホスト（管理者）: 最初につないだ鍵がこの試合の管理用の鍵になる
       if (!this.adminKey) this.adminKey = key;
@@ -247,7 +248,7 @@ export class Game {
     this.matchId = msg.matchId;
     this.gen = msg.gen;
     this.players = players;
-    this.tickets = [null, null, null];
+    this.tickets = [null, null, null, null];
     for (const slot of players) if (slot > 0 && KEY_RE.test(msg.tickets[slot] || '')) this.tickets[slot] = msg.tickets[slot];
     this.seq = 0;
     this._startedAt = Date.now();

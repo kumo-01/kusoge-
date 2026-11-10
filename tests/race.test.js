@@ -259,10 +259,10 @@ test('プロトコル: 方向・形式・サイズが不正なメッセージは
   assert.equal(decode(JSON.stringify({ type: 'player_input', matchId: 'a', gen: 1, seq: 1, inputs: [999] }), FROM_GUEST), null);
   assert.ok(decode(JSON.stringify({ type: 'player_input', matchId: 'a', gen: 1, seq: 1, inputs: [1, 5] }), FROM_GUEST));
   const pl = (links) => links.map((link, i) => ({ link, ready: i === 0 }));
-  assert.equal(sanitizeRoomState({ screen: 'hack', players: pl(['connected', 'none', 'none']), rev: 1 }), null);
+  assert.equal(sanitizeRoomState({ screen: 'hack', players: pl(['connected', 'none', 'none', 'none']), rev: 1 }), null);
   assert.equal(sanitizeRoomState({ screen: 'home', players: pl(['connected', 'none']), rev: 1 }), null, '席の数が違う');
-  assert.equal(sanitizeRoomState({ screen: 'home', players: pl(['connected', 'bad', 'none']), rev: 1 }), null);
-  const ok = sanitizeRoomState({ screen: 'home', players: pl(['waiting', 'connected', 'syncing']), rev: 1 });
+  assert.equal(sanitizeRoomState({ screen: 'home', players: pl(['connected', 'bad', 'none', 'none']), rev: 1 }), null);
+  const ok = sanitizeRoomState({ screen: 'home', players: pl(['waiting', 'connected', 'syncing', 'none']), rev: 1 });
   assert.ok(ok);
   assert.equal(ok.players[0].link, 'connected', 'host seat is always connected');
   assert.equal(ok.players[2].link, 'syncing');
@@ -1045,12 +1045,12 @@ test('コース設定: ランダムは使っていないコースから選ぶ。
 });
 
 test('部屋の状態: 連戦の途中経過とレースごとの設定を検証して受け取る', () => {
-  const base = { rev: 3, screen: 'result', players: [0, 1, 2].map((i) => ({ link: i < 2 ? 'connected' : 'none', ready: false })), options: { course: 99, races: 3 }, match: null, result: null };
+  const base = { rev: 3, screen: 'result', players: [0, 1, 2, 3].map((i) => ({ link: i < 2 ? 'connected' : 'none', ready: false })), options: { course: 99, races: 3 }, match: null, result: null };
   const ok = sanitizeRoomState({ ...base, series: { total: 3, round: 2, scores: [31, 22, 5], final: false, history: [{ name: 'A', points: [15, 12, 0] }, { name: 'B', points: [16, 10, 5] }] } });
   assert.equal(ok.series.round, 2);
   assert.equal(ok.series.history.length, 2);
-  assert.deepEqual(ok.series.scores, [31, 22, 5]);
-  assert.deepEqual(ok.series.history[1].points, [16, 10, 5]);
+  assert.deepEqual(ok.series.scores, [31, 22, 5, 0], '4 人分（いない席は 0）');
+  assert.deepEqual(ok.series.history[1].points, [16, 10, 5, 0]);
   assert.equal(sanitizeRoomState({ ...base, series: { total: 99, round: 2 } }).series, null, '範囲外は捨てる');
   assert.equal(sanitizeRoomState({ ...base, series: 'x' }).series, null);
   const m = sanitizeRoomState({ ...base, screen: 'game', match: { matchId: 'abc', gen: 1, status: 'running', synced: true, started: true, players: [0, 2, 2, 9], opts: { course: 7, round: 2, bad: 'x'.repeat(40), npcs: 3 } } });

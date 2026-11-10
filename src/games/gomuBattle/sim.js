@@ -22,7 +22,7 @@ export const PHASES = ['intro', 'play', 'end', 'done'];
 export class GomuSim {
   /** @param {{ humans: number, bots?: number, seed?: number }} o */
   constructor(o = {}) {
-    this.humans = Math.max(1, Math.min(3, o.humans | 0 || 1));
+    this.humans = Math.max(1, Math.min(4, o.humans | 0 || 1));
     this.bots = Math.max(0, Math.min(BOT.MAX, o.bots | 0));
     this.events = [];
     this.s = {

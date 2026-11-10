@@ -97,7 +97,7 @@ export function mount(el, app) {
               { onclick: () => { app.sound.play('ready'); room.setReady(!myReady); } },
               s.solo ? (myReady ? 'やめる' : '▶ スタート！') : myReady ? '準備完了を取り消す' : '✋ 準備完了！',
             ),
-            !sum.enough ? h('p.small.warn-text', null, '相手の参加を待っています…（2人以上そろうと開始できます。最大3人）') : !sum.allConnected ? h('p.small.warn-text', null, '接続が切れている人を待っています…') : null,
+            !sum.enough ? h('p.small.warn-text', null, '相手の参加を待っています…（2人以上そろうと開始できます。最大4人）') : !sum.allConnected ? h('p.small.warn-text', null, '接続が切れている人を待っています…') : null,
             isHost ? h('button.btn.btn-ghost', { onclick: () => room.goSelect() }, '← ゲーム選択へ戻る') : null,
             countdownEl,
           ),

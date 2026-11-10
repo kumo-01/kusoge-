@@ -21,7 +21,7 @@ import { h } from '../core/util.js';
 import { PLAYERS } from '../screens/common.js';
 
 /** 席ごとの色（赤・青・ピンク。部屋の表示と同じ） */
-export const SLOT_COLORS = ['#ff4d5e', '#3d8bff', '#ff5fb0'];
+export const SLOT_COLORS = ['#ff4d5e', '#3d8bff', '#ff5fb0', '#22b573'];
 
 const nowMs = () => performance.now();
 
@@ -31,8 +31,8 @@ export class HostedGame {
     this.isHost = ctx.isHost;
     this.me = ctx.playerIndex; // 自分の番号（players の順。ホストは 0）
     // 番号 → 部屋の席。ひとりモードの CPU は、空いている席を使って人のあとに並べる
-    const cpu = Math.max(0, Math.min(2, ctx.options?.cpu | 0));
-    const free = [0, 1, 2].filter((x) => !ctx.players.includes(x));
+    const cpu = Math.max(0, Math.min(3, ctx.options?.cpu | 0));
+    const free = [0, 1, 2, 3].filter((x) => !ctx.players.includes(x));
     this.slots = [...ctx.players, ...free.slice(0, cpu)];
     this.humans = ctx.players.length; // 人の数（CPU は番号 humans 以降）
     this.cpuLevel = [1, 2, 3].includes(ctx.options?.cpuLevel) ? ctx.options.cpuLevel : 2;

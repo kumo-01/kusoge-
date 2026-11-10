@@ -726,7 +726,7 @@ export class GuestNetwork extends Emitter {
   _onJoined(link, msg) {
     this.link = link;
     this.token = msg.token;
-    this.slot = msg.slot; // 部屋の席（1・2）
+    this.slot = msg.slot; // 部屋の席（1〜3）
     this.everJoined = true;
     this.retryCount = 0;
     this.lastError = null;
