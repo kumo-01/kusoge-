@@ -8,10 +8,10 @@ import { PLAYERS } from '../../screens/common.js';
 import { device } from '../../core/device.js';
 import { GomuSim } from './sim.js';
 import { ARENAS } from './arena.js';
-import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox } from './physics.js';
+import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder } from './physics.js';
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
-import { packPilot, unpackPilot, packState, unpackState } from './net.js';
+import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
 import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT } from './constants.js';
 import { canSee } from './arena.js';
 
@@ -58,6 +58,7 @@ class GomuGame {
     this.evSeq = 0;
     this.bands = []; // ゲスト: 見せる輪ゴム
     this.cid = 0;
+    this._judged = new Set(); // 自分の画面で当てた輪ゴム（ゲスト）
     this.buffer = []; // ゲスト: 受け取った要約（ほかの犬を滑らかに動かすため）
     this.last = null;
     this.round = -1;
@@ -87,6 +88,8 @@ class GomuGame {
     this._bindMouse();
     if (this.isHost) {
       this.sim = new GomuSim({ humans: this.humans, bots: this.nBots });
+      // ゲストが撃った輪ゴムの当たりは、撃った人の画面で決める（その人が見ているとおりに当たる。遅れがない）
+      this.sim.clientJudge = (i) => i > 0 && i < this.humans && i !== this.me;
       this._hostEvents(this.sim.drainEvents());
     }
   }
@@ -232,10 +235,8 @@ class GomuGame {
         this.ctx.finish(this.result());
       }
     } else {
-      if (++this._sendN >= 2) {
-        this._sendN = 0;
-        this.ctx.sendInput(++this._seq, packPilot(p));
-      }
+      // 自分の位置は毎 tick（毎秒 60 回）送る（小さいので。ホストの計算・ほかの人の画面への遅れを減らす）
+      this.ctx.sendInput(++this._seq, packPilot(p));
       this._stepGuestBands(dt);
     }
   }
@@ -279,10 +280,10 @@ class GomuGame {
     const pitch = Math.asin(d[1]);
     const spec = bandSpec(kind);
     const offs = kind === ITEM.TRIPLE ? [-ITEMS.TRIPLE_SPREAD, 0, ITEMS.TRIPLE_SPREAD] : [0];
-    for (const off of offs) {
+    offs.forEach((off, idx) => {
       const v = aimDir(yaw + off, pitch);
-      this.bands.push({ id: 0, cid: off === 0 ? cid : -cid, o: this.me, kind, x: o[0] + v[0] * GUN.MUZZLE, y: o[1] + v[1] * GUN.MUZZLE - 0.08, z: o[2] + v[2] * GUN.MUZZLE, vx: v[0] * spec.speed, vy: v[1] * spec.speed, vz: v[2] * spec.speed, r: spec.r, bounce: spec.bounce, life: spec.life, age: 0, mine: performance.now() });
-    }
+      this.bands.push({ id: 0, cid: cid * 4 + idx, o: this.me, kind, x: o[0] + v[0] * GUN.MUZZLE, y: o[1] + v[1] * GUN.MUZZLE - 0.08, z: o[2] + v[2] * GUN.MUZZLE, vx: v[0] * spec.speed, vy: v[1] * spec.speed, vz: v[2] * spec.speed, r: spec.r, bounce: spec.bounce, life: spec.life, age: 0, mine: performance.now() });
+    });
   }
 
   _useItem() {
@@ -291,9 +292,13 @@ class GomuGame {
     else this.ctx.sendGameMessage({ t: 'u', o, d });
   }
 
-  /** ゲスト: 見せる輪ゴムを進める（当たって消えるのはホストの知らせで。届かなければ時間で消す） */
+  /**
+   * ゲスト: 見せる輪ゴムを進める。自分が撃った輪ゴムは、自分の画面に見えている相手に当たったら、その場で当たり（ホストへ知らせる）。
+   * ほかの人の輪ゴムが消えるのはホストの知らせで（届かなければ時間で消す）
+   */
   _stepGuestBands(dt) {
     const st = this.last;
+    const views = this.bands.some((b) => b.o === this.me) ? this._remoteViews() : null;
     const target = (b) => {
       if (b.kind !== ITEM.HOMING || !st) return null;
       let best = null;
@@ -314,11 +319,43 @@ class GomuGame {
     };
     for (let n = this.bands.length - 1; n >= 0; n--) {
       const b = this.bands[n];
-      if (stepBand(b, dt, this.cw, target) === 'end' || b.age > b.life + 0.5) {
+      const ax = b.x;
+      const ay = b.y;
+      const az = b.z;
+      const res = stepBand(b, dt, this.cw, target);
+      if (b.o === this.me && views && this._localHit(b, ax, ay, az, views)) {
+        this.bands.splice(n, 1);
+        continue;
+      }
+      if (res === 'end' || b.age > b.life + 0.5) {
         if (b.age < b.life) this.world?.burst(b.x, b.y, b.z, 0xffffff, 4, 1.5, 0.04);
         this.bands.splice(n, 1);
       }
     }
+  }
+
+  /** 自分の輪ゴムが、画面に見えている相手（views）に当たったか。当たったら、その場で印を出してホストへ知らせる */
+  _localHit(b, ax, ay, az, views) {
+    let hit = -1;
+    let ht = 2;
+    views.forEach((q, i) => {
+      if (i === this.me || !q || q.dead > 0 || q.inv > 0) return;
+      const t = segCylinder(ax, ay, az, b.x, b.y, b.z, q, heightOf(q), PLAYER.HIT_RADIUS + b.r);
+      if (t >= 0 && t < ht) {
+        ht = t;
+        hit = i;
+      }
+    });
+    if (hit < 0) return false;
+    const hx = ax + (b.x - ax) * ht;
+    const hy = ay + (b.y - ay) * ht;
+    const hz = az + (b.z - az) * ht;
+    this.ctx.sendGameMessage({ t: 'h', c: b.cid, v: hit, p: [hx, hy, hz].map((x) => Math.round(x * 1000) / 1000) });
+    this.hud.hitMarker(false);
+    this.ctx.sound.play('pickup');
+    this.world?.burst(hx, hy, hz, 0xffd23f, 12, 3, 0.07);
+    this._judged.add(b.cid); // ホストからの「当たった」の知らせで、印と音を 2 回出さない
+    return true;
   }
 
   // ---- 起きたこと ----
@@ -365,7 +402,7 @@ class GomuGame {
             this.pilot.vx += e.kx; // 押される
             this.pilot.vz += e.kz;
           }
-          if (e.by === this.me) {
+          if (e.by === this.me && this.isHost) {
             this.hud.hitMarker(false);
             this.ctx.sound.play('pickup');
           }
@@ -438,23 +475,25 @@ class GomuGame {
   /** ゲスト: ホストからの「撃った」。自分が撃ったものは、すでに飛ばしている輪ゴムと結びつける */
   _guestShot(e) {
     if (e.o === this.me) {
-      const b = this.bands.find((x) => x.cid === e.cid && !x.id && e.cid);
-      if (b) {
-        b.id = e.id;
-        return;
-      }
-      // 3 方向の脇の 2 本など（番号がない）: 近くにある、まだ結びついていない自分の輪ゴムと結びつける
-      const side = this.bands.find((x) => !x.id && x.o === this.me && x.kind === e.k && Math.abs(Math.atan2(x.vx, x.vz) - Math.atan2(e.vx, e.vz)) < 0.05);
-      if (side) {
-        side.id = e.id;
-        return;
-      }
-      if (this.bands.some((x) => x.o === this.me && x.mine && performance.now() - x.mine < 400 && !x.id)) return;
+      // 自分が撃った輪ゴム: すでに自分の画面で飛ばしているもの（同じ番号）と結びつける。もう当てた・消えたものは出さない
+      const b = this.bands.find((x) => x.cid === e.cid && !x.id);
+      if (b) b.id = e.id;
+      return;
     }
     if (this.bands.some((x) => x.id === e.id)) return;
     const spec = bandSpec(e.k);
-    this.bands.push({ id: e.id, o: e.o, kind: e.k, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, r: spec.r, bounce: spec.bounce, life: spec.life, age: 0 });
+    const b = { id: e.id, o: e.o, kind: e.k, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, r: spec.r, bounce: spec.bounce, life: spec.life, age: 0 };
+    // ホストで撃たれてから届くまでの時間（片道）だけ先へ進めて出す（相手の輪ゴムが遅れて見えないように）
+    const ahead = Math.min(0.25, this._oneWay());
+    for (let t = 0; t < ahead - 1e-6 && !(stepBand(b, Math.min(1 / 60, ahead - t), this.cw) === 'end'); t += 1 / 60);
+    this.bands.push(b);
     if (this._near(e)) this.ctx.sound.play('throw');
+  }
+
+  /** ホストとの片道の遅れ（秒）の見積もり */
+  _oneWay() {
+    const rtt = this.ctx.getNetInfo?.()?.rtt;
+    return Number.isFinite(rtt) ? Math.max(0, rtt / 2000) : 0.05;
   }
 
   // ---- 通信 ----
@@ -468,16 +507,34 @@ class GomuGame {
     if (msg.type !== 'game_msg' || !msg.data || !(msg.player > 0)) return;
     const d = msg.data;
     if (d.t === 'f') this.sim.fire(msg.player, d.o, d.d, d.k | 0, d.c | 0);
+    else if (d.t === 'h') this.sim.remoteHit(msg.player, d.c | 0, d.v | 0, d.p); // 撃った人の画面で当たった
     else if (d.t === 'u') this.sim.useItem(msg.player, d.o, d.d);
     this._hostEvents(this.sim.drainEvents());
   }
 
   get netEvery() {
-    return 3; // 毎秒 20 回
+    return 1.5; // 毎秒 40 回
   }
 
+  /** ラウンドごとの点は 10 回に 1 回だけ載せる（めったに変わらない） */
+  _withRs() {
+    this._rsN = ((this._rsN | 0) + 1) % 10;
+    return this._rsN === 1 || this.sim.s.phase !== 'play';
+  }
+
+  /** 中継（文字だけ通る）: バイト列を base64 で（起きたことは別に送られる） */
   encodeNetSnapshot() {
-    return packState(this.sim.s);
+    return { b: toB64(packBin(this.sim.s, this._withRs(), null)) };
+  }
+
+  /** P2P: バイト列（起きたことも一緒に） */
+  encodeNetBinary(ev) {
+    return packBin(this.sim.s, this._withRs(), ev);
+  }
+
+  decodeNetBinary(u8) {
+    const d = unpackBin(u8, this.n, this.last?.players.map((p) => p.rs));
+    return d ? { snap: { st: d.st }, ev: d.ev } : null;
   }
 
   drainNetEvents() {
@@ -501,7 +558,8 @@ class GomuGame {
     }
     if (this.seenEv.size > 800) this.seenEv = new Set([...this.seenEv].slice(-400));
     evs.sort((a, b) => a.id - b.id);
-    const st = unpackState(snap, this.n);
+    const prevRs = this.last?.players.map((p) => p.rs);
+    const st = snap?.st || (typeof snap?.b === 'string' ? unpackBin(fromB64(snap.b), this.n, prevRs)?.st : unpackState(snap, this.n));
     if (st) {
       // 「ラウンドが変わった」の知らせを取りこぼしても、要約で合わせる
       if (st.round !== this.round && !evs.some((e) => e.t === 'round')) this._setRound(st.round);
@@ -509,8 +567,15 @@ class GomuGame {
     this._handleEvents(evs);
     if (!st) return;
     if (this.last && st.round === this.last.round && st.t < this.last.t - 0.001) return; // 順番が入れ替わった古いもの
+    // 届く間隔とそのゆれを測る（ほかの犬を描く遅れを、できるだけ小さく決めるため）
+    const now = performance.now();
+    if (this._lastAt && this.last && st.round === this.last.round) {
+      const gap = (now - this._lastAt) / 1000;
+      this._ivl = this._ivl == null ? gap : this._ivl * 0.9 + gap * 0.1;
+      this._jit = this._jit == null ? 0 : this._jit * 0.9 + Math.abs(gap - this._ivl) * 0.1;
+    }
     this.last = st;
-    this._lastAt = performance.now();
+    this._lastAt = now;
     this.buffer.push({ t: st.t, st });
     if (this.buffer.length > 30) this.buffer.shift();
     // 復活の知らせを取りこぼしたとき: 要約の位置に合わせる
@@ -568,7 +633,9 @@ class GomuGame {
   _remoteViews() {
     const buf = this.buffer;
     if (!buf.length) return this.last?.players || [];
-    const rt = this.roundT - 0.1;
+    // 描く時刻: 最新の要約より「届く間隔 + ゆれ」だけ前（ふつうは 0.03〜0.06 秒。回線がゆれるときだけ長く）
+    const delay = Math.max(0.03, Math.min(0.15, (this._ivl ?? 0.025) * 1.2 + (this._jit ?? 0.01) * 2.5));
+    const rt = this.roundT - delay;
     let a = buf[0];
     let b = buf[buf.length - 1];
     for (let k = buf.length - 1; k >= 0; k--) {
@@ -616,7 +683,7 @@ class GomuGame {
       views = this.sim.s.players.map((q) => {
         if (q.bot || q.i === this.me) return q;
         const sm = (this._smooth[q.i] ||= { x: q.x, y: q.y, z: q.z, yaw: q.yaw });
-        const k = Math.hypot(q.x - sm.x, q.z - sm.z) > 4 ? 1 : Math.min(1, dt * 18);
+        const k = Math.hypot(q.x - sm.x, q.z - sm.z) > 4 ? 1 : Math.min(1, dt * 35); // 報告は毎秒 60 回なので、ほんの少しだけならす
         sm.x += (q.x - sm.x) * k;
         sm.y += (q.y - sm.y) * k;
         sm.z += (q.z - sm.z) * k;

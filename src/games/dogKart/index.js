@@ -12,8 +12,6 @@ import { stepKart } from './physics.js';
 import { World } from './world.js';
 import { ChaseCamera } from './camera.js';
 import { Hud, KART_COLORS } from './hud.js';
-import { AdminPanel } from './admin.js';
-import { isAdminOn } from '../../core/admin.js';
 import { RACE, NET, IN, ITEMS, KART, RAIN, FOOD } from './constants.js';
 import { lerp, lerpAngle, angleDiff } from '../../core/util.js';
 import { spinAngleOf } from './kart.js';
@@ -134,16 +132,6 @@ class DogKartGame {
       this.tapPressed = true;
     };
     ctx.container.addEventListener('pointerdown', this._onPointer);
-    // 管理モード（ホストだけ。準備画面でオンにして合言葉を入れたとき）
-    if (ctx.isHost && isAdminOn()) this.admin = new AdminPanel(ctx.container, (op, args) => this._adminOp(op, args));
-  }
-
-  /** 管理モードの操作: 自分の端末で計算しているときはその場で、サーバーが計算しているときはサーバーへ送る */
-  _adminOp(op, args) {
-    if (!this.isHost) return;
-    if (this.serverSim) this.ctx.engineCommand?.({ type: 'e_admin', op, args });
-    else this.sim.admin(op, args);
-    this.sound.play('click');
   }
 
   /** カメラ切り替え（三人称 ⇔ 一人称）。自分だけの設定で、相手には影響しない */
@@ -1133,11 +1121,6 @@ class DogKartGame {
       this._updateBubbles(karts, firstPerson);
     }
 
-    // 管理パネル（車ごとのアイテムの一覧）
-    if (this.admin) {
-      const names = this.ctx.getNames?.() || [];
-      this.admin.update(s.karts, s.karts.map((k, i) => (i < this.sim.humans && !k.npc ? names[this.ctx.players?.[i] ?? i] || kartName(k) : kartName(k))), dt);
-    }
     // HUD
     const info = this.ctx.getNetInfo();
     const rtt = info.rtt != null ? `${Math.round(info.rtt)}ms` : '';
@@ -1206,7 +1189,6 @@ class DogKartGame {
   }
 
   destroy() {
-    this.admin?.dispose();
     if (this._mgState) this.ctx.music?.setHold(false);
     this.sound.setEngine(false);
     this.sound.setRain(0);

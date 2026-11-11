@@ -114,3 +114,204 @@ export function unpackState(o, n) {
     mov: Array.isArray(o.mv) ? o.mv.slice(0, 16).map((x) => (Array.isArray(x) ? [num(x[0]), num(x[1])] : [0, 0])) : [],
   };
 }
+
+// ---- 配信のバイト列（毎秒 40 回。JSON の約 1/4 の大きさ） ----
+// 犬 1 匹 18 バイト（位置 1mm・向き・状態・体力・アイテム・点数）。ラウンドごとの点は 10 回に 1 回だけ載せる。
+// 起きたこと（撃った・当たった…）は、数を丸めた JSON を後ろにつける（少ないので）
+const BIN_V = 1;
+const PH = ['intro', 'play', 'end', 'done'];
+
+class W {
+  constructor() {
+    this.b = new Uint8Array(256);
+    this.dv = new DataView(this.b.buffer);
+    this.n = 0;
+  }
+  need(k) {
+    if (this.n + k <= this.b.length) return;
+    const nb = new Uint8Array(Math.max(this.b.length * 2, this.n + k));
+    nb.set(this.b.subarray(0, this.n));
+    this.b = nb;
+    this.dv = new DataView(nb.buffer);
+  }
+  u8(v) {
+    this.need(1);
+    this.dv.setUint8(this.n++, clampInt(v, 0, 255));
+  }
+  i8(v) {
+    this.need(1);
+    this.dv.setInt8(this.n++, clampInt(v, -128, 127));
+  }
+  u16(v) {
+    this.need(2);
+    this.dv.setUint16(this.n, clampInt(v, 0, 65535), true);
+    this.n += 2;
+  }
+  i16(v) {
+    this.need(2);
+    this.dv.setInt16(this.n, clampInt(v, -32768, 32767), true);
+    this.n += 2;
+  }
+  i32(v) {
+    this.need(4);
+    this.dv.setInt32(this.n, clampInt(v, -2147483648, 2147483647), true);
+    this.n += 4;
+  }
+  bytes(u8) {
+    this.need(u8.length);
+    this.b.set(u8, this.n);
+    this.n += u8.length;
+  }
+  out() {
+    return this.b.slice(0, this.n);
+  }
+}
+
+class R {
+  constructor(u8) {
+    this.dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    this.u = u8;
+    this.n = 0;
+  }
+  u8() {
+    return this.dv.getUint8(this.n++);
+  }
+  i8() {
+    return this.dv.getInt8(this.n++);
+  }
+  u16() {
+    const v = this.dv.getUint16(this.n, true);
+    this.n += 2;
+    return v;
+  }
+  i16() {
+    const v = this.dv.getInt16(this.n, true);
+    this.n += 2;
+    return v;
+  }
+  i32() {
+    const v = this.dv.getInt32(this.n, true);
+    this.n += 4;
+    return v;
+  }
+}
+
+const enc8 = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+const dec8 = typeof TextDecoder !== 'undefined' ? new TextDecoder() : null;
+/** 起きたことの JSON（数は小数 3 けたに丸める） */
+const evJson = (ev) => JSON.stringify(ev, (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 1000) / 1000 : v));
+
+/** ホスト: 試合の要約をバイト列に。withRs: ラウンドごとの点も載せる。ev: 起きたこと（なければ載せない） */
+export function packBin(s, withRs = true, ev = null) {
+  const w = new W();
+  const evs = ev && ev.length ? enc8.encode(evJson(ev)) : null;
+  w.u8(BIN_V);
+  w.u8(s.round);
+  w.u8(Math.max(0, PH.indexOf(s.phase)) | (withRs ? 8 : 0) | (evs ? 16 : 0));
+  w.i32(s.t * 1000);
+  w.u8(s.players.length);
+  for (const p of s.players) {
+    w.i16(p.x * 1000);
+    w.i16(p.y * 1000);
+    w.i16(p.z * 1000);
+    w.u16((((p.yaw % TAU) + TAU) % TAU) * (65536 / TAU));
+    w.i8((p.pitch / 1.5) * 127);
+    w.u8((p.crouch ? FL.CROUCH : 0) | (p.moving ? FL.MOVING : 0) | (p.inv > 0 ? FL.INV : 0) | (p.stun > 0 ? FL.STUN : 0) | (p.stuck > 0 ? FL.STUCK : 0) | (p.shake > 0 ? FL.SHAKE : 0) | (p.noAmmo > 0 ? FL.NOAMMO : 0) | (p.reload > 0 ? FL.RELOAD : 0));
+    w.u8((p.hp & 15) | ((p.item & 15) << 4));
+    w.u8(p.g);
+    w.u8(Math.ceil(p.dead * 20));
+    w.u16(p.score);
+    w.u8(p.kills);
+    w.u8(p.deaths);
+    w.u8(Math.ceil(Math.max(p.shake, p.noAmmo, p.stuck) * 20));
+    if (withRs) for (let r = 0; r < 3; r++) w.u16(p.rs[r] || 0);
+  }
+  w.u16(s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0));
+  const mov = s.mov || [];
+  w.u8(mov.length);
+  for (const b of mov) {
+    w.i16(((b.x0 + b.x1) / 2) * 1000);
+    w.i16(((b.z0 + b.z1) / 2) * 1000);
+  }
+  w.u8(s.smokes.length);
+  for (const x of s.smokes) {
+    w.i32(x.id); // 番号はほかの知らせ（消えた など）と同じものを使う
+    w.i16(x.x * 1000);
+    w.i16(x.y * 1000);
+    w.i16(x.z * 1000);
+    w.u8(x.age * 20);
+  }
+  w.u8(s.gums.length);
+  for (const x of s.gums) {
+    w.i32(x.id);
+    w.i16(x.x * 1000);
+    w.i16(x.y * 1000);
+    w.i16(x.z * 1000);
+  }
+  if (evs) {
+    w.u16(evs.length);
+    w.bytes(evs);
+  }
+  return w.out();
+}
+
+/** ゲスト: バイト列を読む（unpackState と同じ形。ラウンドごとの点が載っていなければ prevRs を使う）。{ st, ev } */
+export function unpackBin(u8, n, prevRs = null) {
+  try {
+    const r = new R(u8);
+    if (r.u8() !== BIN_V) return null;
+    const round = Math.min(2, r.u8());
+    const f = r.u8();
+    const phase = PH[f & 7] || 'play';
+    const withRs = !!(f & 8);
+    const t = r.i32() / 1000;
+    const np = Math.min(r.u8(), 16);
+    const players = [];
+    for (let i = 0; i < np; i++) {
+      const p = { i, x: r.i16() / 1000, y: r.i16() / 1000, z: r.i16() / 1000 };
+      let yaw = (r.u16() * TAU) / 65536;
+      if (yaw > Math.PI) yaw -= TAU;
+      p.yaw = yaw;
+      p.pitch = (r.i8() / 127) * 1.5;
+      const fl = r.u8();
+      Object.assign(p, { crouch: !!(fl & FL.CROUCH), moving: !!(fl & FL.MOVING), inv: fl & FL.INV ? 1 : 0, stun: fl & FL.STUN ? 1 : 0, stuck: fl & FL.STUCK ? 1 : 0, shake: fl & FL.SHAKE ? 1 : 0, noAmmo: fl & FL.NOAMMO ? 1 : 0, reloading: !!(fl & FL.RELOAD) });
+      const hi = r.u8();
+      p.hp = hi & 15;
+      p.item = hi >> 4;
+      p.g = r.u8();
+      p.dead = r.u8() / 20;
+      p.score = r.u16();
+      p.kills = r.u8();
+      p.deaths = r.u8();
+      p.fxT = r.u8() / 20;
+      p.rs = withRs ? [r.u16(), r.u16(), r.u16()] : prevRs?.[i] ? prevRs[i].slice() : [0, 0, 0];
+      if (i < n) players.push(p);
+    }
+    const boxes = r.u16();
+    const mov = Array.from({ length: Math.min(r.u8(), 16) }, () => [r.i16() / 1000, r.i16() / 1000]);
+    const smokes = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / 1000, y: r.i16() / 1000, z: r.i16() / 1000, age: r.u8() / 20 }));
+    const gums = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / 1000, y: r.i16() / 1000, z: r.i16() / 1000 }));
+    let ev = [];
+    if (f & 16) {
+      const len = r.u16();
+      ev = JSON.parse(dec8.decode(r.u.subarray(r.n, r.n + len)));
+      if (!Array.isArray(ev)) ev = [];
+    }
+    return { st: { round, phase, t, players, boxes, smokes, gums, mov }, ev };
+  } catch {
+    return null;
+  }
+}
+
+/** 中継（文字しか通らない）で送るための base64 */
+export function toB64(u8) {
+  let s = '';
+  for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  return btoa(s);
+}
+export function fromB64(str) {
+  const s = atob(str);
+  const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+}

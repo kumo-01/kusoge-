@@ -311,3 +311,58 @@ test('押せるもの: 試合では、CPU も押す。輪ゴムは押せるも�
   const n0 = sim.s.mov[0];
   assert.deepEqual([(n0.x0 + n0.x1) / 2, (n0.z0 + n0.z1) / 2], [ARENAS[1].movables[0].x, ARENAS[1].movables[0].z]);
 });
+
+// ---- 遅れを減らす仕組み ----
+import { packBin, unpackBin, toB64, fromB64 } from '../src/games/gomuBattle/net.js';
+
+test('撃った人の画面で当たりを決める: ホストでは当てず、知らせを確かめてから当てる（同じ輪ゴムは 1 回だけ・遠すぎる相手はだめ）', () => {
+  const sim = ready();
+  sim.clientJudge = (i) => i === 1; // ゲスト（1）の輪ゴム
+  const [a, b] = sim.s.players;
+  Object.assign(a, { x: -4, z: 2, y: 0 });
+  Object.assign(b, { x: 4, z: 2, y: 0 });
+  sim.fire(1, eye(b), chestDir(b, a), 0, 7);
+  run(sim, 0.8);
+  assert.equal(a.hp, PLAYER.HP, 'ホストの計算では当てない（撃った人の画面で決める）');
+  const key = 7 * 4;
+  assert.equal(sim.remoteHit(1, key + 1, 0, [a.x, 0.6, a.z]), false, '撃っていない番号');
+  assert.equal(sim.remoteHit(1, key, 0, [a.x + 8, 0.6, a.z]), false, '相手から遠すぎる');
+  assert.equal(sim.remoteHit(1, key, 0, [a.x + 0.3, 0.6, a.z]), true);
+  assert.equal(a.hp, PLAYER.HP - 1);
+  assert.equal(b.score, 1);
+  assert.equal(sim.remoteHit(1, key, 0, [a.x, 0.6, a.z]), false, '同じ輪ゴムは 1 回だけ');
+  const ev = sim.drainEvents();
+  assert.ok(ev.some((e) => e.t === 'hit' && e.v === 0 && e.by === 1));
+  // ホスト自身・CPU の輪ゴムは、今までどおりホストが当てる
+  sim.fire(0, eye(a), chestDir(a, b));
+  run(sim, 0.8);
+  assert.equal(b.hp, PLAYER.HP - 1);
+});
+
+test('配信のバイト列: 位置・向き・体力・アイテム・点・押せるもの・煙・ガム・起きたことが戻る。JSON より小さい', () => {
+  const sim = new GomuSim({ humans: 2, bots: 5, seed: 3 });
+  run(sim, ROUND.INTRO + 15);
+  sim.s.gums.push({ id: 70000, o: 1, x: 1.234, y: 0, z: -2.5, age: 0 });
+  sim.s.smokes.push({ id: 5, o: 1, x: 3, y: 1.2, z: 4, age: 1.5 });
+  const ev = sim.drainEvents().slice(0, 4);
+  const u8 = packBin(sim.s, true, ev);
+  const d = unpackBin(fromB64(toB64(u8)), 7);
+  assert.ok(d);
+  assert.equal(d.st.phase, sim.s.phase);
+  assert.ok(Math.abs(d.st.t - sim.s.t) < 0.002);
+  sim.s.players.forEach((p, i) => {
+    const q = d.st.players[i];
+    assert.ok(Math.abs(q.x - p.x) < 0.002 && Math.abs(q.z - p.z) < 0.002 && Math.abs(q.y - p.y) < 0.002);
+    assert.ok(Math.abs(Math.atan2(Math.sin(q.yaw - p.yaw), Math.cos(q.yaw - p.yaw))) < 0.001);
+    assert.deepEqual([q.hp, q.item, q.g, q.score, q.kills, q.deaths], [p.hp, p.item, p.g, p.score, p.kills, p.deaths]);
+    assert.deepEqual(q.rs, p.rs);
+  });
+  assert.equal(d.st.mov.length, sim.s.mov.length);
+  assert.ok(d.st.gums.some((g) => g.id === 70000), '番号はそのまま（知らせの番号と合う）');
+  assert.ok(d.st.smokes.some((x) => x.id === 5));
+  assert.deepEqual(d.ev.map((e) => e.t), ev.map((e) => e.t));
+  // ラウンドごとの点を載せない回は、前の値を使う
+  const d2 = unpackBin(packBin(sim.s, false, null), 7, d.st.players.map((p) => p.rs));
+  assert.deepEqual(d2.st.players.map((p) => p.rs), d.st.players.map((p) => p.rs));
+  assert.ok(packBin(sim.s, false, null).length < 200, '7 匹で 200 バイト未満');
+});

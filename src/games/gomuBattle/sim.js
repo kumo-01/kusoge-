@@ -25,6 +25,8 @@ export class GomuSim {
     this.humans = Math.max(1, Math.min(4, o.humans | 0 || 1));
     this.bots = Math.max(0, Math.min(BOT.MAX, o.bots | 0));
     this.events = [];
+    this.shotLog = []; // 撃った人の端末で当たりを決める輪ゴムの記録（人ごと）
+    this.clientJudge = null; // (i) => その人の輪ゴムの当たりを、その人の端末で決めるか
     this.s = {
       round: 0,
       phase: 'intro',
@@ -222,13 +224,16 @@ export class GomuSim {
     const yaw = Math.atan2(d[0], d[2]);
     const pitch = Math.asin(Math.max(-1, Math.min(1, d[1] / dl)));
     const spec = bandSpec(k);
+    // 撃った人の端末で当たりを決める輪ゴムか（遅れをなくすため。人がゲストのとき）
+    const cj = !!this.clientJudge?.(i);
     p.shots++;
-    for (const off of dirs) {
+    dirs.forEach((off, idx) => {
       const v = aimDir(yaw + off, pitch);
       const b = {
         id: s.nextId++,
         o: i,
-        cid: off === 0 ? cid : 0,
+        cid: cid ? cid * 4 + idx : 0, // 撃った人の端末での番号（3 方向は 1 本ずつ別の番号）
+        cj,
         kind: k,
         x: o[0] + v[0] * GUN.MUZZLE,
         y: o[1] + v[1] * GUN.MUZZLE - 0.08,
@@ -244,8 +249,32 @@ export class GomuSim {
       };
       s.bands.push(b);
       this.events.push({ t: 'shot', id: b.id, o: i, cid: b.cid, k, x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz });
-    }
+      if (cj && b.cid) {
+        const log = (this.shotLog[i] ||= new Map());
+        log.set(b.cid, { dmg: b.dmg, vx: b.vx, vz: b.vz, id: b.id, t: s.t, used: false });
+        if (log.size > 40) log.delete(log.keys().next().value);
+      }
+    });
     if (s.bands.length > 120) s.bands.splice(0, s.bands.length - 120);
+    return true;
+  }
+
+  /**
+   * 撃った人の端末で「当たった」（遅れのない当たり判定）。key: 輪ゴムの番号（撃った人の端末の）、v: 当たった相手、pos: 当たった場所。
+   * ホストは、その輪ゴムを本当に撃っていた・まだ使っていない・相手が近くにいる（通信の遅れの分はゆるす）ことを確かめてから当てる
+   */
+  remoteHit(i, key, v, pos) {
+    const s = this.s;
+    const rec = this.shotLog[i]?.get(key);
+    const q = s.players[v];
+    if (!rec || rec.used || !q || v === i || s.phase !== 'play' || s.t - rec.t > 4) return false;
+    if (q.dead > 0 || !Array.isArray(pos) || !pos.every(Number.isFinite)) return false;
+    if (Math.hypot(pos[0] - q.x, pos[2] - q.z) > 5 || Math.abs(pos[1] - (q.y + 0.5)) > 3) return false;
+    rec.used = true;
+    const n = s.bands.findIndex((b) => b.id === rec.id);
+    if (n >= 0) s.bands.splice(n, 1);
+    this.events.push({ t: 'end', id: rec.id, x: pos[0], y: pos[1], z: pos[2], h: v });
+    this._hit(q, { o: i, dmg: rec.dmg, vx: rec.vx, vz: rec.vz });
     return true;
   }
 
@@ -289,10 +318,10 @@ export class GomuSim {
       const ay = b.y;
       const az = b.z;
       const res = stepBand(b, dt, arena, tgt);
-      // 当たり（撃った本人には当たらない）
+      // 当たり（撃った本人には当たらない。撃った人の端末で決める輪ゴムは、ここでは当てない）
       let hit = null;
       let ht = 2;
-      for (const q of s.players) {
+      if (!b.cj) for (const q of s.players) {
         if (q.i === b.o || q.dead > 0) continue;
         const t = segCylinder(ax, ay, az, b.x, b.y, b.z, q, heightOf(q), PLAYER.HIT_RADIUS + b.r);
         if (t >= 0 && t < ht) {

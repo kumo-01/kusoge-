@@ -3,7 +3,6 @@ import { h, now } from '../core/util.js';
 import { getGame } from '../games/registry.js';
 import { playerCard, linkFor, roomSummary } from './common.js';
 import { MAX_PLAYERS, NAME_MAX, cleanName } from '../core/protocol.js';
-import { isAdminOn, enableAdmin, disableAdmin } from '../core/admin.js';
 
 export function mount(el, app) {
   let countdownEl = null;
@@ -11,8 +10,6 @@ export function mount(el, app) {
   // スライダーを動かしている間・名前を入力している間は、画面を作り直さない（作り直すと操作が途切れる）。離したら作り直す
   let holding = false;
   let pending = false;
-  let adminAsk = false; // 管理モードの合言葉を聞いているところ
-  let adminMsg = '';
   const release = () => {
     if (!holding || document.activeElement?.classList?.contains('name-input')) return;
     // スライダーの change（値が決まる）が先に届くように、少し待ってから
@@ -90,7 +87,6 @@ export function mount(el, app) {
             null,
             nameCard(s, room),
             optionsCard(def, s, isHost),
-            isHost && def?.id === 'dogKart' ? adminCard() : null,
             s.solo ? null : h('div.players-row.compact.three', null, cards),
             h(
               `button.btn.btn-xl.${myReady ? 'btn-ghost' : 'btn-primary'}`,
@@ -105,60 +101,6 @@ export function mount(el, app) {
       ),
     );
     tickCountdown();
-  }
-
-  /** 管理モード（ホストだけ）: オンにして合言葉を入れると、ゲーム中に管理パネルが出る */
-  function adminCard() {
-    const on = isAdminOn();
-    const toggle = h(`button.opt-toggle${on || adminAsk ? '.on' : ''}`, {
-      type: 'button',
-      role: 'switch',
-      'aria-checked': on ? 'true' : 'false',
-      'aria-label': '管理モード',
-      onclick: () => {
-        app.sound.play('click');
-        if (on) {
-          disableAdmin();
-          adminMsg = '管理モードをオフにしました';
-        } else {
-          adminAsk = !adminAsk;
-          adminMsg = '';
-        }
-        render();
-      },
-    }, h('span.opt-knob'));
-    const row = h('div.option-row.is-toggle', null, h('div.option-label', null, '🔧 管理モード（ホストだけ）'), h('div.opt-toggle-row', null, toggle, h('span.opt-value', null, on ? 'オン' : 'オフ')));
-    let ask = null;
-    if (adminAsk && !on) {
-      const input = h('input.name-input.adm-pass', { type: 'password', placeholder: '合言葉', autocomplete: 'off', 'aria-label': '管理モードの合言葉' });
-      const ok = () => {
-        if (enableAdmin(input.value)) {
-          adminAsk = false;
-          adminMsg = '管理モードがオンになりました。ゲーム中に管理パネルが出ます';
-          app.sound.play('ready');
-        } else {
-          adminMsg = '合言葉がちがいます';
-          app.sound.play('miss');
-        }
-        holding = false;
-        render();
-      };
-      input.addEventListener('focus', () => (holding = true));
-      input.addEventListener('blur', () => {
-        holding = false;
-        if (pending) {
-          pending = false;
-          render();
-        }
-      });
-      input.addEventListener('keydown', (e) => {
-        e.stopPropagation();
-        if (e.key === 'Enter') ok();
-      });
-      ask = h('div.adm-ask', null, input, h('button.btn.btn-small', { type: 'button', onmousedown: (e) => e.preventDefault(), onclick: ok }, 'OK'));
-      setTimeout(() => input.focus(), 0);
-    }
-    return h('div.card.options-card.admin-card', null, row, ask, adminMsg ? h('div.small.muted', null, adminMsg) : null);
   }
 
   /** 自分の名前（ゲーム中に吹き出しで出る。この端末に保存される） */

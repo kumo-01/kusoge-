@@ -130,7 +130,6 @@ export class RaceSim {
         stepTiming(k, this.prog[k.i], s.tc, !!(inp & IN.TAP), dt, ev);
       }
       if (active && inp & IN.ITEM) useItem(s, k, ev, this.prog, (u) => this.callRain(u), track);
-      if (active && this.adminQ?.length) this._adminUse(k);
       if (active && inp & IN.RESPAWN && k.npc) this.respawn(k); // 人は復帰できない（NPC が引っかかったときだけ）
       const fishing = k.fs > 0;
       const wall = stepKart(k, inp, dt, track, active);
@@ -321,87 +320,6 @@ export class RaceSim {
           this.events.push({ t: 'finish', k: k.i });
         }
       }
-    }
-  }
-
-  /**
-   * 管理モード（ホストだけ）の操作。値はここで確かめる（サーバー計算のときは、サーバーがホストからの指示だけ受け付ける）
-   * 対象は { kart } で 1 台、または { karts: [...] } で何台でも
-   * - item: { slot: 1 | 2, item } 車のアイテムを書き換える（0 で空に）
-   * - clear: 車のアイテムを両方とも空に（ルーレットも止める）
-   * - use: 車が今持っているアイテム（1 つ目）を取り出して使わせる
-   * - give: { item } アイテムをその場で使わせる（持っているアイテムはそのまま）
-   * 使わせる操作は順番待ちの列に入れて、1 台につき 1 tick に 1 つずつ使う（どんなに続けて押しても、1 回も抜けない）。
-   * 2 回使えるもの（フリスビー 2 枚・犬小屋 2 個）は、1 秒あけて残りも自動で使う
-   * 戻り値: 受け付けたら true
-   */
-  admin(op, a = {}) {
-    const s = this.s;
-    const list = Array.isArray(a.karts) ? a.karts.slice(0, RACE.MAX_KARTS) : [a.kart];
-    const ks = [...new Set(list)].filter((i) => Number.isInteger(i) && s.karts[i]).map((i) => s.karts[i]);
-    const item = Number.isInteger(a.item) && a.item >= 0 && a.item < ITEMS.COUNT ? a.item : -1;
-    if (!ks.length) return false;
-    const q = (this.adminQ ||= []);
-    const queue = (k, it, back = false) => {
-      if (q.length < 200) q.push({ k: k.i, item: it, at: s.tick, back });
-    };
-    let ok = false;
-    for (const k of ks) {
-      if (op === 'item') {
-        if (item < 0) return false;
-        if (a.slot === 2) {
-          if (!k.item && item) k.item = item; // 1 つ目が空なら 1 つ目に
-          else k.item2 = k.item ? item : 0;
-        } else {
-          k.item = item;
-          if (!item && k.item2) {
-            k.item = k.item2;
-            k.item2 = 0;
-          }
-        }
-        ok = true;
-      } else if (op === 'clear') {
-        k.item = 0;
-        k.item2 = 0;
-        k.roll = 0;
-        k.roll2 = 0;
-        for (let i = q.length - 1; i >= 0; i--) if (q[i].k === k.i) q.splice(i, 1); // 使う予定（2 回目）もやめる
-        ok = true;
-      } else if (op === 'give') {
-        if (item <= 0) return false;
-        queue(k, item);
-        ok = true;
-      } else if (op === 'use') {
-        if (!k.item) continue;
-        queue(k, k.item, true);
-        k.item = k.item2 || 0;
-        k.item2 = 0;
-        ok = true;
-      }
-    }
-    return ok;
-  }
-
-  /** 管理モードで使わせる順番待ちのうち、この車の分を 1 つ使う（持っているアイテムには触らない） */
-  _adminUse(k) {
-    const s = this.s;
-    const q = this.adminQ;
-    const j = q.findIndex((e) => e.k === k.i && e.at <= s.tick);
-    if (j < 0) return;
-    const e = q.splice(j, 1)[0];
-    const keep1 = k.item;
-    const keep2 = k.item2;
-    k.item = e.item;
-    k.item2 = 0;
-    useItem(s, k, this.events, this.prog, (u) => this.callRain(u), this.track);
-    const left = k.item; // 2 回使えるものの残り（使えなかったときは、渡したもののまま）
-    k.item = keep1;
-    k.item2 = keep2;
-    if (left && left !== e.item) q.push({ k: k.i, item: left, at: s.tick + 60 }); // 1 秒あけて残りも使う
-    else if (left && e.back) {
-      // 使えなかった（歩いている・釣る相手がいない）: 持っていたアイテムは枠に戻す
-      if (!k.item) k.item = left;
-      else if (!k.item2) k.item2 = left;
     }
   }
 
