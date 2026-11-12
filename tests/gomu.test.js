@@ -653,3 +653,31 @@ test('チーム分け: 準備画面で組んだとおりに分かれる（人は
   assert.equal(sim.foes(2, 3), false, 'CPU 2 匹は味方');
   assert.equal(sim.foes(0, 2), true);
 });
+
+test('当たり判定は見た目に合わせる: テントの三角の外・車のボンネットの上は通り抜け、真ん中には当たる', async () => {
+  const { segmentHit } = await import('../src/games/gomuBattle/arena.js');
+  const camp = ARENAS[2];
+  const tent = camp.draw.find((b) => b.k === 'tent');
+  const car = camp.draw.find((b) => b.k === 'car');
+  const cw = { boxes: camp.boxes };
+  const tcx = (tent.x0 + tent.x1) / 2;
+  const tcz = (tent.z0 + tent.z1) / 2;
+  const tw = tent.x1 - tent.x0;
+  const th = tent.y1 - tent.y0;
+  // 三角の上のすみ（はしの近くの高い所）を奥行き方向に横切る → 当たらない
+  const y = th * 0.8;
+  const x = tcx + tw * 0.4;
+  assert.equal(segmentHit(cw, x, y, tent.z0 - 2, x, y, tent.z1 + 2), 1, 'テントの斜めの外は通り抜ける');
+  // 真ん中の低い所 → 当たる
+  assert.ok(segmentHit(cw, tcx, th * 0.3, tent.z0 - 2, tcx, th * 0.3, tent.z1 + 2) < 1, 'テントの真ん中には当たる');
+  // 車: ボンネットの上（前のはしの、屋根より低くない高さ）を横切る → 当たらない。屋根の高さの真ん中 → 当たる
+  const ch = car.y1 - car.y0;
+  const ccz = (car.z0 + car.z1) / 2;
+  const fx = car.x1 - (car.x1 - car.x0) * 0.08;
+  assert.equal(segmentHit(cw, fx, ch * 0.8, car.z0 - 2, fx, ch * 0.8, car.z1 + 2), 1, 'ボンネットの上は通り抜ける');
+  const mx = (car.x0 + car.x1) / 2;
+  assert.ok(segmentHit(cw, mx, ch * 0.8, ccz - 3, mx, ch * 0.8, ccz + 3) < 1, '屋根には当たる');
+  // 見た目の箱は元のまま（テント・車は 1 つずつ）
+  assert.equal(camp.draw.filter((b) => b.k === 'tent').length, 3);
+  assert.ok(camp.boxes.filter((b) => b.k === 'tent').length >= 15, '当たり判定は細かい箱の組');
+});

@@ -89,9 +89,9 @@ export function botThink(sim, p, dt) {
     p.pitch += Math.max(-turn, Math.min(turn, wantPitch - p.pitch));
     // 動き: 横に動いてよける。遠ければ近づき、近すぎれば離れる
     if ((b.strafeT -= dt) <= 0) {
-      // うろちょろしすぎないように: 横へ動く向きは長めに保ち、3 回に 1 回くらいは止まって撃つ
-      b.strafeT = 1.1 + rnd() * 1.5;
-      b.strafe = rnd() < (p.weapon === WEAPON.SNIPER ? 0.7 : 0.35) ? 0 : rnd() < 0.5 ? -0.8 : 0.8; // スナイパーは高台でじっと狙う
+      // 横へ動いてよける（向きは少し長めに保つ。ときどき止まって撃つ）
+      b.strafeT = 0.9 + rnd() * 1.3;
+      b.strafe = rnd() < (p.weapon === WEAPON.SNIPER ? 0.55 : 0.2) ? 0 : rnd() < 0.5 ? -0.9 : 0.9; // スナイパーは高台でじっと狙う
     }
     inp.fx = b.strafe;
     // スナイパー: 近くに高台があれば、狙いながらそこへ上る（上に着いたらじっと狙う）
@@ -125,7 +125,7 @@ export function botThink(sim, p, dt) {
     // 相手が見えない: アイテム → 最後に見た所 → 適当な所 へ歩く。着いたら少しその場で見張る
     if (b.wait > 0) b.wait -= dt;
     else if (!b.goal || Math.hypot(b.goal.x - p.x, b.goal.z - p.z) < 1 || (b.goalT -= dt) <= 0) {
-      if (b.goal && rnd() < 0.5) b.wait = b.goal.perch ? 4 + rnd() * 4 : 0.8 + rnd() * 1.4; // 高台に着いたスナイパーはしばらく見張る
+      if (b.goal && rnd() < (b.goal.perch ? 0.5 : 0.3)) b.wait = b.goal.perch ? 4 + rnd() * 4 : 0.5 + rnd() * 1.0; // 高台に着いたスナイパーはしばらく見張る
       b.goal = pickGoal(sim, p, b);
     }
     const wantYaw = Math.atan2(b.goal.x - p.x, b.goal.z - p.z);
@@ -214,7 +214,7 @@ function perches(arena) {
 }
 
 function pickGoal(sim, p, b) {
-  b.goalT = 6 + Math.random() * 4;
+  b.goalT = 5 + Math.random() * 3;
   const arena = sim.arena;
   // スナイパーは高台へ（近い方）
   if (p.weapon === WEAPON.SNIPER && Math.random() < 0.6) {

@@ -119,6 +119,13 @@ class GomuGame {
       if (e.button === 0) this.fireHeld = true;
       if (e.button === 2) this._rightZoom = true; // 右クリックを押している間はのぞく（スナイパー）
     };
+    // ボタンをもう 1 つ押したとき（右クリックでのぞきながら左クリックで撃つ など）は、pointerdown が来ないで
+    // pointermove だけが来る。押されているボタン（buttons）をそのまま写す
+    this._onButtons = (e) => {
+      if (e.pointerType !== 'mouse' || this.paused || document.pointerLockElement !== cv || e.button < 0) return;
+      this.fireHeld = !!(e.buttons & 1);
+      this._rightZoom = !!(e.buttons & 2);
+    };
     this._onUp = (e) => {
       if (e.button === 0) this.fireHeld = false;
       if (e.button === 2) this._rightZoom = false;
@@ -134,6 +141,7 @@ class GomuGame {
       if (document.pointerLockElement !== cv) this.fireHeld = false;
     };
     cv.addEventListener('pointerdown', this._onDown);
+    cv.addEventListener('pointermove', this._onButtons);
     window.addEventListener('mouseup', this._onUp);
     document.addEventListener('mousemove', this._onMove);
     document.addEventListener('pointerlockchange', this._onLock);
@@ -1062,6 +1070,7 @@ class GomuGame {
   destroy() {
     const cv = this._cv;
     cv?.removeEventListener('pointerdown', this._onDown);
+    cv?.removeEventListener('pointermove', this._onButtons);
     cv?.removeEventListener('contextmenu', this._onCtx);
     window.removeEventListener('mouseup', this._onUp);
     document.removeEventListener('mousemove', this._onMove);

@@ -252,7 +252,7 @@ export class GomuWorld {
       }
     }
     // 家具
-    for (const b of arena.boxes) G.add(this._furniture(b));
+    for (const b of arena.draw || arena.boxes) G.add(this._furniture(b)); // 見た目は元の箱（当たり判定は形に合わせた箱の組）
     for (const d of arena.decor || []) {
       const o = this._decor(d);
       if (o) G.add(o);

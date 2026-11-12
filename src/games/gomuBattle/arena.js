@@ -150,7 +150,64 @@ function spread(a) {
     ...(d.z != null ? { z: d.z * SCALE } : {}),
     ...(d.type === 'rug' || d.type === 'water' ? { w: d.w * SCALE, d: d.d * SCALE } : {}),
   }));
+  // 見た目は元の箱のまま（draw）、当たり判定は形に合わせた箱の組（boxes）
+  a.draw = a.boxes;
+  a.boxes = a.boxes.flatMap(hitParts);
   return a;
+}
+
+/**
+ * 見た目が箱でないもの（テントの三角・車の屋根・パラソルの円すい・岩・丸太・木の幹）の当たり判定を、
+ * 見た目に合わせた箱の組にする。ほかの箱はそのまま。world.js の見た目の作り方と同じ寸法で作る
+ */
+export function hitParts(b) {
+  const w = b.x1 - b.x0;
+  const d = b.z1 - b.z0;
+  const h = b.y1 - b.y0;
+  const cx = (b.x0 + b.x1) / 2;
+  const cz = (b.z0 + b.z1) / 2;
+  const cy = (b.y0 + b.y1) / 2;
+  // (cx, cz) からの半幅 hx・hz、高さ y0〜y1 の箱
+  const part = (hx, hz, y0, y1, ox = 0) => ({ x0: cx + ox - hx, x1: cx + ox + hx, z0: cz - hz, z1: cz + hz, y0, y1, c: b.c, k: b.k, part: true });
+  switch (b.k) {
+    case 'tent': {
+      // 横から見て三角（底の幅 w、てっぺんは真ん中）。高さを 5 つに分けて、上ほど細い箱
+      const n = 5;
+      return Array.from({ length: n }, (_, j) => part((w / 2) * (1 - (j + 0.5) / n), d / 2, b.y0 + (h * j) / n, b.y0 + (h * (j + 1)) / n));
+    }
+    case 'car':
+      // 車体（下 0.575）と、少し後ろ寄りの細い屋根（窓）
+      return [part(w / 2, d / 2, b.y0, b.y0 + h * 0.575), part(w * 0.275, d * 0.46, b.y0 + h * 0.575, b.y1, -w * 0.05)];
+    case 'umbrella': {
+      // 円すい（底の半径 R、高さ 1.1。下は空いているので、柱の上の傘の部分だけ）。3 つに分けて上ほど細い
+      const R = Math.max(w, d) / 2 + 0.3;
+      const lo = cy - 0.55;
+      const n = 3;
+      return Array.from({ length: n }, (_, j) => {
+        const r = R * (1 - (j + 0.5) / n) * 0.88; // 円に近い四角
+        return part(r, r, lo + (1.1 * j) / n, lo + (1.1 * (j + 1)) / n);
+      });
+    }
+    case 'rock':
+      // でこぼこの玉: 細い芯と、真ん中のふくらみ
+      return [part(w * 0.31, d * 0.31, b.y0, b.y1), part(w * 0.45, d * 0.45, b.y0 + h * 0.25, b.y0 + h * 0.75)];
+    case 'log': {
+      // 寝かせた丸太（半径 r = 細い方と高さの小さい方の半分）。十字の 2 つの箱で丸に近づける
+      const along = w >= d;
+      const r = Math.min(along ? d : w, h) / 2;
+      const len = (along ? w : d) / 2;
+      const mk = (ha, hb) => (along ? part(len, ha, cy - hb, cy + hb) : part(ha, len, cy - hb, cy + hb));
+      return [mk(r, r * 0.7), mk(r * 0.7, r)];
+    }
+    case 'trunk':
+    case 'stump': {
+      // 立てた丸太（円柱）。十字の 2 つの箱
+      const r = Math.min(w, d) / 2;
+      return [part(r * 0.72, r, b.y0, b.y1), part(r, r * 0.72, b.y0, b.y1)];
+    }
+    default:
+      return [b];
+  }
 }
 
 // ---- 公園 ----
