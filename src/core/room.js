@@ -575,6 +575,8 @@ export class HostRoom extends Emitter {
         this.net.sendTo(g, msg);
       }
     }
+    // 待つゲストがいないとき（ひとりモードなど）は、そのまま再開できる
+    this._updateSynced();
   }
 
   pauseGame() {
