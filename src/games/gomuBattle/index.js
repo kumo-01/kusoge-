@@ -12,17 +12,10 @@ import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, mova
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
-import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamOf, BOSS, HAIRBALL } from './constants.js';
+import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS } from './constants.js';
 import { canSee } from './arena.js';
 
 const SLOT_CSS = ['#ff4d5e', '#3d8bff', '#ff5fb0', '#22b573'];
-const BOT_DOGS = [
-  { kind: 'chihuahua', name: 'チワワ', css: '#ffb703' },
-  { kind: 'dachs', name: 'ダックス', css: '#8338ec' },
-  { kind: 'husky', name: 'ハスキー', css: '#06d6a0' },
-  { kind: 'beagle', name: 'ビーグル', css: '#fb8500' },
-  { kind: 'golden', name: 'ゴールデン', css: '#8d99ae' },
-];
 const FUR = { shiba: 0xf2a04b, corgi: 0xe8893a, poodle: 0xfff3f6, pug: 0xead1a4 };
 // キーボードで向きを変える速さ（ラジアン/秒）。押し始めはゆっくり（細かく狙える）、押し続けると速くなる
 const KEY_TURN_MIN = 1.1;
@@ -48,6 +41,8 @@ class GomuGame {
     this.nBots = Math.max(0, Math.min(BOT.MAX, ctx.options?.bots ?? 2));
     this.n = this.humans + this.nBots;
     this.mode = [MODE.TEAM, MODE.BOSS].includes(ctx.options?.mode) ? ctx.options.mode : MODE.FFA;
+    // チーム（準備画面で組んだもの。なければ交互）
+    this.teams = teamList(this.mode, ctx.options?.teams, ctx.players, this.nBots);
     const names = ctx.getNames?.() || [];
     this.idents = Array.from({ length: this.n }, (_, i) => {
       if (i < this.humans) {
@@ -88,7 +83,9 @@ class GomuGame {
     try {
       this.world = new GomuWorld(ctx.container);
       // チーム戦は、足もとの輪の色をチームの色に
-      this.world.ensureDogs(this.idents.map((d) => d.kind), this.idents.map((d, i) => (this.mode === MODE.TEAM ? TEAMS[teamOf(this.mode, i)].hex : parseInt(d.css.slice(1), 16))));
+      const colors = this.idents.map((d, i) => (this.mode === MODE.TEAM ? TEAMS[this._team(i)].hex : parseInt(d.css.slice(1), 16)));
+      // 人の犬は背中に旗（見た目だけ。当たり判定は変わらない）
+      this.world.ensureDogs(this.idents.map((d) => d.kind), colors, this.idents.map((d, i) => (d.bot ? null : colors[i])));
     } catch (err) {
       console.warn('[gomu] 3D を始められませんでした', err);
       this.world = null;
@@ -102,7 +99,7 @@ class GomuGame {
     });
     this._bindMouse();
     if (this.isHost) {
-      this.sim = new GomuSim({ humans: this.humans, bots: this.nBots, mode: this.mode, pick: true });
+      this.sim = new GomuSim({ humans: this.humans, bots: this.nBots, mode: this.mode, teams: this.teams, pick: true });
       // ゲストが撃った輪ゴムの当たりは、撃った人の画面で決める（その人が見ているとおりに当たる。遅れがない）
       this.sim.clientJudge = (i) => i > 0 && i < this.humans && i !== this.me;
       this._hostEvents(this.sim.drainEvents());
@@ -582,11 +579,16 @@ class GomuGame {
     }
   }
 
+  /** 番号 i のチーム（0 = あか、1 = あお。チーム戦でなければ -1） */
+  _team(i) {
+    return this.teams[i] ?? -1;
+  }
+
   /** a と b は敵どうしか（sim.foes と同じ決まり） */
   _foes(a, b) {
     if (a === b || a < 0 || b < 0) return a !== b;
     if (this.mode === MODE.BOSS) return false;
-    if (this.mode === MODE.TEAM) return teamOf(this.mode, a) !== teamOf(this.mode, b);
+    if (this.mode === MODE.TEAM) return this._team(a) !== this._team(b);
     return true;
   }
 
@@ -922,7 +924,7 @@ class GomuGame {
     }
     const st = this.isHost ? null : this.last;
     const src = this.isHost ? this.sim.s.players : st.players;
-    const players = src.map((q, i) => ({ i, name: this.idents[i].name, css: this.mode === MODE.TEAM ? TEAMS[teamOf(this.mode, i)].css : this.idents[i].css, score: q.score, dead: q.dead > 0, rs: q.rs, team: teamOf(this.mode, i), weapon: q.weapon, picked: q.picked }));
+    const players = src.map((q, i) => ({ i, name: this.idents[i].name, css: this.mode === MODE.TEAM ? TEAMS[this._team(i)].css : this.idents[i].css, score: q.score, dead: q.dead > 0, rs: q.rs, team: this._team(i), weapon: q.weapon, picked: q.picked }));
     const round = this.isHost ? this.sim.s.round : st.round;
     const myWeapon = this._pickedLocal ?? rec.weapon ?? WEAPON.NORMAL;
     this.hud.update({
@@ -991,7 +993,7 @@ class GomuGame {
     const roundRows = Array.from({ length: ROUND.COUNT }, (_, r) => ({ label: `ROUND ${r + 1}（${ARENAS[r].name}）`, values: v((q) => `${q.rs[r]} 点`) }));
     if (this.mode === MODE.TEAM) {
       // チーム戦: チームの合計点で勝ち負け
-      const tot = [0, 1].map((t) => ps.filter((q) => teamOf(this.mode, q.i) === t).reduce((n, q) => n + q.score, 0));
+      const tot = [0, 1].map((t) => ps.filter((q) => this._team(q.i) === t).reduce((n, q) => n + q.score, 0));
       const win = tot[0] === tot[1] ? -1 : tot[0] > tot[1] ? 0 : 1;
       return {
         gameId: 'gomuBattle',
@@ -999,18 +1001,18 @@ class GomuGame {
         title: win < 0 ? `引き分け！ ${tot[0]} 対 ${tot[1]}` : `${TEAMS[win].name}の勝ち！ ${tot[win]} 対 ${tot[1 - win]}`,
         course: `チーム戦（${ARENAS.map((a) => a.name).join(' → ')}）`,
         players: humans.map((q) => {
-          const t = teamOf(this.mode, q.i);
+          const t = this._team(q.i);
           return { slot: this.idents[q.i].slot, headline: win < 0 ? '引き分け' : t === win ? 'チームの勝ち！' : 'チームの負け', detail: `${TEAMS[t].name}・自分の点 ${q.score}（当てた ${q.hits}・倒した ${q.kills}）` };
         }),
         stats: [
-          { label: 'チーム', values: v((q) => TEAMS[teamOf(this.mode, q.i)].name) },
+          { label: 'チーム', values: v((q) => TEAMS[this._team(q.i)].name) },
           { label: 'チームの合計', text: `${TEAMS[0].name} ${tot[0]} 点　${TEAMS[1].name} ${tot[1]} 点` },
           ...roundRows,
           { label: '自分の点', values: v((q) => `${q.score} 点`) },
           { label: '倒した数', values: v((q) => `${q.kills} 匹`) },
           { label: '命中率', values: v(acc) },
         ],
-        points: humans.map((q) => q.score + (win >= 0 && teamOf(this.mode, q.i) === win ? 20 : 0)),
+        points: humans.map((q) => q.score + (win >= 0 && this._team(q.i) === win ? 20 : 0)),
         cpu: [],
         solo,
       };

@@ -2,7 +2,8 @@
 import { icon, noEmoji, GAME_ICON } from '../core/icons.js';
 import { h, now } from '../core/util.js';
 import { getGame } from '../games/registry.js';
-import { playerCard, linkFor, roomSummary } from './common.js';
+import { playerCard, linkFor, roomSummary, PLAYERS } from './common.js';
+import { TEAMS, TEAM_CPU_BIT, BOT_DOGS, autoTeamBits } from '../games/gomuBattle/constants.js';
 import { MAX_PLAYERS, NAME_MAX, cleanName } from '../core/protocol.js';
 
 export function mount(el, app) {
@@ -155,7 +156,8 @@ export function mount(el, app) {
 
   function optionsCard(def, s, isHost) {
     // ひとりのときだけの設定（CPU）は、2 人以上では出さない。needs: その設定が 0 のときは出さない
-    const opts = (def?.options || []).filter((opt) => (!opt.soloOnly || s.solo) && (!opt.needs || s.options?.[opt.needs]));
+    // showIf: ほかの設定がその値のときだけ出す（例: チーム分けはチーム戦のときだけ）
+    const opts = (def?.options || []).filter((opt) => (!opt.soloOnly || s.solo) && (!opt.needs || s.options?.[opt.needs]) && (!opt.showIf || s.options?.[opt.showIf.key] === opt.showIf.value));
     if (!opts.length) return null;
     const set = (opt, v) => {
       if (s.options?.[opt.key] === v) return;
@@ -163,6 +165,7 @@ export function mount(el, app) {
       app.room.setOption(opt.key, v);
     };
     const control = (opt) => {
+      if (opt.ui === 'teams') return teamsControl(opt, s, isHost, set);
       const idx = Math.max(0, opt.choices.findIndex((c) => c.value === s.options?.[opt.key]));
       const cur = opt.choices[idx];
       if (opt.ui === 'slider') {
@@ -234,6 +237,42 @@ export function mount(el, app) {
           h('div.option-label', null, noEmoji(opt.label)),
           control(opt))),
       isHost ? null : h('div.small.muted', null, '設定はホストが決めます'));
+  }
+
+  /**
+   * チーム分け: 参加する人（席）と CPU を、あか・あおの 2 列に並べる。ホストが押すと、もう片方のチームへ移る
+   * 値はビット（0〜3 = 人の席、4〜 = CPU。1 = あお）。-1 は自動（交互）
+   */
+  function teamsControl(opt, s, isHost, set) {
+    const slots = s.solo ? [0] : roomSummary(s).occupied;
+    const nBots = Math.max(0, s.options?.bots | 0);
+    const cur = s.options?.[opt.key];
+    const bits = Number.isInteger(cur) && cur >= 0 ? cur : autoTeamBits(slots, nBots);
+    const members = [
+      ...slots.map((slot) => ({ bit: slot, name: s.players[slot]?.name || PLAYERS[slot]?.name || `プレイヤー${slot + 1}`, cpu: false })),
+      ...Array.from({ length: nBots }, (_, k) => ({ bit: TEAM_CPU_BIT + k, name: `${BOT_DOGS[k % BOT_DOGS.length].name}（CPU）`, cpu: true })),
+    ];
+    const col = (t) =>
+      h('div.team-col', { style: { '--c': TEAMS[t].css } },
+        h('div.team-col-head', null, TEAMS[t].name),
+        members
+          .filter((m) => ((bits >> m.bit) & 1) === t)
+          .map((m) =>
+            h(`button.team-member${m.cpu ? '.is-cpu' : ''}`, {
+              type: 'button',
+              disabled: !isHost,
+              title: isHost ? `${TEAMS[1 - t].name}へ移す` : '',
+              onclick: isHost ? () => set(opt, bits ^ (1 << m.bit)) : null,
+            }, h('span', null, m.name), isHost ? icon('reverse', 14) : null)));
+    const empty = [0, 1].some((t) => !members.some((m) => ((bits >> m.bit) & 1) === t));
+    return h('div.opt-teams', null,
+      h('div.team-cols', null, col(0), col(1)),
+      empty ? h('p.small.warn-text', null, '片方のチームがだれもいません（このまま始めると、交互に分けます）') : null,
+      isHost
+        ? h('div.team-foot', null,
+            h('span.small.muted', null, '名前を押すと、もう片方のチームへ移ります'),
+            Number.isInteger(cur) && cur >= 0 ? h('button.chip', { type: 'button', onclick: () => set(opt, -1) }, '自動（交互）にもどす') : null)
+        : null);
   }
 
   render();

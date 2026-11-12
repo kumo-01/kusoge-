@@ -2654,3 +2654,65 @@ body[data-screen='game'] {
 .gomu-hud:has(.gm-pick:not([hidden])) .gm-bl {
   visibility: hidden;
 }
+/* 準備画面: チーム分け（あか・あおの 2 列。名前を押すと反対のチームへ） */
+.opt-teams {
+  display: grid;
+  gap: 8px;
+}
+.team-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.team-col {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 2px solid var(--c);
+  background: color-mix(in oklch, var(--c) 10%, transparent);
+  min-height: 64px;
+}
+.team-col-head {
+  font-weight: 900;
+  color: var(--c);
+  font-size: 0.9rem;
+}
+.team-member {
+  font: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c);
+  color: var(--paper);
+  font-weight: 800;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.12s, filter 0.12s;
+}
+.team-member.is-cpu {
+  filter: saturate(0.75);
+}
+.team-member:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.team-member:disabled {
+  cursor: default;
+}
+.team-member svg {
+  flex: none;
+  opacity: 0.85;
+}
+.team-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}

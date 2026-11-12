@@ -2,7 +2,7 @@
 // 人の犬の位置は、その人の端末が計算して送ってくる（setPilot）。CPU の犬はここで動かす。
 // 起きたこと（撃った・当たった・倒れた・拾った…）は events に積み、ゲストへ配る。
 
-import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOT, WEAPON, WEAPONS, MODE, teamOf, BOSS, HAIRBALL } from './constants.js';
+import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOT, WEAPON, WEAPONS, MODE, BOSS, HAIRBALL } from './constants.js';
 import { ARENAS, segmentHit, ROOM } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage } from './physics.js';
 import { botThink } from './bot.js';
@@ -25,6 +25,9 @@ export class GomuSim {
     this.humans = Math.max(1, Math.min(4, o.humans | 0 || 1));
     this.bots = Math.max(0, Math.min(BOT.MAX, o.bots | 0));
     this.mode = [MODE.TEAM, MODE.BOSS].includes(o.mode) ? o.mode : MODE.FFA;
+    // チーム（番号ごと。0 = あか、1 = あお）。渡されなければ交互
+    const n = this.humans + this.bots;
+    this.teams = Array.from({ length: n }, (_, i) => (this.mode === MODE.TEAM ? (Array.isArray(o.teams) && (o.teams[i] === 0 || o.teams[i] === 1) ? o.teams[i] : i % 2) : -1));
     this.usePick = !!o.pick; // ラウンドの前に武器を選ぶ（ゲームでは使う。計算のテストでは飛ばす）
     this.events = [];
     this.shotLog = []; // 撃った人の端末で当たりを決める輪ゴムの記録（人ごと）
@@ -60,7 +63,7 @@ export class GomuSim {
   foes(a, b) {
     if (a === b || a < 0 || b < 0) return a !== b; // 猫の毛玉（-1）は全員に当たる
     if (this.mode === MODE.BOSS) return false;
-    if (this.mode === MODE.TEAM) return teamOf(this.mode, a) !== teamOf(this.mode, b);
+    if (this.mode === MODE.TEAM) return this.teams[a] !== this.teams[b];
     return true;
   }
 

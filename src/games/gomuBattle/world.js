@@ -9,6 +9,44 @@ import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS, WEAPON } from './constants.js';
 /** 輪ゴムの色（種類ごと） */
 export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]: 0x2a9d8f, [ITEM.BOUNCE]: 0x3a86ff, [ITEM.HOMING]: 0x9b5de5 };
 
+/**
+ * 背中の旗（見た目だけ）: 細い棒と、はためく布。犬の後ろ（-z）の上に立てる。color: 布の色
+ */
+function makeFlag(color) {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.0, 6), new THREE.MeshToonMaterial({ color: 0xf1faee }));
+  pole.position.y = 0.5;
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), new THREE.MeshToonMaterial({ color: 0xffd23f }));
+  tip.position.y = 1.02;
+  // 布: 横 0.46・縦 0.3 を細かく分けて、頂点を波のように動かす
+  const geo = new THREE.PlaneGeometry(0.46, 0.3, 8, 2);
+  geo.translate(0.23, 0, 0); // 棒の側をはしにする
+  const cloth = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ color, side: THREE.DoubleSide }));
+  cloth.position.y = 0.84;
+  cloth.rotation.y = Math.PI / 2; // 後ろへなびく
+  // 白い丸（目印）
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.06, 14), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+  dot.position.set(0.2, 0, 0.003);
+  cloth.add(dot);
+  g.add(pole, tip, cloth);
+  g.position.set(0, 0.45, -0.32);
+  g.userData = { cloth, base: Float32Array.from(geo.attributes.position.array) };
+  return g;
+}
+
+/** 旗の布をはためかせる（t: 時間、k: 強さ） */
+function waveFlag(flag, t, k) {
+  const { cloth, base } = flag.userData;
+  const pos = cloth.geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = base[i * 3];
+    pos.setZ(i, Math.sin(x * 14 - t * 9) * 0.05 * k * (x / 0.46));
+  }
+  pos.needsUpdate = true;
+  cloth.userData.dot ||= cloth.children[0];
+  cloth.userData.dot.position.z = Math.sin(0.2 * 14 - t * 9) * 0.05 * k * (0.2 / 0.46) + 0.003;
+}
+
 /** 爆弾の見た目（半径 0.2 の黒い玉・導火線・火花）。spark は点滅させる */
 function makeBomb() {
   const g = new THREE.Group();
@@ -291,8 +329,12 @@ export class GomuWorld {
     const hillMat = toon(arena.ground === 'sand' ? 0x7cc6e8 : 0x76b852);
     for (let k = 0; k < 10; k++) {
       const a = (k / 10) * Math.PI * 2 + 0.3;
-      const r = 62 + (k % 3) * 8;
-      const hill = new THREE.Mesh(new THREE.SphereGeometry(14 + (k % 4) * 4, 16, 10), hillMat);
+      const R = 14 + (k % 4) * 4;
+      // 柵から丘のふちまで 12 以上あける（角の近くで丘が会場にかぶさって、中に隠れられないように）
+      const outside = (r) => Math.hypot(Math.max(0, Math.abs(Math.cos(a) * r) - W / 2), Math.max(0, Math.abs(Math.sin(a) * r * 0.85) - D / 2)) - R;
+      let r = 62 + (k % 3) * 8;
+      while (outside(r) < 12) r += 1;
+      const hill = new THREE.Mesh(new THREE.SphereGeometry(R, 16, 10), hillMat);
       hill.scale.y = arena.ground === 'sand' && Math.sin(a) < 0 ? 0.04 : 0.45; // 砂浜の北は海（平ら）
       hill.position.set(Math.cos(a) * r, -2, Math.sin(a) * r * 0.85);
       hill.userData.noCast = true;
@@ -625,7 +667,8 @@ export class GomuWorld {
 
   // ---- 犬 ----
   /** kinds: 番号ごとの犬の種類、colors: 番号ごとの足もとの輪の色 */
-  ensureDogs(kinds, colors) {
+  /** kinds: 犬の種類、colors: 足もとの輪の色、flags: 背中の旗の色（null なら旗なし。見た目だけ） */
+  ensureDogs(kinds, colors, flags = []) {
     if (this.dogs.length === kinds.length && this.dogs.every((d, i) => d.kind === kinds[i])) return;
     for (const d of this.dogs) this.scene.remove(d.root);
     this.dogs = kinds.map((kind, i) => {
@@ -650,9 +693,11 @@ export class GomuWorld {
       star.visible = false;
       const body = new THREE.Group();
       body.add(dog.group, gun);
+      const flag = flags[i] != null ? makeFlag(flags[i]) : null;
+      if (flag) body.add(flag);
       root.add(body, ring, blob, gum, star);
       this.scene.add(root);
-      return { kind, root, body, dog, gun, ring, blob, gum, star, t: i };
+      return { kind, root, body, dog, gun, ring, blob, gum, star, flag, t: i };
     });
   }
 
@@ -675,6 +720,7 @@ export class GomuWorld {
       d.body.position.x = v.stun ? Math.sin(d.t * 50) * 0.05 : 0;
       d.gun.visible = !v.dead;
       d.ring.visible = !v.dead;
+      if (d.flag) waveFlag(d.flag, d.t, v.moving ? 1 : 0.4);
       d.gum.visible = !!v.stuck;
       // 無敵の間は点滅（無敵スターは点滅しないで金色に光る）
       d.star.visible = !!v.star && !v.dead;

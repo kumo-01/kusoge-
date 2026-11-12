@@ -633,3 +633,23 @@ test('爆弾: 山なりに投げて、当たると爆発。まわりの相手に
   }
   assert.ok(a.reload > 0, '4 発で補充');
 });
+
+test('チーム分け: 準備画面で組んだとおりに分かれる（人は席、CPU は番号）。片方が空なら交互', async () => {
+  const { teamList, autoTeamBits, TEAM_CPU_BIT } = await import('../src/games/gomuBattle/constants.js');
+  // 人 = 席 0・2、CPU 3 匹。自動は交互
+  assert.deepEqual(teamList(MODE.TEAM, -1, [0, 2], 3), [0, 1, 0, 1, 0]);
+  assert.deepEqual(teamList(MODE.TEAM, autoTeamBits([0, 2], 3), [0, 2], 3), [0, 1, 0, 1, 0], '自動のビットは交互と同じ');
+  // 人 2 人をあおに、CPU はみんなあか
+  const bits = (1 << 0) | (1 << 2);
+  assert.deepEqual(teamList(MODE.TEAM, bits, [0, 2], 3), [1, 1, 0, 0, 0]);
+  // CPU 2 匹目だけあお
+  assert.deepEqual(teamList(MODE.TEAM, 1 << (TEAM_CPU_BIT + 1), [0], 3), [0, 0, 1, 0]);
+  // 全員あお → 交互にもどす
+  assert.deepEqual(teamList(MODE.TEAM, 0b1111111111, [0, 1], 2), [0, 1, 0, 1]);
+  assert.deepEqual(teamList(MODE.FFA, bits, [0, 2], 1), [-1, -1, -1]);
+  // 計算: 組んだとおりに味方・敵が決まる
+  const sim = new GomuSim({ humans: 2, bots: 2, seed: 9, mode: MODE.TEAM, teams: [1, 1, 0, 0] });
+  assert.equal(sim.foes(0, 1), false, '人 2 人は味方');
+  assert.equal(sim.foes(2, 3), false, 'CPU 2 匹は味方');
+  assert.equal(sim.foes(0, 2), true);
+});

@@ -135,6 +135,15 @@ export const WEAPON_LIST = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.BOMB];
 /** 極太ゴムのダメージの倍率 */
 export const THICK_MUL = 1.6;
 
+/** CPU の犬（番号の順。準備画面のチーム分けにも名前を出す） */
+export const BOT_DOGS = [
+  { kind: 'chihuahua', name: 'チワワ', css: '#ffb703' },
+  { kind: 'dachs', name: 'ダックス', css: '#8338ec' },
+  { kind: 'husky', name: 'ハスキー', css: '#06d6a0' },
+  { kind: 'beagle', name: 'ビーグル', css: '#fb8500' },
+  { kind: 'golden', name: 'ゴールデン', css: '#8d99ae' },
+];
+
 /** 遊び方 */
 export const MODE = { FFA: 'ffa', TEAM: 'team', BOSS: 'boss' };
 
@@ -144,6 +153,33 @@ export const TEAMS = [
   { name: 'あおチーム', css: '#2f6fe0', hex: 0x2f6fe0 },
 ];
 export const teamOf = (mode, i) => (mode === MODE.TEAM ? i % 2 : -1);
+
+/**
+ * チームの組み方（準備画面の設定 teams）: -1 = 自動（交互）。0 以上はビット: 0〜3 = 人の席 0〜3、4〜 = CPU 1 匹目〜。1 = あお、0 = あか
+ */
+export const TEAM_AUTO = -1;
+export const TEAM_CPU_BIT = 4;
+
+/**
+ * 試合の番号ごとのチーム（人 = slots の順、そのあと CPU nBots 匹）。チーム戦でなければ全員 -1。
+ * 片方のチームがだれもいないときは、自動（交互）にもどす（撃ち合えないので）
+ */
+export function teamList(mode, teams, slots, nBots) {
+  const n = slots.length + nBots;
+  if (mode !== MODE.TEAM) return Array(n).fill(-1);
+  const auto = Array.from({ length: n }, (_, i) => i % 2);
+  if (!Number.isInteger(teams) || teams < 0) return auto;
+  const list = [...slots.map((slot) => (teams >> slot) & 1), ...Array.from({ length: nBots }, (_, k) => (teams >> (TEAM_CPU_BIT + k)) & 1)];
+  return list.includes(0) && list.includes(1) ? list : auto;
+}
+
+/** 自動（交互）の組み方をビットにしたもの（準備画面で 1 匹ずつ切り替えるときの元） */
+export function autoTeamBits(slots, nBots) {
+  let m = 0;
+  slots.forEach((slot, j) => (m |= (j % 2) << slot));
+  for (let k = 0; k < nBots; k++) m |= ((slots.length + k) % 2) << (TEAM_CPU_BIT + k);
+  return m;
+}
 
 /** ボス戦: でけぇ猫 */
 export const BOSS = {
