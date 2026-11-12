@@ -2,6 +2,8 @@
 // - ゲスト → ホスト: 自分の犬の位置・向き（11 バイト。操作の通り道 sendInput で、毎秒 30 回）
 // - ホスト → 全員: 試合の要約（毎秒 20 回）と、起きたこと（撃った・当たった・倒れた…）
 
+import { PLAYER } from './constants.js';
+
 const TAU = Math.PI * 2;
 const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v) || 0));
 
@@ -92,7 +94,7 @@ export function unpackState(o, n) {
       shake: fl & FL.SHAKE ? 1 : 0,
       noAmmo: fl & FL.NOAMMO ? 1 : 0,
       reloading: !!(fl & FL.RELOAD),
-      hp: num(a[6], 3),
+      hp: num(a[6], PLAYER.HP),
       item: num(a[7]) | 0,
       g: num(a[8]) | 0,
       score: num(a[9]) | 0,

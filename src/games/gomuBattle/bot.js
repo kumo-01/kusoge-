@@ -66,7 +66,7 @@ export function botThink(sim, p, dt) {
     b.prevT[q.i] = { x: q.x, z: q.z };
     const qy = q.y + heightOf(q) * 0.55;
     const dist = Math.hypot(q.x - ex, qy - ey, q.z - ez);
-    const lead = Math.min(0.6, dist / GUN.SPEED) * 0.8;
+    const lead = Math.min(0.6, dist / GUN.SPEED) * BOT.LEAD;
     const tx = q.x + vx * lead;
     const tz = q.z + vz * lead;
     const hd = Math.hypot(tx - ex, tz - ez);
@@ -93,7 +93,7 @@ export function botThink(sim, p, dt) {
     // アイテム
     if (p.item) {
       const it = p.item;
-      const use = BAND_ITEMS.includes(it) || (it === ITEM.SMOKE && dist < 11) || it === ITEM.SHAKE || it === ITEM.NOAMMO || (it === ITEM.GUM && dist < 6);
+      const use = BAND_ITEMS.includes(it) || (it === ITEM.SMOKE && dist < 11) || it === ITEM.SHAKE || it === ITEM.NOAMMO || (it === ITEM.GUM && dist < 6) || (it === ITEM.STAR && dist < 15) || (it === ITEM.HEAL && p.hp <= PLAYER.HP - ITEMS.HEAL);
       if (use) sim.useItem(p.i, [ex, ey, ez], aimDir(p.yaw, p.pitch));
     }
   } else {
@@ -105,7 +105,7 @@ export function botThink(sim, p, dt) {
     p.pitch *= 0.9;
     inp.fz = Math.abs(angDiff(p.yaw, wantYaw)) < 1.2 ? 1 : 0.2;
     if (p.item === ITEM.GUM && rnd() < 0.01) sim.useItem(p.i, [ex, ey, ez], aimDir(p.yaw, p.pitch));
-    if (p.item && BAND_ITEMS.includes(p.item)) sim.useItem(p.i, [ex, ey, ez], aimDir(p.yaw, p.pitch));
+    if (p.item && (BAND_ITEMS.includes(p.item) || (p.item === ITEM.HEAL && p.hp < PLAYER.HP))) sim.useItem(p.i, [ex, ey, ez], aimDir(p.yaw, p.pitch));
   }
   // 進めていないとき: ジャンプ、伏せ、行き先を変える
   if ((b.chk -= dt) <= 0) {

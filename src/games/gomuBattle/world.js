@@ -94,7 +94,8 @@ export class GomuWorld {
     sun.position.set(-12, 30, -20);
     sun.castShadow = !device.low;
     sun.shadow.mapSize.set(1024, 1024);
-    Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 80 });
+    const sr = Math.max(ROOM.W, ROOM.D) / 2 + 6; // 影を描く範囲（部屋全体）
+    Object.assign(sun.shadow.camera, { left: -sr, right: sr, top: sr, bottom: -sr, near: 1, far: 100 });
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.bias = -0.0015;
     scene.add(sun, sun.target);
@@ -168,7 +169,7 @@ export class GomuWorld {
     G.add(ceil);
     // 天井の照明（丸い光）
     const lampMat = new THREE.MeshBasicMaterial({ color: 0xfffbe6 });
-    for (const [lx, lz] of [[-13, -8], [13, -8], [-13, 8], [13, 8]]) {
+    for (const [lx, lz] of [[-W / 4, -D / 5], [W / 4, -D / 5], [-W / 4, D / 5], [W / 4, D / 5]]) {
       const l = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.2, 24), lampMat);
       l.position.set(lx, H - 0.1, lz);
       G.add(l);
@@ -425,11 +426,15 @@ export class GomuWorld {
       const gum = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 8), toon(0xff7eb6));
       gum.scale.set(1.2, 0.18, 1.2);
       gum.visible = false;
+      // 無敵スターの光（金色の玉）
+      const star = new THREE.Mesh(new THREE.SphereGeometry(0.72, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending }));
+      star.position.y = 0.5;
+      star.visible = false;
       const body = new THREE.Group();
       body.add(dog.group, gun);
-      root.add(body, ring, blob, gum);
+      root.add(body, ring, blob, gum, star);
       this.scene.add(root);
-      return { kind, root, body, dog, gun, ring, blob, gum, t: i };
+      return { kind, root, body, dog, gun, ring, blob, gum, star, t: i };
     });
   }
 
@@ -453,8 +458,13 @@ export class GomuWorld {
       d.gun.visible = !v.dead;
       d.ring.visible = !v.dead;
       d.gum.visible = !!v.stuck;
-      // 無敵の間は点滅
-      d.body.visible = !(v.inv && Math.floor(d.t * 10) % 2 === 0);
+      // 無敵の間は点滅（無敵スターは点滅しないで金色に光る）
+      d.star.visible = !!v.star && !v.dead;
+      if (d.star.visible) {
+        d.star.material.opacity = 0.25 + Math.abs(Math.sin(d.t * 6)) * 0.25;
+        d.star.scale.setScalar(v.crouch ? 0.75 : 1);
+      }
+      d.body.visible = !(v.inv && !v.star && Math.floor(d.t * 10) % 2 === 0);
       d.dog.animate({ dt, speed: v.moving ? 14 : 0, steer: 0, spin: v.stun ? 1 : 0, boost: 0, bump: v.stun ? 0.4 : 0, mood: v.dead ? -1 : 0 });
     });
   }

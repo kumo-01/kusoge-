@@ -321,3 +321,34 @@ export function segCylinder(ax, ay, az, bx, by, bz, p, h, R) {
   }
   return -1;
 }
+
+/** 半直線 o + d·t（d は長さ 1）が、足もとの位置 p・高さ h・太さ R の筒に最初に入る t。当たらなければ -1 */
+export function rayCylinder(o, d, p, h, R) {
+  const ox = o[0] - p.x;
+  const oz = o[2] - p.z;
+  const a = d[0] * d[0] + d[2] * d[2];
+  const c = ox * ox + oz * oz - R * R;
+  let t0 = 0;
+  let t1 = Infinity;
+  if (a < 1e-9) {
+    if (c > 0) return -1;
+  } else {
+    const b = ox * d[0] + oz * d[2];
+    const disc = b * b - a * c;
+    if (disc < 0) return -1;
+    const sq = Math.sqrt(disc);
+    t0 = Math.max(0, (-b - sq) / a);
+    t1 = (-b + sq) / a;
+    if (t1 < 0) return -1;
+  }
+  // 縦: 高さ p.y〜p.y + h の間にいる t の範囲と重なるか
+  const y0 = p.y;
+  const y1 = p.y + h;
+  if (Math.abs(d[1]) < 1e-9) return o[1] >= y0 && o[1] <= y1 ? t0 : -1;
+  let ta = (y0 - o[1]) / d[1];
+  let tb = (y1 - o[1]) / d[1];
+  if (ta > tb) [ta, tb] = [tb, ta];
+  const lo = Math.max(t0, ta);
+  const hi = Math.min(t1, tb);
+  return lo <= hi ? lo : -1;
+}

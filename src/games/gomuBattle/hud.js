@@ -61,7 +61,7 @@ export class GomuHud {
     this._set(this.itemName, 'itn', it ? it.name : 'アイテムなし');
     this.itemBox.classList.toggle('has', !!it);
     // 状態（照準ぶれ・ゴム切れ・ネバネバ）
-    const st = [v.me.shake > 0 ? '🌀 照準ぶれ' : '', v.me.noAmmo > 0 ? '✂️ ゴム切れ' : '', v.me.stuck > 0 ? '🍬 ネバネバ' : '', v.me.inv > 0 ? '✨ 無敵' : ''].filter(Boolean).join('　');
+    const st = [v.me.shake > 0 ? '🌀 照準ぶれ' : '', v.me.noAmmo > 0 ? '✂️ ゴム切れ' : '', v.me.stuck > 0 ? '🍬 ネバネバ' : '', v.me.star > 0 ? `⭐ 無敵 ${Math.ceil(v.me.star)}` : v.me.inv > 0 ? '✨ 無敵' : ''].filter(Boolean).join('　');
     this._set(this.status, 'st', st);
     // 点数表（点の順）
     const rows = [...v.players].sort((a, b) => b.score - a.score || a.i - b.i);
@@ -125,6 +125,13 @@ export class GomuHud {
     this.vignette.classList.add('on');
   }
 
+  /** 照準が相手に重なっている（赤く） */
+  setTarget(on) {
+    if (this._key.tgt === on) return;
+    this._key.tgt = on;
+    this.cross.classList.toggle('is-on', on);
+  }
+
   setHint(text) {
     this._set(this.hint, 'hint', text || '');
     this.hint.hidden = !text;
@@ -172,14 +179,16 @@ export class GomuTouch {
     this.crouch = false;
     this.item = false;
     this.knob = h('div.gt-knob');
-    this.stick = h('div.gt-stick', { 'data-ctl': '' }, this.knob);
+    this.stick = h('div.gt-stick', null, this.knob);
+    // 左下の広い範囲のどこを触っても、そこがスティックの真ん中になる（スティックの丸を狙って触らなくてよい）
+    this.zone = h('div.gt-zone', { 'data-ctl': '' }, this.stick);
     this.look = h('div.gt-look', { 'data-ctl': '' });
     const btn = (cls, text) => h(`div.gt-btn.${cls}`, { 'data-ctl': '' }, text);
     this.fireBtn = btn('gt-fire', '発射');
     this.jumpBtn = btn('gt-jump', 'ジャンプ');
     this.dashBtn = btn('gt-dash', 'ダッシュ');
     this.crouchBtn = btn('gt-crouch', '伏せ');
-    this.el = h('div.gomu-touch', null, this.look, this.stick, this.fireBtn, this.jumpBtn, this.dashBtn, this.crouchBtn);
+    this.el = h('div.gomu-touch', null, this.look, this.zone, this.fireBtn, this.jumpBtn, this.dashBtn, this.crouchBtn);
     root.append(this.el);
     this._bindStick();
     this._bindLook(this.look);
@@ -194,30 +203,44 @@ export class GomuTouch {
   }
 
   _bindStick() {
-    const el = this.stick;
+    const el = this.zone;
+    const st = this.stick;
     let id = null;
     let cx = 0;
     let cy = 0;
     const R = 50;
+    const DEAD = 0.12; // 真ん中の少しの揺れは止まっている扱い
     const move = (e) => {
       let dx = e.clientX - cx;
       let dy = e.clientY - cy;
       const l = Math.hypot(dx, dy);
       if (l > R) {
+        // 指が丸の外へ出たら、丸ごとついてくる（端で止まって動けなくならない）
+        cx += (dx / l) * (l - R);
+        cy += (dy / l) * (l - R);
+        this._placeStick(cx, cy);
         dx = (dx / l) * R;
         dy = (dy / l) * R;
       }
-      this.mx = dx / R;
-      this.mz = -dy / R;
+      const m = Math.hypot(dx, dy) / R;
+      const k = m < DEAD ? 0 : (m - DEAD) / (1 - DEAD) / (m || 1);
+      this.mx = (dx / R) * k;
+      this.mz = (-dy / R) * k;
       this.knob.style.transform = `translate(${dx}px, ${dy}px)`;
     };
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      if (id != null) return;
       id = e.pointerId;
-      el.setPointerCapture?.(id);
-      const r = el.getBoundingClientRect();
-      cx = r.left + r.width / 2;
-      cy = r.top + r.height / 2;
+      try {
+        el.setPointerCapture?.(id);
+      } catch {
+        // 指を捕まえられなくても動かせる
+      }
+      cx = e.clientX;
+      cy = e.clientY;
+      this._placeStick(cx, cy);
+      st.classList.add('on');
       move(e);
     });
     el.addEventListener('pointermove', (e) => e.pointerId === id && move(e));
@@ -226,10 +249,20 @@ export class GomuTouch {
       id = null;
       this.mx = this.mz = 0;
       this.knob.style.transform = '';
+      st.style.left = st.style.top = '';
+      st.classList.remove('on');
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
     el.addEventListener('lostpointercapture', () => end(null));
+  }
+
+  /** スティックの丸の真ん中を、画面の (x, y) へ */
+  _placeStick(x, y) {
+    const r = this.zone.getBoundingClientRect();
+    const st = this.stick;
+    st.style.left = `${x - r.left - st.offsetWidth / 2}px`;
+    st.style.top = `${y - r.top - st.offsetHeight / 2}px`;
   }
 
   /** なぞった分だけ視点を動かす（指ごとに、前の位置との差）。ほとんど動かさずに短く触れたら「タップ」= 1 発撃つ */

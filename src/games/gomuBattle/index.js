@@ -8,7 +8,7 @@ import { PLAYERS } from '../../screens/common.js';
 import { device } from '../../core/device.js';
 import { GomuSim } from './sim.js';
 import { ARENAS } from './arena.js';
-import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder } from './physics.js';
+import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder, rayCylinder } from './physics.js';
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
@@ -24,10 +24,16 @@ const BOT_DOGS = [
   { kind: 'golden', name: 'ゴールデン', css: '#8d99ae' },
 ];
 const FUR = { shiba: 0xf2a04b, corgi: 0xe8893a, poodle: 0xfff3f6, pug: 0xead1a4 };
-const KEY_TURN = 2.6; // キーボードで向きを変える速さ（ラジアン/秒）
-const KEY_PITCH = 1.6;
+// キーボードで向きを変える速さ（ラジアン/秒）。押し始めはゆっくり（細かく狙える）、押し続けると速くなる
+const KEY_TURN_MIN = 1.1;
+const KEY_TURN_MAX = 3.2;
+const KEY_PITCH_MIN = 0.7;
+const KEY_PITCH_MAX = 1.6;
+const KEY_RAMP = 0.4; // 速くなりきるまでの秒数
 const LOOK = 0.0024; // マウスの感度（ラジアン / ピクセル）
-const TOUCH_LOOK = 0.006;
+const TOUCH_LOOK = 0.006; // タッチの感度（ゆっくりなぞると細かく、速くなぞると大きく回る）
+const LEVEL_AFTER = 0.6; // 視点を動かさずに歩いて、この秒数たつと上下の向きを少しずつ水平へ戻す（タッチ・キーボード）
+const AIM_RANGE = 45; // 照準が相手に重なっているかを調べる距離
 const PITCH_MAX = 1.35;
 
 export function createGame() {
@@ -73,6 +79,10 @@ class GomuGame {
     this._smooth = []; // ホスト: ほかの人の犬の見た目の位置（報告は毎秒 30 回なので、なめらかにする）
     this._los = [];
     this._frame = 0;
+    this._starT = []; // 無敵スターの残り（見た目のため。番号ごと）
+    this._keyHeld = 0; // 矢印キーを押し続けている秒数
+    this._lookIdle = 0; // 視点を最後に動かしてからの秒数
+    this._onTarget = false;
     try {
       this.world = new GomuWorld(ctx.container);
       this.world.ensureDogs(this.idents.map((d) => d.kind), this.idents.map((d) => parseInt(d.css.slice(1), 16)));
@@ -124,6 +134,7 @@ class GomuGame {
 
   _turn(dx, dy) {
     const p = this.pilot;
+    if (dx || dy) this._lookIdle = 0;
     p.yaw -= dx;
     p.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, p.pitch - dy));
   }
@@ -165,6 +176,7 @@ class GomuGame {
     this.round = r;
     this.bands = [];
     this.buffer = [];
+    this._starT = [];
     this.mov = (this.arena.movables || []).map(movableBox);
     this._gcw = null;
     this.world?.setArena(ARENAS[r % ARENAS.length]);
@@ -195,8 +207,14 @@ class GomuGame {
     if (!this.paused) {
       const kx = (i.isDown('ArrowRight') ? 1 : 0) - (i.isDown('ArrowLeft') ? 1 : 0);
       const ky = (i.isDown('ArrowDown') ? 1 : 0) - (i.isDown('ArrowUp') ? 1 : 0);
-      if (kx || ky) this._turn(kx * KEY_TURN * dt, ky * KEY_PITCH * dt);
+      this._keyHeld = kx || ky ? this._keyHeld + dt : 0;
+      const ramp = Math.min(1, this._keyHeld / KEY_RAMP);
+      if (kx || ky) this._turn(kx * (KEY_TURN_MIN + (KEY_TURN_MAX - KEY_TURN_MIN) * ramp) * dt, ky * (KEY_PITCH_MIN + (KEY_PITCH_MAX - KEY_PITCH_MIN) * ramp) * dt);
     }
+    // 視点を動かさずに歩いているときは、上下の向きを少しずつ水平へ（上や下を向いたままになって迷わないように）。マウスで狙っているときはしない
+    this._lookIdle += dt;
+    const mouse = document.pointerLockElement === this._cv;
+    if (!mouse && act && Math.hypot(fx, fz) > 0.3 && this._lookIdle > LEVEL_AFTER) p.pitch *= 1 - Math.min(1, dt * 1.6);
     const jump = i.consume('Space') || tk.jump;
     const dash = i.consume('ShiftLeft', 'ShiftRight', 'KeyQ') || tk.dash;
     const crouch = i.isDown('KeyC') || !!t?.crouch;
@@ -451,6 +469,19 @@ class GomuGame {
             this.hud.pushFeed('🍬 ネバネバを踏んだ！2秒うごけない', 'bad');
           }
           break;
+        case 'heal':
+          if (e.i === this.me) {
+            this.ctx.sound.play('respawn');
+            this.hud.pushFeed(`🍖 体力が回復した！`, 'mine');
+          }
+          break;
+        case 'star':
+          this._starT[e.i] = e.d;
+          if (e.i === this.me) {
+            this.ctx.sound.play('boost');
+            this.hud.pushFeed(`⭐ ${e.d}秒間 無敵！`, 'mine');
+          }
+          break;
         case 'fx':
           if (e.by !== this.me) {
             this.ctx.sound.play('thunder');
@@ -659,7 +690,8 @@ class GomuGame {
     const t = this.hud.touch;
     if (t && !this.paused) {
       const [dx, dy] = t.takeLook();
-      this._turn(dx * TOUCH_LOOK, dy * TOUCH_LOOK);
+      const k = TOUCH_LOOK * (0.75 + Math.min(1, Math.hypot(dx, dy) / 30)); // ゆっくりなぞると細かく、速くなぞると大きく
+      this._turn(dx * k, dy * k);
     }
     if (!this.isHost && !this.last) {
       this.hud.setHint('つないでいます…');
@@ -693,7 +725,8 @@ class GomuGame {
     } else views = this._remoteViews();
     const w = this.world;
     if (w) {
-      w.updateDogs(views.map((q, i) => (i === this.me ? { hide: true } : { x: q.x, y: q.y, z: q.z, yaw: q.yaw, crouch: q.crouch, moving: q.moving, dead: q.dead > 0, inv: q.inv > 0, stuck: q.stuck > 0, stun: q.stun > 0 })), dt);
+      for (let k = 0; k < this._starT.length; k++) if (this._starT[k] > 0) this._starT[k] = Math.max(0, this._starT[k] - dt);
+      w.updateDogs(views.map((q, i) => (i === this.me ? { hide: true } : { x: q.x, y: q.y, z: q.z, yaw: q.yaw, crouch: q.crouch, moving: q.moving, dead: q.dead > 0, inv: q.inv > 0, star: this._starT[i] > 0 && q.inv > 0, stuck: q.stuck > 0, stun: q.stun > 0 })), dt);
       const bands = this.isHost ? this.sim.s.bands : this.bands;
       w.updateBands(bands, dt);
       const boxes = this.isHost ? this.sim.s.boxes.map((x) => x <= 0) : this.arena.items.map((_, k) => !!((this.last?.boxes ?? 0) & (1 << k)));
@@ -723,6 +756,9 @@ class GomuGame {
         return s ? { x: s.x, y: s.y, text: `${this.idents[i].name}${q.hp != null ? ' ' + '♥'.repeat(Math.max(0, q.hp)) : ''}`, css: this.idents[i].css } : null;
       });
       this.hud.setNames(names);
+      // 照準が相手に重なっていたら、照準を赤く（当たる目安）
+      if (this._frame % 2 === 0) this._onTarget = !dead && this.phase === 'play' && this._aimOnTarget(views);
+      this.hud.setTarget(this._onTarget);
     }
     const st = this.isHost ? null : this.last;
     const players = (this.isHost ? this.sim.s.players : st.players).map((q, i) => ({ i, name: this.idents[i].name, css: this.idents[i].css, score: q.score, dead: q.dead > 0, rs: q.rs }));
@@ -736,7 +772,7 @@ class GomuGame {
       meIndex: this.me,
       players,
       inSmoke: w ? w.inSmoke(cx, cy + this._eye, cz) : false,
-      me: { hp: rec.hp, dead: rec.dead, item: rec.item, ammo: p.ammo, reload: p.reload, sp: p.sp && p.spN > 0 ? p.sp : 0, spN: p.spN, shake: rec.shake, noAmmo: rec.noAmmo, stuck: rec.stuck, inv: rec.inv },
+      me: { hp: rec.hp, dead: rec.dead, item: rec.item, ammo: p.ammo, reload: p.reload, sp: p.sp && p.spN > 0 ? p.sp : 0, spN: p.spN, shake: rec.shake, noAmmo: rec.noAmmo, stuck: rec.stuck, inv: rec.inv, star: rec.inv > 0 ? this._starT[this.me] || 0 : 0 },
     });
     // 3・2・1 の音
     if (this.phase === 'intro') {
@@ -746,6 +782,19 @@ class GomuGame {
     }
     const locked = document.pointerLockElement === this._cv;
     this.hud.setHint(this.paused || t ? '' : locked ? '' : '🖱 画面をクリックして操作開始（マウスで狙う・Esc で解除）');
+  }
+
+  /** 照準の先（まっすぐ AIM_RANGE まで）に、見えている相手がいるか */
+  _aimOnTarget(views) {
+    const { o, d } = this._aim();
+    let ht = Infinity;
+    views.forEach((q, i) => {
+      if (i === this.me || !q || q.dead > 0) return;
+      const t = rayCylinder(o, d, q, heightOf(q), PLAYER.HIT_RADIUS);
+      if (t >= 0 && t < ht) ht = t;
+    });
+    if (ht > AIM_RANGE) return false;
+    return canSee(this.cw, o[0], o[1], o[2], o[0] + d[0] * ht, o[1] + d[1] * ht, o[2] + d[2] * ht);
   }
 
   // ---- 結果 ----

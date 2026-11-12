@@ -60,6 +60,7 @@ export class GomuSim {
       hp: PLAYER.HP,
       dead: 0, // 倒れてから復活までの残り時間
       inv: 0, // 無敵の残り
+      star: 0, // 無敵スターの残り（見た目のため）
       stun: 0, // よろけの残り
       stuck: 0, // ネバネバで動けない残り
       shake: 0, // 照準ぶれの残り
@@ -102,7 +103,7 @@ export class GomuSim {
       [spots[k], spots[j]] = [spots[j], spots[k]];
     }
     s.players.forEach((p, k) => {
-      Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, ammo: GUN.AMMO, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bot2: null });
+      Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, star: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, ammo: GUN.AMMO, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bot2: null });
       this._place(p, this.arena.spawns[spots[k % spots.length]]);
     });
   }
@@ -167,7 +168,7 @@ export class GomuSim {
   }
 
   _stepPlayer(p, dt) {
-    for (const f of ['inv', 'stun', 'stuck', 'shake', 'noAmmo', 'fireCd']) p[f] = Math.max(0, p[f] - dt);
+    for (const f of ['inv', 'star', 'stun', 'stuck', 'shake', 'noAmmo', 'fireCd']) p[f] = Math.max(0, p[f] - dt);
     if (p.dead > 0) {
       p.dead = Math.max(0, p.dead - dt);
       if (p.dead === 0) this._respawn(p);
@@ -468,6 +469,13 @@ export class GomuSim {
         else q.noAmmo = ITEMS.NOAMMO_TIME;
       }
       this.events.push({ t: 'fx', k: it, by: i });
+    } else if (it === ITEM.HEAL) {
+      p.hp = Math.min(PLAYER.HP, p.hp + ITEMS.HEAL);
+      this.events.push({ t: 'heal', i, hp: p.hp });
+    } else if (it === ITEM.STAR) {
+      p.inv = Math.max(p.inv, ITEMS.STAR_TIME);
+      p.star = ITEMS.STAR_TIME;
+      this.events.push({ t: 'star', i, d: ITEMS.STAR_TIME });
     } else if (it === ITEM.GUM) {
       const g = { id: s.nextId++, o: i, x: p.x, y: p.y, z: p.z, age: 0 };
       s.gums.push(g);

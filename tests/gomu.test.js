@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GomuSim } from '../src/games/gomuBattle/sim.js';
-import { ARENAS, ROOM } from '../src/games/gomuBattle/arena.js';
+import { ARENAS, ROOM, SCALE } from '../src/games/gomuBattle/arena.js';
 import { createBody, stepMove, fits, aimDir, heightOf, movableBox, shoveMovables } from '../src/games/gomuBattle/physics.js';
 import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE } from '../src/games/gomuBattle/constants.js';
 
@@ -42,23 +42,25 @@ test('会場: 3 つとも、出発地点・アイテムの箱・押せるもの�
     }
     assert.ok(a.spawns.length >= 8 && a.items.length >= 8, '広い会場なので出発地点・箱も多い');
   }
-  assert.equal(ROOM.W * ROOM.D, 52 * 40);
-  assert.equal(ROUND.TIME, 180);
+  assert.ok(Math.abs((ROOM.W * ROOM.D) / (52 * 40) - 1.5) < 0.01, '前の 1.5 倍の広さ');
+  assert.equal(ROUND.TIME, 360);
+  assert.equal(PLAYER.HP, 5);
 });
 
 test('動き: 歩く・家具にぶつかって止まる・ジャンプでソファに乗る・テーブルの下は伏せでくぐる', () => {
   const a = ARENAS[0];
   // ソファの前（座面の高さ 0.9）へ向かって歩くと止まる
-  const m = createBody(0, -11, Math.PI);
+  const seat = a.boxes.find((b) => b.k === 'fabric' && b.y0 === 0 && b.x0 < 0 && b.x1 > 0 && b.z1 < -10);
+  const m = createBody(0, seat.z1 + 4, Math.PI);
   for (let i = 0; i < 120; i++) stepMove(m, { fz: 1 }, DT, a);
-  assert.ok(Math.abs(m.z - (-14.9 + PLAYER.RADIUS)) < 0.02, `ソファの前で止まる (${m.z})`);
+  assert.ok(Math.abs(m.z - (seat.z1 + PLAYER.RADIUS)) < 0.02, `ソファの前で止まる (${m.z})`);
   assert.equal(m.y, 0);
   // ジャンプしながら前へ → 座面に乗る
   stepMove(m, { fz: 1, jump: true }, DT, a);
   for (let i = 0; i < 60; i++) stepMove(m, { fz: 1 }, DT, a);
   assert.ok(Math.abs(m.y - 0.9) < 1e-6, `座面の上 (${m.y})`);
   // ローテーブル: 立ったままでは入れない、伏せればくぐれる
-  const t = createBody(-8, -8, Math.PI / 2);
+  const t = createBody(-8, -8 * SCALE, Math.PI / 2);
   for (let i = 0; i < 90; i++) stepMove(t, { fz: 1 }, DT, a);
   assert.ok(t.x < -4.3, `立ったままでは止まる (${t.x})`);
   for (let i = 0; i < 120; i++) stepMove(t, { fz: 1, crouch: true }, DT, a);
@@ -86,20 +88,20 @@ test('動き: ダッシュは速く、使ったあとは待ち時間。壁は抜
   assert.ok(w.x <= ROOM.W / 2 - PLAYER.RADIUS + 1e-6 && w.x > 25, `壁を抜けない (${w.x})`);
 });
 
-test('撃つ: 当たると体力が減って点が入り、3 発で倒れて +3 点。3 秒で復活し、2 秒は無敵', () => {
+test('撃つ: 当たると体力が減って点が入り、5 発で倒れて +3 点。3 秒で復活し、2 秒は無敵', () => {
   const sim = ready();
   const [a, b] = sim.s.players;
   Object.assign(a, { x: -4, z: 2, y: 0 });
   Object.assign(b, { x: 4, z: 2, y: 0 });
   face(a, b);
-  for (let n = 0; n < 3; n++) {
+  for (let n = 0; n < PLAYER.HP; n++) {
     assert.ok(sim.fire(0, eye(a), chestDir(a, b)));
     run(sim, 0.6);
   }
   const ev = sim.drainEvents();
-  assert.equal(ev.filter((e) => e.t === 'hit').length, 3);
+  assert.equal(ev.filter((e) => e.t === 'hit').length, PLAYER.HP);
   assert.equal(ev.filter((e) => e.t === 'kill').length, 1);
-  assert.equal(a.score, SCORE.HIT * 3 + SCORE.KILL);
+  assert.equal(a.score, SCORE.HIT * PLAYER.HP + SCORE.KILL);
   assert.equal(a.rs[0], a.score);
   assert.equal(a.kills, 1);
   assert.equal(b.deaths, 1);
@@ -122,8 +124,8 @@ test('撃つ: 家具の陰には当たらない・自分には当たらない・
   const sim = ready();
   const [a, b] = sim.s.players;
   // ソファの背もたれ越し
-  Object.assign(a, { x: 0, z: -11, y: 0 });
-  Object.assign(b, { x: 0, z: -19.3, y: 0 });
+  Object.assign(a, { x: 0, z: -11 * SCALE, y: 0 });
+  Object.assign(b, { x: 0, z: -23, y: 0 });
   sim.fire(0, eye(a), chestDir(a, b));
   run(sim, 1);
   assert.equal(b.hp, PLAYER.HP, 'ソファにさえぎられる');
@@ -214,16 +216,16 @@ test('アイテム: 照準ぶれ・ゴム切れは自分以外、ガムを踏む
   Object.assign(a, { x: 0, z: 2, y: 0 });
   sim.useItem(0, eye(a), [0, 0, 1]);
   const sm = sim.s.smokes[0];
-  assert.ok(sm && sm.z > 4 && sm.z < 19.5, `前に煙 (${sm?.z})`);
+  assert.ok(sm && sm.z > 4 && sm.z < ROOM.D / 2 - 2, `前に煙 (${sm?.z})`);
   run(sim, ITEMS.SMOKE_TIME + 0.1);
   assert.equal(sim.s.smokes.length, 0);
 });
 
-test('ラウンド: 60 秒で 1 ラウンド、会場が変わって 3 ラウンドで終わる。点はラウンドごとにも数える', () => {
+test('ラウンド: 6 分で 1 ラウンド、会場が変わって 3 ラウンドで終わる。点はラウンドごとにも数える', () => {
   const sim = new GomuSim({ humans: 1, bots: 3, seed: 5 });
   const rounds = [];
   let ticks = 0;
-  while (sim.s.phase !== 'done' && ticks < 60 * 700) {
+  while (sim.s.phase !== 'done' && ticks < 60 * 1300) {
     sim.step(DT);
     ticks++;
     for (const e of sim.drainEvents()) if (e.t === 'round') rounds.push(e.r);
@@ -295,14 +297,15 @@ test('押せるもの: 試合では、CPU も押す。輪ゴムは押せるも�
   const [a, b] = sim.s.players;
   const m0 = sim.s.mov[0];
   const start = [(m0.x0 + m0.x1) / 2, (m0.z0 + m0.z1) / 2];
-  // a と b の間に押せるもの（8, 6）: a(4, 6) → b(12, 6)
-  Object.assign(a, { x: 4.5, z: 6, y: 0 });
-  Object.assign(b, { x: 11.5, z: 6, y: 0 });
+  // a と b の間に押せるもの
+  const [mx, mz] = start;
+  Object.assign(a, { x: mx - 3.5, z: mz, y: 0 });
+  Object.assign(b, { x: mx + 3.5, z: mz, y: 0 });
   sim.fire(0, eye(a), chestDir(a, b));
   run(sim, 0.6);
   assert.equal(b.hp, PLAYER.HP, '段ボールにさえぎられる');
   // 位置の報告で押す
-  sim.setPilot(0, { x: 6.9, y: 0, z: 6, yaw: 0, pitch: 0, g: a.g });
+  sim.setPilot(0, { x: mx - 1.1, y: 0, z: mz, yaw: 0, pitch: 0, g: a.g });
   assert.ok((m0.x0 + m0.x1) / 2 > start[0], '押された');
   // 次のラウンドで元に戻る
   sim.s.t = ROUND.TIME + ROUND.END;
@@ -365,4 +368,46 @@ test('配信のバイト列: 位置・向き・体力・アイテム・点・押
   const d2 = unpackBin(packBin(sim.s, false, null), 7, d.st.players.map((p) => p.rs));
   assert.deepEqual(d2.st.players.map((p) => p.rs), d.st.players.map((p) => p.rs));
   assert.ok(packBin(sim.s, false, null).length < 200, '7 匹で 200 バイト未満');
+});
+
+test('アイテム: 回復おやつは体力が 3 回復（5 まで）、無敵スターは 10 秒間 輪ゴムもガムも効かない', () => {
+  const sim = ready();
+  const [a, b] = sim.s.players;
+  a.hp = 1;
+  a.item = ITEM.HEAL;
+  assert.ok(sim.useItem(0, eye(a), [1, 0, 0]));
+  assert.equal(a.hp, 1 + ITEMS.HEAL);
+  a.item = ITEM.HEAL;
+  sim.useItem(0, eye(a), [1, 0, 0]);
+  assert.equal(a.hp, PLAYER.HP, '最大を超えない');
+  assert.ok(sim.drainEvents().some((e) => e.t === 'heal' && e.i === 0));
+  // 無敵スター
+  Object.assign(a, { x: -4, z: 2, y: 0 });
+  Object.assign(b, { x: 4, z: 2, y: 0 });
+  b.item = ITEM.STAR;
+  sim.useItem(1, eye(b), [1, 0, 0]);
+  assert.ok(sim.drainEvents().some((e) => e.t === 'star' && e.i === 1 && e.d === ITEMS.STAR_TIME));
+  sim.fire(0, eye(a), chestDir(a, b));
+  run(sim, 0.6);
+  assert.equal(b.hp, PLAYER.HP, '無敵の間は当たらない');
+  assert.equal(a.score, 0);
+  run(sim, ITEMS.STAR_TIME - 0.6);
+  assert.equal(b.inv, 0, '10 秒で切れる');
+  sim.fire(0, eye(a), chestDir(a, b));
+  run(sim, 0.6);
+  assert.equal(b.hp, PLAYER.HP - 1);
+  // 箱から出る（拾うと 1〜COUNT-1 のどれか）
+  assert.ok(ITEM.HEAL < ITEM.COUNT && ITEM.STAR < ITEM.COUNT);
+});
+
+test('照準が相手に重なっているか（半直線と筒）: 遠くても正しく分かる', async () => {
+  const { rayCylinder } = await import('../src/games/gomuBattle/physics.js');
+  const q = { x: 0, y: 0, z: 30 };
+  assert.ok(Math.abs(rayCylinder([0, 0.85, 0], [0, 0, 1], q, 1, 0.5) - 29.5) < 1e-9);
+  assert.equal(rayCylinder([0, 0.85, 0], [0, 0, -1], q, 1, 0.5), -1, '後ろ');
+  assert.equal(rayCylinder([2, 0.85, 0], [0, 0, 1], q, 1, 0.5), -1, '横にずれている');
+  const up = aimDir(0, 0.2); // 上を向きすぎ（頭の上を通る）
+  assert.equal(rayCylinder([0, 0.85, 0], up, q, 1, 0.5), -1);
+  const down = aimDir(0, -0.02);
+  assert.ok(rayCylinder([0, 0.85, 0], down, q, 1, 0.5) > 0);
 });

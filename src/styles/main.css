@@ -3232,6 +3232,9 @@ canvas {
 .gm-cross i:nth-child(4) {
   display: none;
 }
+.gm-cross.is-on i {
+  background: #ff3b3b; /* 照準が相手に重なっている */
+}
 .gm-cross.is-off i {
   background: #9aa0a6;
 }
@@ -3565,11 +3568,23 @@ canvas {
   pointer-events: auto;
   touch-action: none;
 }
-.gt-stick {
+.gt-zone {
+  /* 左下の広い範囲: どこを触ってもスティックになる */
   position: absolute;
   z-index: 2;
+  left: 0;
+  width: 40%;
+  top: 38%;
+  bottom: 0;
+  pointer-events: auto;
+  touch-action: none;
+}
+.gt-stick {
+  position: absolute;
   left: max(18px, env(safe-area-inset-left));
   bottom: 22px;
+  pointer-events: none;
+  opacity: 0.75;
   width: 132px;
   height: 132px;
   border-radius: 50%;
@@ -3603,6 +3618,10 @@ canvas {
   pointer-events: auto;
   touch-action: none;
   -webkit-touch-callout: none;
+}
+.gt-stick.on {
+  bottom: auto;
+  opacity: 1;
 }
 .gt-btn.down,
 .gt-btn.on {

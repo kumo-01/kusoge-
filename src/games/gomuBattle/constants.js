@@ -3,7 +3,7 @@
 
 export const ROUND = {
   COUNT: 3, // ラウンド数
-  TIME: 180, // 1 ラウンドの長さ（秒）
+  TIME: 360, // 1 ラウンドの長さ（秒）
   INTRO: 3, // 始まる前の 3・2・1
   END: 4, // ラウンドの終わりの結果表示
 };
@@ -23,15 +23,15 @@ export const PLAYER = {
   DASH_COOLDOWN: 2.2,
   JUMP: 7.4, // ジャンプの初速（約 1.25 の高さまで。ソファの座面に乗れる）
   GRAVITY: 22,
-  STEP: 0.32, // これより低い段差は歩いて上がれる（ラグ・低いクッション）
+  STEP: 0.5, // これより低い段差は歩いて上がれる（ラグ・クッション・犬のベッド）
   PUSH_SPEED: 2.4, // 押せるもの（段ボールなど）を押して進む速さ（ズルズル）
-  HP: 3,
+  HP: 5,
   RESPAWN: 3, // 倒れてから復活するまで（秒）
   INVINCIBLE: 2, // 復活してから無敵の時間
   STUN: 0.3, // 当てられてよろける時間
   STUN_SPEED: 0.35, // よろけている間の速さの割合
   KNOCK: 4.5, // 当てられたときに押される速さ
-  HIT_RADIUS: 0.45, // 輪ゴムが当たる太さ（半径）
+  HIT_RADIUS: 0.55, // 輪ゴムが当たる太さ（半径。少し太めにして当てやすく）
 };
 
 export const GUN = {
@@ -39,7 +39,7 @@ export const GUN = {
   RELOAD: 1.5, // 撃ち切ってから補充まで
   FIRE_GAP: 0.18, // 連射の間隔
   SPEED: 28, // 輪ゴムの速さ
-  GRAVITY: 5, // 少し落ちる
+  GRAVITY: 2.5, // ほんの少し落ちる（ほぼ狙ったとおりに飛ぶ）
   LIFE: 1.8, // 飛んでいられる時間（約 50 先まで）
   RADIUS: 0.08,
   MUZZLE: 0.55, // 目から銃口までの距離
@@ -56,7 +56,9 @@ export const ITEM = {
   SHAKE: 6, // 照準ぶれ
   NOAMMO: 7, // ゴム切れ
   GUM: 8, // ネバネバガム
-  COUNT: 9,
+  HEAL: 9, // 回復のおやつ
+  STAR: 10, // 無敵スター
+  COUNT: 11,
 };
 
 /** ゴムが変わるアイテム → 撃つ輪ゴムの種類 */
@@ -83,6 +85,8 @@ export const ITEMS = {
   GUM_TIME: 25, // 置いたガムが残る時間
   GUM_RADIUS: 0.6,
   GUM_STUCK: 2, // 踏むと動けない時間
+  HEAL: 3, // 回復する体力
+  STAR_TIME: 10, // 無敵の時間
 };
 
 export const SCORE = {
@@ -93,10 +97,11 @@ export const SCORE = {
 export const BOT = {
   MAX: 5,
   VIEW: 40, // 見える距離
-  AIM_ERROR: 0.12, // 狙いのぶれ（ラジアン）
-  REACT: 0.7, // 相手を見つけてから撃ち始めるまで
-  FIRE_GAP: 0.5, // CPU の連射の間隔（人より遅い）
-  TURN: 3.2, // 向きを変える速さ（ラジアン/秒）
+  AIM_ERROR: 0.2, // 狙いのぶれ（ラジアン）
+  REACT: 1.0, // 相手を見つけてから撃ち始めるまで
+  FIRE_GAP: 0.7, // CPU の連射の間隔（人より遅い）
+  TURN: 2.4, // 向きを変える速さ（ラジアン/秒）
+  LEAD: 0.5, // 相手の動きを読む割合（1 = ぴったり）
 };
 
 export const ITEM_INFO = {
@@ -108,4 +113,6 @@ export const ITEM_INFO = {
   [ITEM.SHAKE]: { name: '照準ぶれ', icon: '🌀', desc: '自分以外の全員の狙いが3秒ゆらゆら' },
   [ITEM.NOAMMO]: { name: 'ゴム切れ', icon: '✂️', desc: '自分以外の全員が3秒撃てない' },
   [ITEM.GUM]: { name: 'ネバネバガム', icon: '🍬', desc: '足もとに置く罠。踏んだ相手は2秒動けない' },
+  [ITEM.HEAL]: { name: '回復おやつ', icon: '🍖', desc: '体力が3回復する' },
+  [ITEM.STAR]: { name: '無敵スター', icon: '⭐', desc: '10秒間、輪ゴムもガムも効かない' },
 };
