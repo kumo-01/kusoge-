@@ -286,7 +286,7 @@ body[data-screen='game'] .app-main {
 .hud-item-key {
   position: absolute;
   bottom: -12px;
-  background: var(--ink);
+  background: var(--hud-ink);
   border-radius: 999px;
   padding: 0 0.6em;
   font-size: 0.7rem;
@@ -413,7 +413,7 @@ body[data-screen='game'] .app-main {
   font: inherit;
   font-weight: 900;
   font-size: 0.8rem;
-  color: var(--ink);
+  color: var(--hud-ink);
   background: rgba(255, 255, 255, 0.9);
   border: 0;
   border-radius: 999px;
@@ -934,7 +934,7 @@ body[data-screen='game'] {
   display: block;
   position: absolute;
   bottom: -10px;
-  background: var(--ink);
+  background: var(--hud-ink);
   border-radius: 999px;
   padding: 0 0.6em;
   font-size: 0.65rem;
@@ -1698,7 +1698,7 @@ body[data-screen='game'] {
 .hud-mg-panel {
   width: min(560px, 92vw);
   background: rgba(255, 255, 255, 0.94);
-  color: var(--ink);
+  color: var(--hud-ink);
   border-radius: 22px;
   padding: 14px 18px 16px;
   box-shadow: 0 8px 0 rgba(0, 0, 0, 0.15), 0 10px 30px rgba(0, 0, 0, 0.25);

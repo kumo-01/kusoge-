@@ -13,16 +13,18 @@ export function mount(el, app) {
     el.replaceChildren(h('div.screen.screen-connect', null, body));
   }
 
-  /** タイトル: 紺の看板のふちに、4 匹が並んで顔を出す */
+  /** タイトル: 大きな名前と、4 匹が並ぶ「プレイヤー選択」の画面 */
   function hero() {
     return h(
       'div.hero',
       null,
-      h('div.hero-board', null,
-        h('div.hero-dogs', { 'aria-hidden': 'true' }, PLAYERS.map((p, i) => h('div.hero-dog', { style: { '--i': i }, html: dogAvatar(p.kind, 120) }))),
-        h('h1.logo', null, h('span.logo-line', null, 'わんわん'), h('span.logo-line', null, 'パーティー')),
-        h('div.hero-tag', null, '1〜4人で遊ぶ、犬のミニゲーム集')),
-      h('p.lead', null, '招待URLを送れば、友だちとすぐ対戦できます。'),
+      h('h1.logo', null, 'わんわんパーティー'),
+      h('p.lead', null, '1〜4人で遊ぶ、犬のミニゲーム集。招待URLを送れば、友だちとすぐ対戦できます。'),
+      h('ol.hero-dogs', { 'aria-label': '遊べる犬' },
+        PLAYERS.map((p, i) => h(`li.hero-dog.player-${p.color}`, { style: { '--i': i } },
+          h('span.hero-p', null, `P${i + 1}`),
+          h('span.hero-face', { html: dogAvatar(p.kind, 96) }),
+          h('span.hero-name', null, p.name)))),
       h('p.app-version', null, typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'),
     );
   }
