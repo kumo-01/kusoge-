@@ -2207,7 +2207,7 @@ body[data-screen='game'] {
   touch-action: none;
 }
 .gt-zone {
-  /* 左下の広い範囲: どこを触ってもスティックになる */
+  /* 左下の広い範囲: どこを触ってもスティックを動かせる（丸は動かない） */
   position: absolute;
   z-index: 2;
   left: 0;
@@ -2221,14 +2221,13 @@ body[data-screen='game'] {
   position: absolute;
   left: max(18px, env(safe-area-inset-left));
   bottom: 22px;
-  pointer-events: none;
   opacity: 0.75;
   width: 132px;
   height: 132px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.18);
   border: 3px solid rgba(255, 255, 255, 0.55);
-  pointer-events: auto;
+  pointer-events: none; /* 触ったのは下の範囲（.gt-zone）が受け取る */
   touch-action: none;
 }
 .gt-knob {
@@ -2258,7 +2257,6 @@ body[data-screen='game'] {
   -webkit-touch-callout: none;
 }
 .gt-stick.on {
-  bottom: auto;
   opacity: 1;
 }
 .gt-btn.down,

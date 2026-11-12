@@ -167,6 +167,15 @@ export class GomuHud {
  * タッチ操作: 左下のスティックで移動、右側をなぞって視点、ボタン（発射・ジャンプ・ダッシュ・伏せ・アイテム）
  * 複数の指を同時に使える（指ごとに Pointer Events で追う）
  */
+/** 指を捕まえる（指がもう離れているなどで失敗しても、操作は続ける） */
+function capture(el, id) {
+  try {
+    el.setPointerCapture?.(id);
+  } catch {
+    // 捕まえられなくても、その要素の上での操作は届く
+  }
+}
+
 export class GomuTouch {
   constructor(root) {
     this.mx = 0; // 右へ -1..1
@@ -180,7 +189,7 @@ export class GomuTouch {
     this.item = false;
     this.knob = h('div.gt-knob');
     this.stick = h('div.gt-stick', null, this.knob);
-    // 左下の広い範囲のどこを触っても、そこがスティックの真ん中になる（スティックの丸を狙って触らなくてよい）
+    // 左下の広い範囲のどこを触っても、スティックを動かせる（丸は左下に止まったまま）
     this.zone = h('div.gt-zone', { 'data-ctl': '' }, this.stick);
     this.look = h('div.gt-look', { 'data-ctl': '' });
     const btn = (cls, text) => h(`div.gt-btn.${cls}`, { 'data-ctl': '' }, text);
@@ -210,15 +219,12 @@ export class GomuTouch {
     let cy = 0;
     const R = 50;
     const DEAD = 0.12; // 真ん中の少しの揺れは止まっている扱い
+    // スティックの丸は動かさない（左下の決まった場所）。左下の範囲のどこを触っても、丸の真ん中からの向きで進む
     const move = (e) => {
       let dx = e.clientX - cx;
       let dy = e.clientY - cy;
       const l = Math.hypot(dx, dy);
       if (l > R) {
-        // 指が丸の外へ出たら、丸ごとついてくる（端で止まって動けなくならない）
-        cx += (dx / l) * (l - R);
-        cy += (dy / l) * (l - R);
-        this._placeStick(cx, cy);
         dx = (dx / l) * R;
         dy = (dy / l) * R;
       }
@@ -237,9 +243,9 @@ export class GomuTouch {
       } catch {
         // 指を捕まえられなくても動かせる
       }
-      cx = e.clientX;
-      cy = e.clientY;
-      this._placeStick(cx, cy);
+      const r = st.getBoundingClientRect();
+      cx = r.left + r.width / 2;
+      cy = r.top + r.height / 2;
       st.classList.add('on');
       move(e);
     });
@@ -249,20 +255,11 @@ export class GomuTouch {
       id = null;
       this.mx = this.mz = 0;
       this.knob.style.transform = '';
-      st.style.left = st.style.top = '';
       st.classList.remove('on');
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
-    el.addEventListener('lostpointercapture', () => end(null));
-  }
-
-  /** スティックの丸の真ん中を、画面の (x, y) へ */
-  _placeStick(x, y) {
-    const r = this.zone.getBoundingClientRect();
-    const st = this.stick;
-    st.style.left = `${x - r.left - st.offsetWidth / 2}px`;
-    st.style.top = `${y - r.top - st.offsetHeight / 2}px`;
+    el.addEventListener('lostpointercapture', end);
   }
 
   /** なぞった分だけ視点を動かす（指ごとに、前の位置との差）。ほとんど動かさずに短く触れたら「タップ」= 1 発撃つ */
@@ -271,7 +268,7 @@ export class GomuTouch {
     const start = new Map();
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      el.setPointerCapture?.(e.pointerId);
+      capture(el, e.pointerId);
       last.set(e.pointerId, [e.clientX, e.clientY]);
       start.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 });
     });
@@ -298,7 +295,7 @@ export class GomuTouch {
     const last = new Map();
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      el.setPointerCapture?.(e.pointerId);
+      capture(el, e.pointerId);
       set(true);
       el.classList.add('down');
       last.set(e.pointerId, [e.clientX, e.clientY]);
