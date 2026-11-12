@@ -32,7 +32,6 @@ const KEY_PITCH_MAX = 1.6;
 const KEY_RAMP = 0.4; // 速くなりきるまでの秒数
 const LOOK = 0.0024; // マウスの感度（ラジアン / ピクセル）
 const TOUCH_LOOK = 0.006; // タッチの感度（ゆっくりなぞると細かく、速くなぞると大きく回る）
-const LEVEL_AFTER = 0.6; // 視点を動かさずに歩いて、この秒数たつと上下の向きを少しずつ水平へ戻す（タッチ・キーボード）
 const AIM_RANGE = 45; // 照準が相手に重なっているかを調べる距離
 const PITCH_MAX = 1.35;
 
@@ -81,7 +80,6 @@ class GomuGame {
     this._frame = 0;
     this._starT = []; // 無敵スターの残り（見た目のため。番号ごと）
     this._keyHeld = 0; // 矢印キーを押し続けている秒数
-    this._lookIdle = 0; // 視点を最後に動かしてからの秒数
     this._onTarget = false;
     try {
       this.world = new GomuWorld(ctx.container);
@@ -134,7 +132,6 @@ class GomuGame {
 
   _turn(dx, dy) {
     const p = this.pilot;
-    if (dx || dy) this._lookIdle = 0;
     p.yaw -= dx;
     p.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, p.pitch - dy));
   }
@@ -211,10 +208,6 @@ class GomuGame {
       const ramp = Math.min(1, this._keyHeld / KEY_RAMP);
       if (kx || ky) this._turn(kx * (KEY_TURN_MIN + (KEY_TURN_MAX - KEY_TURN_MIN) * ramp) * dt, ky * (KEY_PITCH_MIN + (KEY_PITCH_MAX - KEY_PITCH_MIN) * ramp) * dt);
     }
-    // 視点を動かさずに歩いているときは、上下の向きを少しずつ水平へ（上や下を向いたままになって迷わないように）。マウスで狙っているときはしない
-    this._lookIdle += dt;
-    const mouse = document.pointerLockElement === this._cv;
-    if (!mouse && act && Math.hypot(fx, fz) > 0.3 && this._lookIdle > LEVEL_AFTER) p.pitch *= 1 - Math.min(1, dt * 1.6);
     const jump = i.consume('Space') || tk.jump;
     const dash = i.consume('ShiftLeft', 'ShiftRight', 'KeyQ') || tk.dash;
     const crouch = i.isDown('KeyC') || !!t?.crouch;
