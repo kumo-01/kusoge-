@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GomuSim } from '../src/games/gomuBattle/sim.js';
 import { ARENAS, ROOM, SCALE } from '../src/games/gomuBattle/arena.js';
-import { createBody, stepMove, fits, aimDir, heightOf, movableBox, shoveMovables } from '../src/games/gomuBattle/physics.js';
+import { createBody, stepMove, fits, aimDir, heightOf, movableBox, shoveMovables, bandSpec } from '../src/games/gomuBattle/physics.js';
 import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE } from '../src/games/gomuBattle/constants.js';
 
 const DT = 1 / 60;
@@ -434,7 +434,7 @@ test('武器えらび: ラウンドの前に選ぶ。全員選べば早く始ま
   assert.equal(s2.s.phase, 'intro');
 });
 
-test('スナイパー: 速くまっすぐ飛んで 3 ダメージ。3 発で補充。連射は遅い', () => {
+test('スナイパー: 速くまっすぐ飛んで 4 ダメージ。5 発で補充。連射は遅い', () => {
   const sim = ready();
   const [a, b] = sim.s.players;
   a.weapon = WEAPON.SNIPER;
@@ -446,13 +446,23 @@ test('スナイパー: 速くまっすぐ飛んで 3 ダメージ。3 発で補�
   assert.ok(sim.tryFire(a, eye(a), [d[0] / l, 0, 0]));
   assert.equal(sim.tryFire(a, eye(a), [1, 0, 0]), false, 'すぐには次を撃てない');
   run(sim, 0.8); // 40 先まで 0.6 秒くらい
-  assert.equal(b.hp, PLAYER.HP - WEAPONS[WEAPON.SNIPER].dmg, '35 離れていても 3 ダメージ');
-  run(sim, 2);
-  sim.tryFire(a, eye(a), [1, 0, 0]);
-  run(sim, 1.1);
-  sim.tryFire(a, eye(a), [1, 0, 0]);
+  assert.equal(b.hp, PLAYER.HP - WEAPONS[WEAPON.SNIPER].dmg, '35 離れていても 4 ダメージ');
+  for (let k = 1; k < WEAPONS[WEAPON.SNIPER].ammo; k++) {
+    run(sim, 1.1);
+    assert.ok(sim.tryFire(a, eye(a), [1, 0, 0]));
+  }
   assert.equal(a.ammo, 0);
-  assert.ok(a.reload > 0, '3 発で補充');
+  assert.ok(a.reload > 0, '5 発で補充');
+});
+
+test('輪ゴム: ふつうは 10 発・壁で 1 回跳ね返る。跳ね返りゴムは 3 回', () => {
+  assert.equal(WEAPONS[WEAPON.NORMAL].ammo, 10);
+  assert.equal(WEAPONS[WEAPON.SNIPER].ammo, 5);
+  assert.equal(WEAPONS[WEAPON.SNIPER].dmg, 4);
+  assert.equal(bandSpec(0).bounce, 1);
+  assert.equal(bandSpec(0, WEAPON.SNIPER).bounce, 1);
+  assert.equal(bandSpec(ITEM.BOUNCE).bounce, 3);
+  assert.ok(Math.abs(bandSpec(0).speed - 28 * 1.8) < 1e-9);
 });
 
 test('チーム戦: 2 チームに分かれ、味方には当たらない。照準ぶれ・ゴム切れは敵のチームだけ', () => {

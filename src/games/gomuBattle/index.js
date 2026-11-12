@@ -80,7 +80,7 @@ class GomuGame {
     this._seq = 0;
     this._finished = false;
     this._smooth = []; // ホスト: ほかの人の犬の見た目の位置（報告は毎秒 30 回なので、なめらかにする）
-    this._los = [];
+    this._hurtDirs = []; // { x, z, t } 撃ってきた場所と残り時間
     this._frame = 0;
     this._starT = []; // 無敵スターの残り（見た目のため。番号ごと）
     this._keyHeld = 0; // 矢印キーを押し続けている秒数
@@ -459,6 +459,7 @@ class GomuGame {
         case 'hit':
           if (e.v === this.me) {
             this.hud.hurt();
+            this._addHurtDir(e);
             this.ctx.sound.play('hit');
             this.pilot.vx += e.kx; // 押される
             this.pilot.vz += e.kz;
@@ -764,6 +765,22 @@ class GomuGame {
   }
 
   /** ゲスト: 猫の、少し前の時刻の位置（ほかの犬と同じ遅れで、2 つの要約の間をなめらかに） */
+  /** 当てられたとき、撃ってきた犬（猫）の場所を覚えて、画面に向きを出す */
+  _addHurtDir(e) {
+    let src = null;
+    if (e.by < 0) src = this.isHost ? this.sim.s.boss : this._bossView || this.last?.boss;
+    else src = this.isHost ? this.sim.s.players[e.by] : this.last?.players?.[e.by];
+    const me = this.pilot;
+    // わからなければ、輪ゴムの飛んできた向きの逆
+    const x = src ? src.x : me.x - (e.kx || 0) * 10;
+    const z = src ? src.z : me.z - (e.kz || 0) * 10;
+    if (Math.hypot(x - me.x, z - me.z) < 0.05) return;
+    const old = this._hurtDirs.find((d) => d.by === e.by);
+    if (old) Object.assign(old, { x, z, t: 1.6 });
+    else this._hurtDirs.push({ by: e.by, x, z, t: 1.6 });
+    if (this._hurtDirs.length > 4) this._hurtDirs.shift();
+  }
+
   _bossInterp() {
     const buf = this.buffer;
     const last = this.last?.boss;
@@ -863,16 +880,10 @@ class GomuGame {
       w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), sniper: p.weapon === WEAPON.SNIPER, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
       this._fired = false;
       w.render(dt);
-      // 名前（見えている犬だけ）
       this._frame++;
-      const names = views.map((q, i) => {
-        if (i === this.me || q.dead > 0) return null;
-        if (this._frame % 8 === i % 8) this._los[i] = canSee(this.cw, cx, cy + ey, cz, q.x, q.y + heightOf(q) * 0.8, q.z) && Math.hypot(q.x - cx, q.z - cz) < 45;
-        if (!this._los[i]) return null;
-        const s = w.project(q.x, q.y + heightOf(q) + 0.35, q.z);
-        return s ? { x: s.x, y: s.y, text: this.idents[i].name, hp: q.hp, css: this.mode === MODE.TEAM ? TEAMS[teamOf(this.mode, i)].css : this.idents[i].css } : null;
-      });
-      this.hud.setNames(names);
+      // 当てられた向き（いまの向きから見て、どちらから撃たれたか）
+      this._hurtDirs = this._hurtDirs.filter((d) => (d.t -= dt) > 0);
+      this.hud.setHurtDirs(this._hurtDirs.map((d) => ({ a: Math.atan2(d.x - cx, d.z - cz), k: Math.min(1, d.t / 0.6) })), p.yaw);
       // 照準が相手に重なっていたら、照準を赤く（当たる目安）
       if (this._frame % 2 === 0) this._onTarget = !dead && this.phase === 'play' && this._aimOnTarget(views);
       this.hud.setTarget(this._onTarget);

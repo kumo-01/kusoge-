@@ -36,12 +36,13 @@ export const PLAYER = {
 };
 
 export const GUN = {
-  AMMO: 5, // 1 回に撃てる数
+  AMMO: 10, // 1 回に撃てる数
   RELOAD: 1.5, // 撃ち切ってから補充まで
   FIRE_GAP: 0.18, // 連射の間隔
-  SPEED: 28, // 輪ゴムの速さ
+  SPEED: 50.4, // 輪ゴムの速さ
+  BOUNCES: 1, // ふつうの輪ゴムも 1 回だけ跳ね返る
   GRAVITY: 2.5, // ほんの少し落ちる（ほぼ狙ったとおりに飛ぶ）
-  LIFE: 1.8, // 飛んでいられる時間（約 50 先まで）
+  LIFE: 1.8, // 飛んでいられる時間（約 90 先まで）
   RADIUS: 0.08,
   MUZZLE: 0.55, // 目から銃口までの距離
 };
@@ -69,11 +70,11 @@ export const ITEMS = {
   BOX_RESPAWN: 10, // 箱を取ってから次が出るまで
   BOX_RADIUS: 0.8, // これより近づくと取れる
   SPECIAL_SHOTS: 5, // ゴムが変わるアイテムは次の 5 発
-  THICK_SPEED: 21,
+  THICK_SPEED: 37.8,
   THICK_RADIUS: 0.22,
   THICK_DAMAGE: 2,
   TRIPLE_SPREAD: 0.14, // 3 方向の開き（ラジアン）
-  BOUNCES: 2,
+  BOUNCES: 3,
   BOUNCE_LIFE: 2.6,
   HOMING_TURN: 3.2, // 追いかけゴムの曲がる速さ（ラジアン/秒）
   HOMING_CONE: 0.9, // 進む向きからこの角度（ラジアン）以内の相手を追う
@@ -108,7 +109,7 @@ export const BOT = {
 export const ITEM_INFO = {
   [ITEM.THICK]: { name: '極太ゴム', icon: 'thick', desc: '次の5発が太くて当たりやすい。当たると2ダメージ' },
   [ITEM.TRIPLE]: { name: '3方向ゴム', icon: 'triple', desc: '次の5発が、扇の形に3本ずつ飛ぶ' },
-  [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: 'bounce', desc: '次の5発が、壁や家具で2回まで跳ね返る' },
+  [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: 'bounce', desc: '次の5発が、壁や家具で3回まで跳ね返る' },
   [ITEM.HOMING]: { name: '追いかけゴム', icon: 'target', desc: '次の5発が、狙った近くの相手へゆるく曲がる' },
   [ITEM.SMOKE]: { name: '煙幕', icon: 'cloud', desc: '狙った所に煙を投げる。中は見えない' },
   [ITEM.SHAKE]: { name: '照準ぶれ', icon: 'spiral', desc: '自分以外の全員の狙いが3秒ゆらゆら' },
@@ -121,9 +122,9 @@ export const ITEM_INFO = {
 /** 武器（ラウンドの前の選択画面で選ぶ） */
 export const WEAPON = { NORMAL: 0, SNIPER: 1 };
 export const WEAPONS = {
-  [WEAPON.NORMAL]: { name: '輪ゴム鉄砲', desc: '5発ずつ。連射がきいて扱いやすい', ammo: 5, reload: 1.5, gap: 0.18, speed: 28, gravity: 2.5, dmg: 1, r: 0.08, life: 1.8 },
-  // スナイパー: 遠くまでまっすぐ速く飛んで 3 ダメージ。3 発ずつで連射は遅い。のぞくと拡大
-  [WEAPON.SNIPER]: { name: 'スナイパー', desc: '3発ずつ。遠くまでまっすぐ飛んで3ダメージ。のぞくと拡大', ammo: 3, reload: 2.4, gap: 1.0, speed: 72, gravity: 0.3, dmg: 3, r: 0.06, life: 1.6, zoomFov: 24 },
+  [WEAPON.NORMAL]: { name: '輪ゴム鉄砲', desc: '10発ずつ。連射がきいて扱いやすい', ammo: 10, reload: 1.5, gap: 0.18, speed: 50.4, gravity: 2.5, dmg: 1, r: 0.08, life: 1.8 },
+  // スナイパー: 遠くまでまっすぐ速く飛んで 4 ダメージ。5 発ずつで連射は遅い。のぞくと拡大
+  [WEAPON.SNIPER]: { name: 'スナイパー', desc: '5発ずつ。遠くまでまっすぐ飛んで4ダメージ。のぞくと拡大', ammo: 5, reload: 2.4, gap: 1.0, speed: 72, gravity: 0.3, dmg: 4, r: 0.06, life: 1.6, zoomFov: 24 },
 };
 
 /** 遊び方 */

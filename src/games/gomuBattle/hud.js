@@ -25,7 +25,8 @@ export class GomuHud {
     this.status = h('div.gm-status');
     this.vignette = h('div.gm-vignette');
     this.smoke = h('div.gm-smoke');
-    this.names = h('div.gm-names');
+    this.hurtDirs = h('div.gm-hurtdirs');
+    this._hurtEls = [];
     this.hint = h('div.gm-hint');
     this.table = h('div.gm-table');
     // ボス戦: 猫の体力のバー
@@ -44,11 +45,10 @@ export class GomuHud {
     this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target')];
     this.pickInfo = h('p.gm-pick-info');
     this.pick = h('div.gm-pick', { hidden: true }, h('h2', null, '武器をえらぶ'), h('div.gm-pick-row', null, ...this.pickCards), this.pickInfo);
-    this.root.append(this.scope, this.smoke, this.vignette, this.names, this.cross, h('div.gm-top', null, this.round, this.timer), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.status), h('div.gm-br', null, this.special, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
+    this.root.append(this.scope, this.smoke, this.vignette, this.hurtDirs, this.cross, h('div.gm-top', null, this.round, this.timer), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.status), h('div.gm-br', null, this.special, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
     this.touch = touch ? new GomuTouch(this.root) : null;
     this.root.classList.add(`mode-${mode}`);
     this.root.classList.toggle('is-touch', !!touch);
-    this._nameEls = [];
     this._feedItems = [];
     this._key = {};
   }
@@ -99,7 +99,7 @@ export class GomuHud {
     this._setHtml(this.hearts, 'hp', `${hpN}`, () => Array.from({ length: PLAYER.HP }, (_, k) => `<span class="gm-heart${k < hpN ? ' on' : ''}">${iconSvg('heart', 26)}</span>`).join(''));
     // 輪ゴム
     const ammoN = v.me.reload > 0 ? -1 : Math.max(0, v.me.ammo);
-    this._setHtml(this.ammo, 'ammo', `${ammoN}:${v.me.weapon}`, () => (ammoN < 0 ? '' : Array.from({ length: v.me.maxAmmo || GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg(v.me.weapon === WEAPON.SNIPER ? 'target' : 'ring', 24)}</span>`).join('')));
+    this._setHtml(this.ammo, 'ammo', `${ammoN}:${v.me.weapon}`, () => (ammoN < 0 ? '' : Array.from({ length: v.me.maxAmmo || GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg(v.me.weapon === WEAPON.SNIPER ? 'target' : 'ring', (v.me.maxAmmo || GUN.AMMO) > 5 ? 18 : 24)}</span>`).join('')));
     this.reloadBar.hidden = !(v.me.reload > 0);
     if (v.me.reload > 0) this.reloadBar.firstChild.style.width = `${(1 - v.me.reload / (v.me.reloadT || GUN.RELOAD)) * 100}%`;
     this._setHtml(this.special, 'sp', v.me.sp ? `${v.me.sp}:${v.me.spN}` : '', () => (v.me.sp ? `${iconSvg(ITEM_INFO[v.me.sp].icon, 18)} ${ITEM_INFO[v.me.sp].name} ×${v.me.spN}` : ''));
@@ -188,30 +188,23 @@ export class GomuHud {
     this.hint.hidden = !text;
   }
 
-  /** ほかの犬の名前（画面の座標。null なら隠す） */
-  setNames(list) {
-    while (this._nameEls.length < list.length) {
-      const el = h('div.gm-name');
-      this.names.append(el);
-      this._nameEls.push(el);
+  /**
+   * 当てられた向きの印（照準のまわりの赤い弧）。list = [{ a: 撃ってきた場所の向き（世界）, k: 濃さ 0〜1 }]、yaw = いまの向き
+   * 前 = (sin yaw, cos yaw)、右 = (-cos yaw, sin yaw) なので、画面の時計回りの角度は yaw - a
+   */
+  setHurtDirs(list, yaw) {
+    while (this._hurtEls.length < list.length) {
+      const el = h('div.gm-hurtdir');
+      el.innerHTML = '<svg viewBox="0 0 260 260" aria-hidden="true"><path d="M81.4 25.8 A115 115 0 0 1 178.6 25.8"/><path class="tip" d="M118 14 L130 2 L142 14 Z"/></svg>';
+      this.hurtDirs.append(el);
+      this._hurtEls.push(el);
     }
-    this._nameEls.forEach((el, i) => {
-      const n = list[i];
-      if (!n) {
-        el.hidden = true;
-        return;
-      }
-      el.hidden = false;
-      const k = `${n.text}|${n.hp ?? ''}`;
-      if (el.dataset.k !== k) {
-        el.dataset.k = k;
-        // 名前と、体力の数だけ小さなハート
-        el.innerHTML = '';
-        el.append(n.text);
-        if (n.hp != null) el.insertAdjacentHTML('beforeend', `<span class="gm-name-hp">${Array.from({ length: Math.max(0, n.hp) }, () => iconSvg('heart', 11)).join('')}</span>`);
-      }
-      el.style.transform = `translate(${n.x.toFixed(0)}px, ${n.y.toFixed(0)}px) translate(-50%, -100%)`;
-      el.style.setProperty('--c', n.css);
+    this._hurtEls.forEach((el, i) => {
+      const d = list[i];
+      el.hidden = !d;
+      if (!d) return;
+      el.style.transform = `rotate(${(yaw - d.a).toFixed(3)}rad)`;
+      el.style.opacity = d.k.toFixed(2);
     });
   }
 

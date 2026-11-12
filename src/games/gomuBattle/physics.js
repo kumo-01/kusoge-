@@ -235,7 +235,7 @@ export function aimDir(yaw, pitch) {
 /** 輪ゴムの種類ごとの速さ・太さ・ダメージ・跳ね返り・飛んでいられる時間 */
 export function bandSpec(kind, weapon = WEAPON.NORMAL) {
   const w = WEAPONS[weapon] || WEAPONS[WEAPON.NORMAL];
-  const base = { speed: w.speed, r: w.r, dmg: w.dmg, bounce: 0, life: w.life, g: w.gravity };
+  const base = { speed: w.speed, r: w.r, dmg: w.dmg, bounce: GUN.BOUNCES, life: w.life, g: w.gravity };
   if (kind === ITEM.THICK) return { ...base, speed: weapon === WEAPON.SNIPER ? w.speed * 0.8 : ITEMS.THICK_SPEED, r: ITEMS.THICK_RADIUS, dmg: weapon === WEAPON.SNIPER ? w.dmg + 1 : ITEMS.THICK_DAMAGE };
   if (kind === ITEM.BOUNCE) return { ...base, bounce: ITEMS.BOUNCES, life: Math.max(w.life, ITEMS.BOUNCE_LIFE) };
   if (kind === HAIRBALL) return { speed: BOSS.SPIT_SPEED, r: BOSS.SPIT_RADIUS, dmg: BOSS.SPIT_DMG, bounce: 0, life: 3, g: 4 };
