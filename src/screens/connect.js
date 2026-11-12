@@ -2,6 +2,7 @@
 import { spinner } from '../core/icons.js';
 import { h } from '../core/util.js';
 import { dogAvatar, PLAYERS } from './common.js';
+import { GAMES } from '../games/registry.js';
 
 export function mount(el, app) {
   function render() {
@@ -13,52 +14,41 @@ export function mount(el, app) {
     el.replaceChildren(h('div.screen.screen-connect', null, body));
   }
 
-  /** タイトル: 大きな名前と、4 匹が並ぶ「プレイヤー選択」の画面 */
+  const version = () => h('p.app-version', null, typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev');
+
+  /** 部屋の画面の見出し（タイトルと同じ、ポスターの文字） */
   function hero() {
-    return h(
-      'div.hero',
-      null,
-      h('h1.logo', null, 'わんわんパーティー'),
-      h('p.lead', null, '1〜4人で遊ぶ、犬のミニゲーム集。招待URLを送れば、友だちとすぐ対戦できます。'),
-      h('ol.hero-dogs', { 'aria-label': '遊べる犬' },
-        PLAYERS.map((p, i) => h(`li.hero-dog.player-${p.color}`, { style: { '--i': i } },
-          h('span.hero-p', null, `P${i + 1}`),
-          h('span.hero-face', { html: dogAvatar(p.kind, 96) }),
-          h('span.hero-name', null, p.name)))),
-      h('p.app-version', null, typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'),
-    );
+    return h('div.hero', null, h('h1.logo', null, h('span.logo-line', null, 'わんわん'), h('span.logo-line', null, 'パーティー')), version());
   }
 
+  /** 4 匹の写真を貼った紙（少し傾けて貼る）と、蛍光の紙 1 枚 */
+  function dogWall() {
+    return h('div.dog-wall', null,
+      h('ol.dog-sheets', { 'aria-label': '遊べる犬' },
+        PLAYERS.map((p, i) => h(`li.dog-sheet.player-${p.color}`, null,
+          h('span.dog-photo', { html: dogAvatar(p.kind, 128) }),
+          h('span.dog-caption', null, h('b', null, `P${i + 1}`), p.name)))),
+      h('p.dog-tag', null, `${GAMES.length}つのゲーム`));
+  }
+
+  /** タイトル: 左にチラシの見出しと 2 つのボタン、右に 4 匹の写真の紙 */
   function renderStart() {
     const info = app.connectInfo;
     return h(
-      'div.connect-wrap',
+      'div.title-board',
       null,
-      hero(),
-      info.notice || info.error
-        ? h('div.start-msgs', null,
-            info.notice ? h('div.notice', null, info.notice) : null,
-            info.error ? h('div.error-box', { role: 'alert' }, info.error) : null)
-        : null,
-      h(
-        'div.start-choices',
-        null,
-        h(
-          'section.card.choice',
-          null,
-          h('h2', null, '友だちと遊ぶ'),
-          h('p', null, '部屋を作ると、あなたが柴犬（ホスト）になります。表示される招待URLを、遊ぶ相手（3人まで）に送ってください。相手はURLを開くだけで参加できます。'),
-          modePicker(info.busy),
+      h('div.title-copy', null,
+        h('h1.logo', null, h('span.logo-line', null, 'わんわん'), h('span.logo-line', null, 'パーティー')),
+        h('p.lead', null, '1〜4人で遊ぶ、犬のミニゲーム集。'),
+        info.notice ? h('div.notice', null, info.notice) : null,
+        info.error ? h('div.error-box', { role: 'alert' }, info.error) : null,
+        h('div.title-actions', null,
           h('button.btn.btn-primary.btn-xl', { onclick: () => app.createRoom(), disabled: info.busy }, info.busy ? '部屋を作っています…' : '部屋を作る'),
-        ),
-        h(
-          'section.card.choice',
-          null,
-          h('h2', null, 'ひとりで遊ぶ'),
-          h('p', null, '部屋を作らずに、すぐ遊べます。CPU の犬と対戦したり、記録に挑戦したりできます。通信はしません。'),
-          h('button.btn.btn-secondary.btn-xl', { onclick: () => app.startSolo(), disabled: info.busy }, 'ひとりで遊ぶ'),
-        ),
-      ),
+          h('button.btn.btn-light.btn-xl', { onclick: () => app.startSolo(), disabled: info.busy }, 'ひとりで遊ぶ')),
+        h('p.title-help', null, '部屋を作ると招待URLが出ます。送れば、あと3人まで参加できます。ひとりなら通信はしません。'),
+        modePicker(info.busy),
+        version()),
+      dogWall(),
     );
   }
 

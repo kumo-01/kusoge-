@@ -1,0 +1,77 @@
+[
+ {
+  "shape": "app screen",
+  "theme": "pasteup",
+  "axes": "mid/display-condensed/chromatic-yellow",
+  "hero": "flyer beside four dog photo sheets",
+  "nav": "kept top bar, copy-paper strip",
+  "footer": "none",
+  "imagery": "product",
+  "photos": [],
+  "entry": "redesign",
+  "fingerprint": "pasteup-flyer-wall",
+  "sections": [
+   "title",
+   "select wall of flyers",
+   "ready",
+   "result toner band"
+  ],
+  "signature": "title flyer beside four pasted dog photos",
+  "waived": [],
+  "prompt": "browser party minigame collection for 1-4 friends playing as dogs",
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "date": "2026-11-12"
+ },
+ {
+  "shape": "app screen",
+  "theme": "arcade",
+  "axes": "dark/pixel/chromatic-ember",
+  "hero": "marquee",
+  "nav": "kept top bar",
+  "footer": "none",
+  "imagery": "product",
+  "photos": [],
+  "entry": "redesign",
+  "fingerprint": "arcade-app-menu",
+  "sections": [
+   "title",
+   "select",
+   "ready",
+   "result"
+  ],
+  "signature": "four dogs as a player-select screen",
+  "waived": [],
+  "prompt": "browser party minigame collection",
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "date": "2026-11-12"
+ },
+ {
+  "shape": "app screen",
+  "theme": "hum",
+  "axes": "light/rounded-sans/chromatic-yellow",
+  "hero": "player-select row",
+  "nav": "kept top bar",
+  "footer": "none",
+  "imagery": "product",
+  "photos": [],
+  "entry": "redesign",
+  "fingerprint": "hum-app-menu",
+  "sections": [
+   "title",
+   "select",
+   "ready",
+   "result"
+  ],
+  "signature": "four dogs as a player-select row",
+  "waived": [],
+  "prompt": "browser party minigame collection for 1-4 friends playing as dogs",
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "date": "2026-11-12"
+ }
+]

@@ -162,7 +162,7 @@ export class Effects {
     c.width = 512;
     c.height = 192;
     const x = c.getContext('2d');
-    x.font = '104px "Chillax", "Kiwi Maru", sans-serif';
+    x.font = '104px "League Gothic", "Reggae One", sans-serif';
     x.textAlign = 'center';
     x.textBaseline = 'middle';
     x.lineJoin = 'round';

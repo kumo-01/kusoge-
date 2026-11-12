@@ -32,7 +32,7 @@ function canvasTexture(w, hgt, draw, { repeat = false } = {}) {
   return tex;
 }
 
-const FONT = '"Chillax", "Kiwi Maru", sans-serif';
+const FONT = '"League Gothic", "Reggae One", sans-serif';
 
 // コースごとの見た目（track.theme）
 const THEMES = {
