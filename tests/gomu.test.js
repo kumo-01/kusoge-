@@ -46,7 +46,7 @@ test('会場: 3 つとも、出発地点・アイテムの箱・押せるもの�
     assert.ok(a.spawns.length >= 8 && a.items.length >= 8, '広い会場なので出発地点・箱も多い');
   }
   assert.ok(Math.abs((ROOM.W * ROOM.D) / (52 * 40) - 1.5) < 0.01, '前の 1.5 倍の広さ');
-  assert.equal(ROUND.TIME, 360);
+  assert.equal(ROUND.TIME, 270, '4 分 30 秒（6 分の 3/4）');
   assert.equal(PLAYER.HP, 100);
 });
 
@@ -238,7 +238,7 @@ test('アイテム: 照準ぶれ・ゴム切れは自分以外、ガムを踏む
   assert.equal(sim.s.smokes.length, 0);
 });
 
-test('ラウンド: 6 分で 1 ラウンド、会場が変わって 3 ラウンドで終わる。点はラウンドごとにも数える', () => {
+test('ラウンド: 4 分 30 秒で 1 ラウンド、会場が変わって 3 ラウンドで終わる。点はラウンドごとにも数える', () => {
   const sim = new GomuSim({ humans: 1, bots: 3, seed: 5 });
   const rounds = [];
   let ticks = 0;

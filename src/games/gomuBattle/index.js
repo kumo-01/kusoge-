@@ -113,6 +113,7 @@ class GomuGame {
     this._onDown = (e) => {
       if (e.pointerType !== 'mouse' || this.paused) return;
       if (document.pointerLockElement !== cv) {
+        if (this.phase === 'pick') return; // 武器を選ぶ間はマウスを固定しない（カーソルでカードを押す）
         cv.requestPointerLock?.()?.catch?.(() => {});
         return;
       }
@@ -238,6 +239,12 @@ class GomuGame {
       p.fireCd = 0;
     }
     if (phase === 'pick') {
+      // 武器を選ぶ間は、マウスの固定を外してカーソルを出す（カードを押して選べるように）
+      if (document.pointerLockElement === this._cv) {
+        document.exitPointerLock?.();
+        this.fireHeld = false;
+        this._rightZoom = false;
+      }
       if (i.consume('Digit1', 'Numpad1')) this._pickWeapon(WEAPON.NORMAL);
       if (i.consume('Digit2', 'Numpad2')) this._pickWeapon(WEAPON.SNIPER);
       if (i.consume('Digit3', 'Numpad3')) this._pickWeapon(WEAPON.RIFLE);
@@ -1019,7 +1026,7 @@ class GomuGame {
       this._cd = n;
     }
     const locked = document.pointerLockElement === this._cv;
-    this.hud.setHint(this.paused || t ? '' : locked ? '' : '画面をクリックして操作開始（マウスで狙う・Esc で解除）');
+    this.hud.setHint(this.paused || t || this.phase === 'pick' ? '' : locked ? '' : '画面をクリックして操作開始（マウスで狙う・Esc で解除）');
   }
 
   /** 照準の先（まっすぐ AIM_RANGE まで）に、見えている相手がいるか */
