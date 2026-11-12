@@ -293,9 +293,9 @@ class AngleDuel extends HostedGame {
       g.textAlign = 'center';
       g.textBaseline = 'top';
       g.fillStyle = '#4a3426';
-      g.font = '900 26px "Chivo", "M PLUS 1", sans-serif';
+      g.font = '900 26px "M PLUS 1", sans-serif';
       g.fillText(`${fmtDeg(s.target)}° までもっていけ！`, w / 2, fy);
-      g.font = '700 16px "Chivo", "M PLUS 1", sans-serif';
+      g.font = '700 16px "M PLUS 1", sans-serif';
       g.fillStyle = ph === 'play' && remain < 3 ? '#e0344a' : '#7a6152';
       g.fillText(this.el.timer.querySelector('.g2d-timer-num').textContent, w / 2, fy + 34);
       top = Math.min(hh * 0.45, fy + 60);
@@ -353,7 +353,7 @@ class AngleDuel extends HostedGame {
       if (label) {
         const [lx0, ly0] = pt(deg, lr);
         const ly = Math.max(12, Math.min(hh - 12, ly0));
-        g.font = '700 15px "Chivo", "M PLUS 1", sans-serif';
+        g.font = '700 15px "M PLUS 1", sans-serif';
         const tw = g.measureText(label).width / 2 + 4;
         const lx = Math.max(tw, Math.min(w - tw, lx0)); // 画面からはみ出さない
         g.textAlign = 'center';
@@ -378,7 +378,7 @@ class AngleDuel extends HostedGame {
     // 基準線
     arm(0, '#7a6152', 5, 0, '');
     const [bx, by] = pt(0, R * 0.62);
-    g.font = '700 13px "Chivo", "M PLUS 1", sans-serif';
+    g.font = '700 13px "M PLUS 1", sans-serif';
     g.fillStyle = '#7a6152';
     g.textAlign = 'center';
     g.textBaseline = 'bottom';
@@ -417,7 +417,7 @@ class AngleDuel extends HostedGame {
         labels.push({ text: `${p.name} ${fmtDeg(a)}°`, col: p.col, x, y, alpha: appear });
       });
       // 名前のラベル: 画面からはみ出さず、重ならないように上下にずらす
-      g.font = '700 15px "Chivo", "M PLUS 1", sans-serif';
+      g.font = '700 15px "M PLUS 1", sans-serif';
       const LH = 19;
       for (const L of labels) {
         L.hw = g.measureText(L.text).width / 2 + 4;
@@ -452,7 +452,7 @@ class AngleDuel extends HostedGame {
       g.textAlign = 'center';
       g.textBaseline = 'middle';
       g.fillStyle = '#4a3426';
-      g.font = '900 22px "Chivo", "M PLUS 1", sans-serif';
+      g.font = '900 22px "M PLUS 1", sans-serif';
       g.fillText(`お題 ${fmtDeg(s.target)}°`, cx, Math.max(16, cy - R - 40));
       if (rt > 1.9 + this.n * 0.45 + 0.3 && !this._fanfare) {
         this._fanfare = true;

@@ -559,7 +559,7 @@ class PrefBattle extends HostedGame {
       g.fillRect(0, 0, w, hh);
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.font = '900 34px "Chivo", "M PLUS 1", sans-serif';
+      g.font = '900 34px "M PLUS 1", sans-serif';
       g.lineWidth = 6;
       g.strokeStyle = 'rgba(0,0,0,0.35)';
       const txt = `${prefOf(this.s.code).name}`;
@@ -633,7 +633,7 @@ class PrefBattle extends HostedGame {
         g.beginPath();
         roundRect(g, R, 14);
         g.stroke();
-        g.font = '900 16px "Chivo", "M PLUS 1", sans-serif';
+        g.font = '900 16px "M PLUS 1", sans-serif';
         g.textAlign = 'left';
         g.textBaseline = 'top';
         g.fillStyle = p.col;
@@ -668,7 +668,7 @@ class PrefBattle extends HostedGame {
       // 凡例（地図の左下）
       g.save();
       g.globalAlpha = bandT;
-      g.font = '700 12px "Chivo", "M PLUS 1", sans-serif';
+      g.font = '700 12px "M PLUS 1", sans-serif';
       const lines2 = [`🟨 濃い帯: 県境から ${(T * FULL_RATIO).toFixed(1)}km 以内 = 満点`, `🟨 うすい帯: ${(T * ZERO_RATIO).toFixed(1)}km 以内 = 遠いほど減点（外は 0 点）`];
       const bw = Math.max(...lines2.map((x) => g.measureText(x).width)) + 16;
       const bx = C.x + 8;
@@ -731,7 +731,7 @@ class PrefBattle extends HostedGame {
       g.globalAlpha = a;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.font = `900 ${Math.min(64, w * 0.12) * (1 + 0.15 * (1 - Math.min(1, rt / 0.3)))}px "Chivo", "M PLUS 1", sans-serif`;
+      g.font = `900 ${Math.min(64, w * 0.12) * (1 + 0.15 * (1 - Math.min(1, rt / 0.3)))}px "M PLUS 1", sans-serif`;
       g.lineWidth = 10;
       g.strokeStyle = '#4a3426';
       g.strokeText('そこまで！', w / 2, hh / 2);
@@ -743,7 +743,7 @@ class PrefBattle extends HostedGame {
     if (merge >= 1) {
       g.textAlign = 'center';
       g.textBaseline = 'top';
-      g.font = '900 20px "Chivo", "M PLUS 1", sans-serif';
+      g.font = '900 20px "M PLUS 1", sans-serif';
       g.lineWidth = 5;
       g.strokeStyle = 'rgba(0,0,0,0.45)';
       g.strokeText(`お題: ${pref.name}`, w / 2, C.y + 8);
