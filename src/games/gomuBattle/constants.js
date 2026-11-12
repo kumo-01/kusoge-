@@ -4,6 +4,7 @@
 export const ROUND = {
   COUNT: 3, // ラウンド数
   TIME: 360, // 1 ラウンドの長さ（秒）
+  PICK: 12, // ラウンドの前に武器を選ぶ時間（全員が選んだら早く進む）
   INTRO: 3, // 始まる前の 3・2・1
   END: 4, // ラウンドの終わりの結果表示
 };
@@ -116,3 +117,51 @@ export const ITEM_INFO = {
   [ITEM.HEAL]: { name: '回復おやつ', icon: 'heal', desc: '体力が3回復する' },
   [ITEM.STAR]: { name: '無敵スター', icon: 'star', desc: '10秒間、輪ゴムもガムも効かない' },
 };
+
+/** 武器（ラウンドの前の選択画面で選ぶ） */
+export const WEAPON = { NORMAL: 0, SNIPER: 1 };
+export const WEAPONS = {
+  [WEAPON.NORMAL]: { name: '輪ゴム鉄砲', desc: '5発ずつ。連射がきいて扱いやすい', ammo: 5, reload: 1.5, gap: 0.18, speed: 28, gravity: 2.5, dmg: 1, r: 0.08, life: 1.8 },
+  // スナイパー: 遠くまでまっすぐ速く飛んで 3 ダメージ。3 発ずつで連射は遅い。のぞくと拡大
+  [WEAPON.SNIPER]: { name: 'スナイパー', desc: '3発ずつ。遠くまでまっすぐ飛んで3ダメージ。のぞくと拡大', ammo: 3, reload: 2.4, gap: 1.0, speed: 72, gravity: 0.3, dmg: 3, r: 0.06, life: 1.6, zoomFov: 24 },
+};
+
+/** 遊び方 */
+export const MODE = { FFA: 'ffa', TEAM: 'team', BOSS: 'boss' };
+
+/** チーム戦のチーム（番号の偶数・奇数で 2 チーム。人と CPU を交互に並べるので人数がそろう） */
+export const TEAMS = [
+  { name: 'あかチーム', css: '#e04f3a', hex: 0xe04f3a },
+  { name: 'あおチーム', css: '#2f6fe0', hex: 0x2f6fe0 },
+];
+export const teamOf = (mode, i) => (mode === MODE.TEAM ? i % 2 : -1);
+
+/** ボス戦: でけぇ猫 */
+export const BOSS = {
+  NAME: 'でけぇ猫',
+  HP_BASE: 60, // 体力 = HP_BASE + HP_PER × 人数（CPU も入れた全員）× ラウンドの倍率
+  HP_PER: 80,
+  ROUND_MUL: [1, 1.2, 1.4],
+  RADIUS: 2.1, // ぶつかる太さ
+  HIT_RADIUS: 2.3, // 輪ゴムが当たる太さ
+  HEIGHT: 3.6,
+  SPEED: 4.2,
+  TURN: 3,
+  SWIPE_RANGE: 3.9, // ひっかきが届く距離
+  SWIPE_WIND: 0.55, // 前ぶり（よけられる）
+  SWIPE_DMG: 2,
+  POUNCE_EVERY: [4, 7], // とびかかりの間隔（秒）
+  POUNCE_WIND: 0.7,
+  POUNCE_TIME: 0.9,
+  POUNCE_RADIUS: 3.8,
+  POUNCE_DMG: 2,
+  SPIT_EVERY: [2.6, 4.5], // 毛玉を吐く間隔
+  SPIT_SPEED: 20,
+  SPIT_RADIUS: 0.35,
+  SPIT_DMG: 1,
+  KILL_BONUS: 5, // とどめを刺した人
+  DIZZY: 3, // 照準ぶれ・ゴム切れを使われると、ふらふらで攻撃しない
+  STUCK: 2, // ガムを踏むと動けない
+};
+/** 毛玉（猫が吐く玉）の種類の番号（輪ゴムの種類と同じ並びで扱う） */
+export const HAIRBALL = 20;

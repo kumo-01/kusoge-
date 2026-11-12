@@ -1,7 +1,7 @@
 // 犬の動き（歩く・ジャンプ・ダッシュ・伏せ）と、輪ゴムの飛び方。
 // 自分の犬は自分の端末で、CPU の犬はホストが、同じ stepMove で動かす。輪ゴムはホストが正本（ゲストは見た目だけ同じ計算）
 
-import { PLAYER, GUN, ITEMS, ITEM } from './constants.js';
+import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL } from './constants.js';
 import { ROOM, overlapXZ, segmentHit } from './arena.js';
 
 /** 動く体（犬）の初期値 */
@@ -233,10 +233,13 @@ export function aimDir(yaw, pitch) {
 }
 
 /** 輪ゴムの種類ごとの速さ・太さ・ダメージ・跳ね返り・飛んでいられる時間 */
-export function bandSpec(kind) {
-  if (kind === ITEM.THICK) return { speed: ITEMS.THICK_SPEED, r: ITEMS.THICK_RADIUS, dmg: ITEMS.THICK_DAMAGE, bounce: 0, life: GUN.LIFE };
-  if (kind === ITEM.BOUNCE) return { speed: GUN.SPEED, r: GUN.RADIUS, dmg: 1, bounce: ITEMS.BOUNCES, life: ITEMS.BOUNCE_LIFE };
-  return { speed: GUN.SPEED, r: GUN.RADIUS, dmg: 1, bounce: 0, life: GUN.LIFE };
+export function bandSpec(kind, weapon = WEAPON.NORMAL) {
+  const w = WEAPONS[weapon] || WEAPONS[WEAPON.NORMAL];
+  const base = { speed: w.speed, r: w.r, dmg: w.dmg, bounce: 0, life: w.life, g: w.gravity };
+  if (kind === ITEM.THICK) return { ...base, speed: weapon === WEAPON.SNIPER ? w.speed * 0.8 : ITEMS.THICK_SPEED, r: ITEMS.THICK_RADIUS, dmg: weapon === WEAPON.SNIPER ? w.dmg + 1 : ITEMS.THICK_DAMAGE };
+  if (kind === ITEM.BOUNCE) return { ...base, bounce: ITEMS.BOUNCES, life: Math.max(w.life, ITEMS.BOUNCE_LIFE) };
+  if (kind === HAIRBALL) return { speed: BOSS.SPIT_SPEED, r: BOSS.SPIT_RADIUS, dmg: BOSS.SPIT_DMG, bounce: 0, life: 3, g: 4 };
+  return base;
 }
 
 const hitOut = { t: 1, nx: 0, ny: 0, nz: 0 };
@@ -275,7 +278,7 @@ export function stepBand(b, dt, arena, target = null) {
       b.vy = ny * sp;
       b.vz = nz * sp;
     }
-  } else b.vy -= GUN.GRAVITY * dt;
+  } else b.vy -= (b.g ?? GUN.GRAVITY) * dt;
   // 速いので、途中で家具を飛び越えないように線分で当たりを見る
   let rest = 1;
   for (let k = 0; k < 3 && rest > 1e-4; k++) {

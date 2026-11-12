@@ -2415,3 +2415,167 @@ body[data-screen='game'] {
   margin-right: 0.35em;
   vertical-align: -0.05em;
 }
+
+/* ---- ゴム鉄砲: 武器えらび・猫の体力・スコープ・チーム ---- */
+.gm-pick {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: rgba(20, 16, 12, 0.45);
+  pointer-events: auto;
+}
+.gm-pick h2 {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 2.2rem;
+  color: var(--paper);
+  margin: 0;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+.gm-pick-row {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.gm-pick-card {
+  font: inherit;
+  width: min(260px, 42vw);
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 18px 14px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+  cursor: pointer;
+  text-align: center;
+  touch-action: manipulation;
+  transition: translate 0.12s, box-shadow 0.12s;
+}
+.gm-pick-card:hover {
+  translate: 0 -3px;
+}
+.gm-pick-card:active {
+  translate: 4px 4px;
+  box-shadow: none;
+}
+.gm-pick-card:focus-visible {
+  outline: 3px solid var(--ball);
+  outline-offset: 3px;
+}
+.gm-pick-card.on {
+  background: var(--ball);
+}
+.gm-pick-card b {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 1.5rem;
+}
+.gm-pick-card small {
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.gm-pick-card kbd {
+  font-size: 0.75rem;
+}
+.gm-pick-info {
+  color: var(--paper);
+  font-weight: 700;
+  margin: 0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.gm-boss {
+  position: absolute;
+  top: 78px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, 70vw);
+  text-align: center;
+  color: var(--paper);
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.gm-boss-name {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+.gm-boss-num {
+  font-variant-numeric: tabular-nums;
+}
+.gm-boss-bar {
+  height: 14px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid var(--paper);
+  overflow: hidden;
+}
+.gm-boss-bar i {
+  display: block;
+  height: 100%;
+  background: var(--orange);
+  transform-origin: left center;
+  transition: transform 0.15s;
+}
+.gm-boss.is-dizzy .gm-boss-bar i {
+  background: var(--purple);
+}
+.gm-scope {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, transparent 0 min(38vw, 38vh), rgba(10, 10, 10, 0.92) calc(min(38vw, 38vh) + 2px));
+}
+.gm-scope::before,
+.gm-scope::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: rgba(10, 10, 10, 0.8);
+}
+.gm-scope::before {
+  width: 2px;
+  height: min(76vw, 76vh);
+  transform: translate(-50%, -50%);
+}
+.gm-scope::after {
+  height: 2px;
+  width: min(76vw, 76vh);
+  transform: translate(-50%, -50%);
+}
+.gm-row.gm-team {
+  font-size: 1.05em;
+  background: rgba(0, 0, 0, 0.55);
+}
+.gt-zoom {
+  right: calc(max(24px, env(safe-area-inset-right)) + 118px);
+  bottom: 158px;
+  width: 58px;
+  height: 58px;
+}
+.gt-zoom.on {
+  background: rgba(30, 30, 30, 0.85);
+}
+@media (prefers-reduced-motion: reduce) {
+  .gm-pick-card,
+  .gm-boss-bar i {
+    transition: none;
+  }
+}
+/* ボス戦では、猫の体力バーの下にお知らせを出す（重ならないように） */
+.gomu-hud:has(.gm-boss:not([hidden])) .gm-feed {
+  top: 124px;
+}
+.gomu-hud.is-touch:has(.gm-boss:not([hidden])) .gm-feed {
+  top: 150px;
+}

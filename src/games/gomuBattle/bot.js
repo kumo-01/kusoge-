@@ -1,7 +1,7 @@
 // CPU の犬の考え方。見える相手がいれば狙って撃ち、横に動いてよける。いなければアイテムの箱や相手のいた所へ向かう。
 // ぶつかって進めないときはジャンプ・伏せ・行き先の変更で抜け出す。
 
-import { BOT, PLAYER, ITEM, ITEMS, BAND_ITEMS, GUN } from './constants.js';
+import { BOT, PLAYER, ITEM, ITEMS, BAND_ITEMS, GUN, WEAPON, WEAPONS, BOSS } from './constants.js';
 import { canSee, ROOM } from './arena.js';
 import { aimDir, eyeOf, heightOf } from './physics.js';
 
@@ -35,9 +35,14 @@ export function botThink(sim, p, dt) {
   if ((b.look -= dt) <= 0) {
     b.look = 0.12;
     let best = -1;
-    let bd = BOT.VIEW;
-    for (const q of sim.s.players) {
-      if (q.i === p.i || q.dead > 0) continue;
+    let bd = BOT.VIEW * (p.weapon === WEAPON.SNIPER ? 1.6 : 1);
+    const boss = sim.s.boss;
+    if (boss && boss.hp > 0) {
+      // ボス戦: 猫だけを狙う（見えていれば）
+      const by = boss.y + BOSS.HEIGHT * 0.6;
+      if (canSee(arena, ex, ey, ez, boss.x, by, boss.z) && !smokeBlocks(sim, ex, ey, ez, boss.x, by, boss.z)) best = -2;
+    } else for (const q of sim.s.players) {
+      if (!sim.foes(p.i, q.i) || q.dead > 0) continue;
       const d = Math.hypot(q.x - p.x, q.z - p.z);
       if (d >= bd) continue;
       const qy = q.y + heightOf(q) * 0.6;
@@ -48,7 +53,9 @@ export function botThink(sim, p, dt) {
     if (best !== b.tgt) b.see = 0;
     b.tgt = best;
   }
-  const q = b.tgt >= 0 ? sim.s.players[b.tgt] : null;
+  const bs = sim.s.boss;
+  const q = b.tgt === -2 && bs && bs.hp > 0 ? { i: -2, x: bs.x, y: bs.y, z: bs.z, dead: 0, h: BOSS.HEIGHT } : b.tgt >= 0 ? sim.s.players[b.tgt] : null;
+  const W = WEAPONS[p.weapon] || WEAPONS[WEAPON.NORMAL];
   // 狙いのぶれ（ゆっくり変わる。照準ぶれのときは大きい）
   if ((b.errT -= dt) <= 0) {
     b.errT = 0.4 + rnd() * 0.4;
@@ -64,13 +71,13 @@ export function botThink(sim, p, dt) {
     const vx = pv ? (q.x - pv.x) / dt : 0;
     const vz = pv ? (q.z - pv.z) / dt : 0;
     b.prevT[q.i] = { x: q.x, z: q.z };
-    const qy = q.y + heightOf(q) * 0.55;
+    const qy = q.y + (q.h ?? heightOf(q)) * 0.55;
     const dist = Math.hypot(q.x - ex, qy - ey, q.z - ez);
-    const lead = Math.min(0.6, dist / GUN.SPEED) * BOT.LEAD;
+    const lead = Math.min(0.6, dist / W.speed) * BOT.LEAD;
     const tx = q.x + vx * lead;
     const tz = q.z + vz * lead;
     const hd = Math.hypot(tx - ex, tz - ez);
-    const drop = 0.5 * GUN.GRAVITY * (hd / GUN.SPEED) ** 2; // 少し落ちるので上を狙う
+    const drop = 0.5 * W.gravity * (hd / W.speed) ** 2; // 少し落ちるので上を狙う
     const wantYaw = Math.atan2(tx - ex, tz - ez) + b.err[0];
     const wantPitch = Math.atan2(qy + drop - ey, hd) + b.err[1];
     const turn = BOT.TURN * dt;
@@ -83,10 +90,13 @@ export function botThink(sim, p, dt) {
       b.strafe = rnd() < 0.5 ? -1 : 1;
     }
     inp.fx = b.strafe;
-    inp.fz = dist > 12 ? 1 : dist < 4 ? -0.7 : 0;
+    // 間合い: スナイパーは遠くから、ボス戦は猫の手が届かない所から
+    if (q.i === -2) inp.fz = dist > 14 ? 1 : dist < 8 ? -1 : 0;
+    else if (p.weapon === WEAPON.SNIPER) inp.fz = dist > 24 ? 1 : dist < 10 ? -0.8 : 0;
+    else inp.fz = dist > 12 ? 1 : dist < 4 ? -0.7 : 0;
     if (p.stun > 0 && rnd() < 0.05) inp.dash = true;
     // 撃つ（見つけてから少し待ってから、だいたい狙えているとき）
-    if (b.see > BOT.REACT && Math.abs(dy) < 0.1 && dist < BOT.VIEW) {
+    if (b.see > BOT.REACT && Math.abs(dy) < (p.weapon === WEAPON.SNIPER ? 0.06 : 0.1) && dist < BOT.VIEW * (p.weapon === WEAPON.SNIPER ? 1.6 : 1)) {
       const d = aimDir(p.yaw, p.pitch);
       sim.tryFire(p, [ex, ey, ez], d);
     }

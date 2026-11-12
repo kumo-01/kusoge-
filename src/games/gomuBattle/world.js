@@ -4,7 +4,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { buildDog } from '../dogKart/dog.js';
 import { device } from '../../core/device.js';
 import { ROOM } from './arena.js';
-import { ITEM, ITEMS, PLAYER } from './constants.js';
+import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS } from './constants.js';
 
 /** 輪ゴムの色（種類ごと） */
 export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]: 0x2a9d8f, [ITEM.BOUNCE]: 0x3a86ff, [ITEM.HOMING]: 0x9b5de5 };
@@ -33,6 +33,25 @@ function floorTexture(kind, color) {
     for (let i = 0; i <= 4; i++) {
       x.fillRect(i * 64 - 1, 0, 3, 256);
       x.fillRect(0, i * 64 - 1, 256, 3);
+    }
+  } else if (kind === 'grass') {
+    // 芝生: 短い草の線
+    for (let i = 0; i < 1800; i++) {
+      x.fillStyle = css(0.82 + Math.random() * 0.3);
+      x.fillRect(Math.random() * 256, Math.random() * 256, 2, 4 + Math.random() * 4);
+    }
+  } else if (kind === 'sand' || kind === 'dirt') {
+    for (let i = 0; i < 3000; i++) {
+      x.fillStyle = css(0.86 + Math.random() * 0.22);
+      x.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+    }
+    if (kind === 'dirt') {
+      for (let i = 0; i < 40; i++) {
+        x.fillStyle = css(0.7);
+        x.beginPath();
+        x.arc(Math.random() * 256, Math.random() * 256, 2 + Math.random() * 3, 0, Math.PI * 2);
+        x.fill();
+      }
     }
   } else {
     // カーペット: 細かいざらざら
@@ -138,41 +157,45 @@ export class GomuWorld {
     const W = ROOM.W;
     const D = ROOM.D;
     const H = ROOM.WALL;
-    // 床・壁・天井
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), toon(0xffffff, { map: floorTexture(arena.floorK, arena.floor) }));
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    G.add(floor);
-    const wallMat = toon(arena.wall);
-    const base = toon(0xffffff);
-    const walls = [
-      [0, -D / 2, 0, W],
-      [0, D / 2, Math.PI, W],
-      [-W / 2, 0, Math.PI / 2, D],
-      [W / 2, 0, -Math.PI / 2, D],
-    ];
-    for (const [x, z, ry, len] of walls) {
-      const w = new THREE.Mesh(new THREE.PlaneGeometry(len, H), wallMat);
-      w.position.set(x, H / 2, z);
-      w.rotation.y = ry;
-      w.receiveShadow = true;
-      G.add(w);
-      const b = new THREE.Mesh(new THREE.BoxGeometry(len, 0.35, 0.08), base);
-      b.position.set(x, 0.17, z);
-      b.rotation.y = ry;
-      b.translateZ(0.04);
-      G.add(b);
-    }
-    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, D), toon(0xfffdf8));
-    ceil.rotation.x = Math.PI / 2;
-    ceil.position.y = H;
-    G.add(ceil);
-    // 天井の照明（丸い光）
-    const lampMat = new THREE.MeshBasicMaterial({ color: 0xfffbe6 });
-    for (const [lx, lz] of [[-W / 4, -D / 5], [W / 4, -D / 5], [-W / 4, D / 5], [W / 4, D / 5]]) {
-      const l = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.2, 24), lampMat);
-      l.position.set(lx, H - 0.1, lz);
-      G.add(l);
+    if (arena.outdoor) this._buildOutdoor(G, arena);
+    else {
+      // 床・壁・天井
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), toon(0xffffff, { map: floorTexture(arena.floorK, arena.floor) }));
+      floor.userData.noCast = true;
+      floor.rotation.x = -Math.PI / 2;
+      floor.receiveShadow = true;
+      G.add(floor);
+      const wallMat = toon(arena.wall);
+      const base = toon(0xffffff);
+      const walls = [
+        [0, -D / 2, 0, W],
+        [0, D / 2, Math.PI, W],
+        [-W / 2, 0, Math.PI / 2, D],
+        [W / 2, 0, -Math.PI / 2, D],
+      ];
+      for (const [x, z, ry, len] of walls) {
+        const w = new THREE.Mesh(new THREE.PlaneGeometry(len, H), wallMat);
+        w.position.set(x, H / 2, z);
+        w.rotation.y = ry;
+        w.receiveShadow = true;
+        G.add(w);
+        const b = new THREE.Mesh(new THREE.BoxGeometry(len, 0.35, 0.08), base);
+        b.position.set(x, 0.17, z);
+        b.rotation.y = ry;
+        b.translateZ(0.04);
+        G.add(b);
+      }
+      const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, D), toon(0xfffdf8));
+      ceil.rotation.x = Math.PI / 2;
+      ceil.position.y = H;
+      G.add(ceil);
+      // 天井の照明（丸い光）
+      const lampMat = new THREE.MeshBasicMaterial({ color: 0xfffbe6 });
+      for (const [lx, lz] of [[-W / 4, -D / 5], [W / 4, -D / 5], [-W / 4, D / 5], [W / 4, D / 5]]) {
+        const l = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.2, 24), lampMat);
+        l.position.set(lx, H - 0.1, lz);
+        G.add(l);
+      }
     }
     // 家具
     for (const b of arena.boxes) G.add(this._furniture(b));
@@ -196,7 +219,7 @@ export class GomuWorld {
     });
     this.scene.add(G);
     G.traverse((o) => {
-      if (o.isMesh && o !== floor) o.castShadow = true;
+      if (o.isMesh && !o.userData.noCast) o.castShadow = true;
       if (o.isMesh) o.receiveShadow = true;
     });
     // 動かないものの行列は 1 回だけ
@@ -210,6 +233,74 @@ export class GomuWorld {
     // 前の会場の煙・ガム・輪ゴムは消す
     for (const id of [...this.smokes.keys()]) this.removeSmoke(id);
     for (const id of [...this.gums.keys()]) this.removeGum(id);
+  }
+
+  /** 屋外: 空・地面（柵の外まで続く）・まわりの柵・遠くの丘と雲 */
+  _buildOutdoor(G, arena) {
+    const W = ROOM.W;
+    const D = ROOM.D;
+    this.scene.background = new THREE.Color(arena.sky);
+    this.scene.fog = new THREE.Fog(arena.sky, 70, 150);
+    const tex = floorTexture(arena.ground, arena.floor);
+    tex.repeat.set((W + 120) / 4, (D + 120) / 4);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(W + 120, D + 120), toon(0xffffff, { map: tex }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.userData.noCast = true;
+    G.add(ground);
+    // 柵（ここから外へは出られない）。木の柵か、ロープと杭
+    const wood = toon(arena.fence === 'rope' ? 0xa47148 : 0xc8a165);
+    const rope = toon(0xf1faee);
+    const sides = [
+      [0, -D / 2, W, 0],
+      [0, D / 2, W, 0],
+      [-W / 2, 0, D, Math.PI / 2],
+      [W / 2, 0, D, Math.PI / 2],
+    ];
+    for (const [x, z, len, ry] of sides) {
+      const n = Math.ceil(len / 2.4);
+      for (let k = 0; k <= n; k++) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2, 0.3), wood);
+        const a = -len / 2 + (k * len) / n;
+        post.position.set(x + (ry ? 0 : a), 1, z + (ry ? a : 0));
+        G.add(post);
+      }
+      for (const y of arena.fence === 'rope' ? [1.2, 1.8] : [0.7, 1.5]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(len, arena.fence === 'rope' ? 0.08 : 0.22, arena.fence === 'rope' ? 0.08 : 0.12), arena.fence === 'rope' ? rope : wood);
+        rail.position.set(x, y, z);
+        rail.rotation.y = ry;
+        G.add(rail);
+      }
+    }
+    // 遠くの丘・木（柵の外。当たりはない）
+    const hillMat = toon(arena.ground === 'sand' ? 0x7cc6e8 : 0x76b852);
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * Math.PI * 2 + 0.3;
+      const r = 62 + (k % 3) * 8;
+      const hill = new THREE.Mesh(new THREE.SphereGeometry(14 + (k % 4) * 4, 16, 10), hillMat);
+      hill.scale.y = arena.ground === 'sand' && Math.sin(a) < 0 ? 0.04 : 0.45; // 砂浜の北は海（平ら）
+      hill.position.set(Math.cos(a) * r, -2, Math.sin(a) * r * 0.85);
+      hill.userData.noCast = true;
+      G.add(hill);
+    }
+    if (arena.ground === 'sand') {
+      const sea = new THREE.Mesh(new THREE.PlaneGeometry(W + 120, 60), toon(0x48cae4));
+      sea.rotation.x = -Math.PI / 2;
+      sea.position.set(0, 0.02, -D / 2 - 30);
+      sea.userData.noCast = true;
+      G.add(sea);
+    }
+    const cloudMat = toon(0xffffff);
+    for (let k = 0; k < 7; k++) {
+      const c = new THREE.Group();
+      for (let j = 0; j < 4; j++) {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(2.2 + (j % 2), 12, 8), cloudMat);
+        m.position.set(j * 2.4 - 3.6, (j % 2) * 0.8, 0);
+        m.userData.noCast = true;
+        c.add(m);
+      }
+      c.position.set(-50 + k * 17, 24 + (k % 3) * 4, -40 + ((k * 23) % 80));
+      G.add(c);
+    }
   }
 
   _furniture(b) {
@@ -234,7 +325,83 @@ export class GomuWorld {
         food.position.y = h / 2 - 0.04;
         o.add(food);
       }
-    } else if (['fabric', 'cushion', 'bed', 'toy'].includes(b.k)) {
+    } else if (b.k === 'trunk' || b.k === 'stump') {
+      const r = Math.min(w, d) / 2;
+      o = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.85, r, h, 12), mat);
+      if (b.k === 'stump') {
+        const top = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.8, r * 0.8, 0.04, 12), toon(0xe9c46a));
+        top.position.y = h / 2;
+        o.add(top);
+      }
+    } else if (b.k === 'rock') {
+      o = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5, 0), mat);
+      o.scale.set(w, h * 1.1, d);
+    } else if (b.k === 'hedge' || b.k === 'sand') {
+      o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, Math.min(0.4, Math.min(w, d, h) * 0.3)), mat);
+    } else if (b.k === 'log') {
+      const along = w >= d;
+      const r = Math.min(along ? d : w, h) / 2;
+      o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, along ? w : d, 12), mat);
+      o.rotation[along ? 'z' : 'x'] = Math.PI / 2;
+      o.scale.y = 1;
+      const end = toon(0xe9c46a);
+      for (const sgn of [-1, 1]) {
+        const e = new THREE.Mesh(new THREE.CircleGeometry(r * 0.9, 12), end);
+        e.position.y = (sgn * (along ? w : d)) / 2 + sgn * 0.005;
+        e.rotation.x = sgn * -Math.PI / 2;
+        o.add(e);
+      }
+      // 寝かせた円柱は、上下を (h) の中心に
+    } else if (b.k === 'umbrella') {
+      o = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) / 2 + 0.3, 1.1, 16, 1, true), toon(b.c, { side: THREE.DoubleSide }));
+      o.position.y = 0.3;
+    } else if (b.k === 'tent') {
+      // 三角の屋根（横から見て三角）
+      const shape = new THREE.Shape([new THREE.Vector2(-w / 2, -h / 2), new THREE.Vector2(w / 2, -h / 2), new THREE.Vector2(0, h / 2)]);
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: d, bevelEnabled: false });
+      geo.translate(0, 0, -d / 2);
+      o = new THREE.Mesh(geo, mat);
+      const door = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.3, h * 0.6), toon(0x3d2b1f));
+      door.position.set(0, -h * 0.2, d / 2 + 0.01);
+      o.add(door);
+    } else if (b.k === 'car') {
+      o = new THREE.Mesh(new RoundedBoxGeometry(w, h * 0.55, d, 2, 0.2), mat);
+      o.position.y = 0;
+      const cab = new THREE.Mesh(new RoundedBoxGeometry(w * 0.55, h * 0.45, d * 0.92, 2, 0.15), mat);
+      cab.position.set(-w * 0.05, h * 0.5, 0);
+      const glass = toon(0xbfe6ff);
+      const win = new THREE.Mesh(new THREE.BoxGeometry(w * 0.5, h * 0.3, d * 0.94), glass);
+      win.position.set(-w * 0.05, h * 0.52, 0);
+      o.add(cab, win);
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.3, 14), toon(0x222222));
+        wh.rotation.x = Math.PI / 2;
+        wh.position.set(sx * w * 0.32, -h * 0.28, sz * (d / 2));
+        o.add(wh);
+      }
+      o.position.set(cx, h * 0.3, cz);
+      return o;
+    } else if (b.k === 'fire') {
+      o = new THREE.Group();
+      for (let k = 0; k < 3; k++) {
+        const lg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, w, 8), toon(0x6d4c41));
+        lg.rotation.z = Math.PI / 2;
+        lg.rotation.y = (k * Math.PI) / 3;
+        lg.position.y = -h / 2 + 0.12;
+        o.add(lg);
+      }
+    } else if (b.k === 'boat') {
+      o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, 0.4), mat);
+      const inner = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 0.05, d * 0.85), toon(0x118ab2));
+      inner.position.y = h / 2 + 0.01;
+      o.add(inner);
+    } else if (b.k === 'pond') {
+      o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.5, d - 0.5), toon(0x48cae4));
+      water.rotation.x = -Math.PI / 2;
+      water.position.y = h / 2 + 0.01;
+      o.add(water);
+    } else if (['fabric', 'cushion', 'bed', 'toy', 'play', 'step'].includes(b.k)) {
       const rad = Math.min(0.18, Math.min(w, d, h) * 0.25);
       o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, rad), mat);
     } else {
@@ -334,6 +501,24 @@ export class GomuWorld {
       hand.position.set(0, d.r * 0.35, 0.02);
       g.add(hand);
       return onWall(g, d.wall, d.x ?? d.z, d.y);
+    }
+    if (d.type === 'water') {
+      const o = new THREE.Mesh(new THREE.PlaneGeometry(d.w, d.d), toon(d.c, { transparent: true, opacity: 0.85 }));
+      o.rotation.x = -Math.PI / 2;
+      o.position.set(d.x, 0.03, d.z);
+      return o;
+    }
+    if (d.type === 'fire') {
+      // たき火の炎（光る三角。当たりはない）
+      const g = new THREE.Group();
+      const m1 = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.1, 8), new THREE.MeshBasicMaterial({ color: 0xff9f1c }));
+      const m2 = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.7, 8), new THREE.MeshBasicMaterial({ color: 0xffe066 }));
+      m1.position.y = 0.55;
+      m2.position.y = 0.4;
+      m1.userData.noCast = m2.userData.noCast = true;
+      g.add(m1, m2);
+      g.position.set(d.x, d.y, d.z);
+      return g;
     }
     if (d.type === 'leaves') {
       const g = new THREE.Group();
@@ -469,17 +654,141 @@ export class GomuWorld {
     });
   }
 
+  // ---- ボス戦の猫 ----
+  _buildCat() {
+    const root = new THREE.Group();
+    const body = new THREE.Group(); // しゃがむ・倒れる・ゆれるのはここ
+    const fur = toon(0xf4a259);
+    const dark = toon(0xc9762f);
+    const white = toon(0xfff7ec);
+    const pink = toon(0xff8fab);
+    const mats = [fur, dark, white];
+    const add = (geo, mat, x, y, z, sx = 1, sy = 1, sz = 1, parent = body) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      m.scale.set(sx, sy, sz);
+      m.castShadow = true;
+      parent.add(m);
+      return m;
+    };
+    const sph = new THREE.SphereGeometry(1, 20, 14);
+    add(sph, fur, 0, 1.75, 0, 1.45, 1.2, 2.1);
+    add(sph, white, 0, 1.45, 0.9, 1.05, 0.9, 1.1);
+    for (const z of [-1, -0.3, 0.4]) add(new THREE.BoxGeometry(2.2, 0.18, 0.35), dark, 0, 2.75, z, 1, 1, 1).rotation.x = 0.1;
+    const head = new THREE.Group();
+    head.position.set(0, 2.95, 1.85);
+    body.add(head);
+    add(sph, fur, 0, 0, 0, 1.08, 0.98, 1, head);
+    add(sph, white, 0, -0.3, 0.75, 0.55, 0.42, 0.4, head);
+    for (const sx of [-1, 1]) {
+      const ear = add(new THREE.ConeGeometry(0.42, 0.85, 4), fur, sx * 0.55, 0.95, -0.05, 1, 1, 0.6, head);
+      ear.rotation.z = -sx * 0.25;
+      const inner = add(new THREE.ConeGeometry(0.24, 0.5, 4), pink, sx * 0.55, 0.9, 0.08, 1, 1, 0.4, head);
+      inner.rotation.z = -sx * 0.25;
+      add(sph, toon(0x7bd88f), sx * 0.38, 0.12, 0.82, 0.2, 0.24, 0.1, head);
+      add(new THREE.BoxGeometry(0.06, 0.32, 0.05), toon(0x111111), sx * 0.38, 0.12, 0.92, 1, 1, 1, head);
+      for (const k of [-1, 0, 1]) {
+        const wk = add(new THREE.BoxGeometry(0.9, 0.025, 0.025), white, sx * 0.75, -0.3 + k * 0.1, 0.8, 1, 1, 1, head);
+        wk.rotation.z = sx * k * 0.12;
+      }
+    }
+    add(sph, pink, 0, -0.12, 1.0, 0.12, 0.09, 0.08, head);
+    // 足（前足は振り上げる）
+    const legGeo = new THREE.CylinderGeometry(0.34, 0.3, 1.5, 10);
+    const legs = [];
+    for (const [x, z] of [[-0.8, 1.15], [0.8, 1.15], [-0.85, -1.2], [0.85, -1.2]]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(x, 1.45, z);
+      body.add(pivot);
+      add(legGeo, fur, 0, -0.72, 0, 1, 1, 1, pivot);
+      add(sph, white, 0, -1.45, 0.08, 0.38, 0.22, 0.45, pivot);
+      legs.push(pivot);
+    }
+    // しっぽ（ゆらゆら）
+    const tail = new THREE.Group();
+    tail.position.set(0, 2.1, -2);
+    body.add(tail);
+    for (let k = 0; k < 5; k++) add(sph, k % 2 ? dark : fur, 0, k * 0.42, -k * 0.18, 0.28, 0.32, 0.28, tail);
+    const blob = new THREE.Mesh(new THREE.CircleGeometry(2.4, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
+    blob.rotation.x = -Math.PI / 2;
+    blob.position.y = 0.03;
+    root.add(body, blob);
+    root.visible = false;
+    this.scene.add(root);
+    this.cat = { root, body, head, legs, tail, blob, mats, t: 0, flash: 0, lx: 0, lz: 0 };
+  }
+
+  /** 猫に当たったとき、一瞬白く光る */
+  bossFlash() {
+    if (this.cat) this.cat.flash = 0.12;
+  }
+
+  /** v: { x, y, z, yaw, hp, st, t, fx }（いなければ null） */
+  updateBoss(v, dt) {
+    if (!v) {
+      if (this.cat) this.cat.root.visible = false;
+      return;
+    }
+    if (!this.cat) this._buildCat();
+    const c = this.cat;
+    c.root.visible = true;
+    c.t += dt;
+    const sp = Math.hypot(v.x - c.lx, v.z - c.lz) / Math.max(dt, 1e-3);
+    c.lx = v.x;
+    c.lz = v.z;
+    c.root.position.set(v.x, v.y, v.z);
+    c.root.rotation.y = v.yaw;
+    c.blob.position.y = -v.y + 0.03;
+    const st = v.st;
+    const walk = st === 'walk' && sp > 0.4 ? Math.sin(c.t * 9) * 0.45 : 0;
+    c.legs[0].rotation.x = walk;
+    c.legs[3].rotation.x = walk;
+    c.legs[1].rotation.x = -walk;
+    c.legs[2].rotation.x = -walk;
+    // ひっかき: 前ぶりで右の前足を上げ、振り下ろす
+    if (st === 'wind') c.legs[1].rotation.x = -Math.min(1, v.t / BOSS.SWIPE_WIND) * 1.9;
+    else if (st === 'rest') c.legs[1].rotation.x = 0.5;
+    // とびかかり: しゃがんでから、足をのばして飛ぶ
+    const crouch = st === 'crouch' ? Math.min(1, v.t / BOSS.POUNCE_WIND) : 0;
+    c.body.scale.y = 1 - crouch * 0.18;
+    if (st === 'pounce') for (const [k, l] of c.legs.entries()) l.rotation.x = k < 2 ? -0.9 : 0.9;
+    // 倒れた: 横に倒れる
+    const down = st === 'down' ? Math.min(1, v.t * 2) : 0;
+    c.body.rotation.z = down * (Math.PI / 2);
+    c.body.position.y = -down * 0.6;
+    // ふらふら・しっぽ
+    c.head.rotation.z = v.fx > 0 && st !== 'down' ? Math.sin(c.t * 10) * 0.25 : 0;
+    c.tail.rotation.x = Math.sin(c.t * 2.2) * 0.3 - 0.2;
+    c.tail.rotation.z = Math.sin(c.t * 1.7) * 0.4;
+    c.flash = Math.max(0, c.flash - dt);
+    const e = c.flash > 0 ? 0.55 : 0;
+    for (const m of c.mats) m.emissive?.setScalar(e);
+  }
+
   // ---- 輪ゴム ----
   /** list: { x, y, z, vx, vy, vz, kind, spin } */
   updateBands(list, dt) {
     while (this.bands.length < list.length) {
       const m = new THREE.Mesh(new THREE.TorusGeometry(1, 0.22, 6, 16), toon(BAND_COLORS[0]));
-      this.scene.add(m);
+      // 猫の毛玉（ふわふわの玉）
+      const hair = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), toon(0xc9a27e));
+      hair.visible = false;
+      this.scene.add(m, hair);
+      m.userData.hair = hair;
       this.bands.push(m);
     }
     this.bands.forEach((m, k) => {
       const b = list[k];
-      m.visible = !!b;
+      const hair = m.userData.hair;
+      const isHair = !!b && b.kind === HAIRBALL;
+      hair.visible = isHair;
+      m.visible = !!b && !isHair;
+      if (isHair) {
+        hair.position.set(b.x, b.y, b.z);
+        hair.scale.setScalar(BOSS.SPIT_RADIUS * 1.2);
+        hair.rotation.set(b.age * 6, b.age * 4, 0);
+        return;
+      }
       if (!b) return;
       const big = b.kind === ITEM.THICK;
       const r = big ? ITEMS.THICK_RADIUS : 0.13;
@@ -599,7 +908,16 @@ export class GomuWorld {
     gun.rotation.y = Math.PI; // カメラの前（-z）を向く
     const paw = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8), toon(0xf2a04b));
     paw.position.set(0, -0.05, 0.03);
-    vm.add(gun, paw);
+    // スナイパー: 長い銃身とスコープ
+    const sn = new THREE.Group();
+    const longB = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.22), toon(0x5c4033));
+    longB.position.set(0, 0, -0.3);
+    const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.16, 12), toon(0x2b2d42));
+    scope.rotation.x = Math.PI / 2;
+    scope.position.set(0, 0.06, -0.1);
+    sn.add(longB, scope);
+    sn.visible = false;
+    vm.add(gun, paw, sn);
     vm.position.set(0.2, -0.19, -0.36);
     vm.traverse((o) => {
       if (o.material) {
@@ -609,13 +927,14 @@ export class GomuWorld {
       o.renderOrder = 1000;
     });
     this.camera.add(vm);
-    this.vm = { root: vm, gun, paw, recoil: 0, bob: 0 };
+    this.vm = { root: vm, gun, paw, sn, recoil: 0, bob: 0 };
   }
 
   /** 自分の鉄砲の見た目: 撃った反動・補充中は下げる・輪ゴムの色・歩きの揺れ */
-  setViewModel({ fired = false, reloading = false, kind = 0, moving = false, visible = true, furColor = null }, dt) {
+  setViewModel({ fired = false, reloading = false, kind = 0, moving = false, visible = true, sniper = false, furColor = null }, dt) {
     const v = this.vm;
     v.root.visible = visible;
+    v.sn.visible = sniper;
     if (fired) v.recoil = 1;
     v.recoil = Math.max(0, v.recoil - dt * 8);
     v.bob += dt * (moving ? 10 : 2);

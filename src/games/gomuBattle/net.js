@@ -64,7 +64,10 @@ export function packState(s) {
       p.deaths,
       p.rs,
       Math.round(Math.max(p.shake, p.noAmmo, p.stuck) * 10) / 10,
+      (p.weapon | 0) | (p.picked ? 4 : 0),
     ]),
+    bw: (s.bossWon || []).map((x) => (x ? 1 : 0)),
+    bo: s.boss ? [r2(s.boss.x), r2(s.boss.y), r2(s.boss.z), Math.round(s.boss.yaw * 1000) / 1000, s.boss.hp, s.boss.max, BOSS_ST.indexOf(s.boss.st), r2(s.boss.t), r2(Math.max(s.boss.dizzy, s.boss.stuck))] : null,
     bx: s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0),
     sm: s.smokes.map((x) => [x.id, r2(x.x), r2(x.y), r2(x.z), r2(x.age)]),
     gm: s.gums.map((x) => [x.id, r2(x.x), r2(x.y), r2(x.z)]),
@@ -103,11 +106,16 @@ export function unpackState(o, n) {
       deaths: num(a[12]) | 0,
       rs: Array.isArray(a[13]) ? a[13].map((x) => num(x) | 0) : [0, 0, 0],
       fxT: num(a[14]),
+      weapon: (num(a[15]) | 0) & 3,
+      picked: !!((num(a[15]) | 0) & 4),
     };
   });
+  const bo = Array.isArray(o.bo) ? o.bo : null;
   return {
     round: Math.max(0, Math.min(2, num(o.r) | 0)),
-    phase: ['intro', 'play', 'end', 'done'].includes(o.ph) ? o.ph : 'play',
+    phase: PH.includes(o.ph) ? o.ph : 'play',
+    bossWon: Array.isArray(o.bw) ? o.bw.map((x) => !!x) : [],
+    boss: bo ? { x: num(bo[0]), y: num(bo[1]), z: num(bo[2]), yaw: num(bo[3]), hp: num(bo[4]), max: num(bo[5], 1), st: BOSS_ST[num(bo[6]) | 0] || 'walk', t: num(bo[7]), fx: num(bo[8]) } : null,
     t: num(o.t),
     players,
     boxes: num(o.bx) | 0,
@@ -120,8 +128,10 @@ export function unpackState(o, n) {
 // ---- 配信のバイト列（毎秒 40 回。JSON の約 1/4 の大きさ） ----
 // 犬 1 匹 18 バイト（位置 1mm・向き・状態・体力・アイテム・点数）。ラウンドごとの点は 10 回に 1 回だけ載せる。
 // 起きたこと（撃った・当たった…）は、数を丸めた JSON を後ろにつける（少ないので）
-const BIN_V = 1;
-const PH = ['intro', 'play', 'end', 'done'];
+const BIN_V = 2;
+const PH = ['intro', 'play', 'end', 'done', 'pick'];
+/** 猫の動きの番号 */
+const BOSS_ST = ['walk', 'wind', 'crouch', 'pounce', 'rest', 'down'];
 
 class W {
   constructor() {
@@ -226,6 +236,7 @@ export function packBin(s, withRs = true, ev = null) {
     w.u8(p.kills);
     w.u8(p.deaths);
     w.u8(Math.ceil(Math.max(p.shake, p.noAmmo, p.stuck) * 20));
+    w.u8((p.weapon | 0) | (p.picked ? 4 : 0));
     if (withRs) for (let r = 0; r < 3; r++) w.u16(p.rs[r] || 0);
   }
   w.u16(s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0));
@@ -249,6 +260,20 @@ export function packBin(s, withRs = true, ev = null) {
     w.i16(x.x * 1000);
     w.i16(x.y * 1000);
     w.i16(x.z * 1000);
+  }
+  // ボス戦の猫（いなければ 0）と、ラウンドごとに猫を倒せたか
+  const b = s.boss;
+  w.u8((b ? 1 : 0) | ((s.bossWon || []).reduce((m, x, k) => (x ? m | (2 << k) : m), 0)));
+  if (b) {
+    w.i16(b.x * 1000);
+    w.i16(b.y * 1000);
+    w.i16(b.z * 1000);
+    w.u16((((b.yaw % TAU) + TAU) % TAU) * (65536 / TAU));
+    w.u16(b.hp);
+    w.u16(b.max);
+    w.u8(Math.max(0, BOSS_ST.indexOf(b.st)));
+    w.u8(Math.min(12, b.t) * 20);
+    w.u8(Math.ceil(Math.max(b.dizzy, b.stuck) * 20));
   }
   if (evs) {
     w.u16(evs.length);
@@ -286,6 +311,9 @@ export function unpackBin(u8, n, prevRs = null) {
       p.kills = r.u8();
       p.deaths = r.u8();
       p.fxT = r.u8() / 20;
+      const wb = r.u8();
+      p.weapon = wb & 3;
+      p.picked = !!(wb & 4);
       p.rs = withRs ? [r.u16(), r.u16(), r.u16()] : prevRs?.[i] ? prevRs[i].slice() : [0, 0, 0];
       if (i < n) players.push(p);
     }
@@ -293,13 +321,27 @@ export function unpackBin(u8, n, prevRs = null) {
     const mov = Array.from({ length: Math.min(r.u8(), 16) }, () => [r.i16() / 1000, r.i16() / 1000]);
     const smokes = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / 1000, y: r.i16() / 1000, z: r.i16() / 1000, age: r.u8() / 20 }));
     const gums = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / 1000, y: r.i16() / 1000, z: r.i16() / 1000 }));
+    const bf = r.u8();
+    const bossWon = [0, 1, 2].map((k) => !!(bf & (2 << k)));
+    let boss = null;
+    if (bf & 1) {
+      boss = { x: r.i16() / 1000, y: r.i16() / 1000, z: r.i16() / 1000 };
+      let yaw = (r.u16() * TAU) / 65536;
+      if (yaw > Math.PI) yaw -= TAU;
+      boss.yaw = yaw;
+      boss.hp = r.u16();
+      boss.max = Math.max(1, r.u16());
+      boss.st = BOSS_ST[r.u8()] || 'walk';
+      boss.t = r.u8() / 20;
+      boss.fx = r.u8() / 20;
+    }
     let ev = [];
     if (f & 16) {
       const len = r.u16();
       ev = JSON.parse(dec8.decode(r.u.subarray(r.n, r.n + len)));
       if (!Array.isArray(ev)) ev = [];
     }
-    return { st: { round, phase, t, players, boxes, smokes, gums, mov }, ev };
+    return { st: { round, phase, t, players, boxes, smokes, gums, mov, boss, bossWon }, ev };
   } catch {
     return null;
   }

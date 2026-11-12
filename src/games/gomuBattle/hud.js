@@ -1,10 +1,12 @@
 // 画面の表示（照準・体力・残りの輪ゴム・アイテム・時間・点数・お知らせ）と、タッチ操作（左のスティック・右でなぞって視点・ボタン）
 import { iconSvg, iconText } from '../../core/icons.js';
 import { h } from '../../core/util.js';
-import { ITEM_INFO, GUN, PLAYER, ROUND } from './constants.js';
+import { ITEM_INFO, GUN, PLAYER, ROUND, WEAPON, WEAPONS, MODE, TEAMS, BOSS } from './constants.js';
 
 export class GomuHud {
-  constructor(root, { touch }) {
+  constructor(root, { touch, mode = MODE.FFA }) {
+    this.mode = mode;
+    this.onPick = null; // (weapon) => 武器を選んだ
     this.root = h('div.gomu-hud');
     root.append(this.root);
     this.cross = h('div.gm-cross', null, h('i'), h('i'), h('i'), h('i'));
@@ -26,8 +28,25 @@ export class GomuHud {
     this.names = h('div.gm-names');
     this.hint = h('div.gm-hint');
     this.table = h('div.gm-table');
-    this.root.append(this.smoke, this.vignette, this.names, this.cross, h('div.gm-top', null, this.round, this.timer), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.status), h('div.gm-br', null, this.special, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.hint);
+    // ボス戦: 猫の体力のバー
+    this.bossFill = h('i');
+    this.bossNum = h('span.gm-boss-num');
+    this.bossBar = h('div.gm-boss', { hidden: true }, h('div.gm-boss-name', null, BOSS.NAME, this.bossNum), h('div.gm-boss-bar', null, this.bossFill));
+    // スナイパーでのぞいたときの丸い視界
+    this.scope = h('div.gm-scope', { hidden: true });
+    // ラウンドの前の武器選び（カードを押すか、1 / 2 キー）
+    const card = (w, ic) =>
+      h('button.gm-pick-card', { type: 'button', 'data-ctl': '', 'data-w': String(w), ontap: () => this.onPick?.(w) },
+        h('span.gm-pick-ic', { html: iconSvg(ic, 44) }),
+        h('b', null, WEAPONS[w].name),
+        h('small', null, WEAPONS[w].desc),
+        h('kbd', null, String(w + 1)));
+    this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target')];
+    this.pickInfo = h('p.gm-pick-info');
+    this.pick = h('div.gm-pick', { hidden: true }, h('h2', null, '武器をえらぶ'), h('div.gm-pick-row', null, ...this.pickCards), this.pickInfo);
+    this.root.append(this.scope, this.smoke, this.vignette, this.names, this.cross, h('div.gm-top', null, this.round, this.timer), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.status), h('div.gm-br', null, this.special, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
     this.touch = touch ? new GomuTouch(this.root) : null;
+    this.root.classList.add(`mode-${mode}`);
     this.root.classList.toggle('is-touch', !!touch);
     this._nameEls = [];
     this._feedItems = [];
@@ -52,6 +71,27 @@ export class GomuHud {
     // ラウンドと時間
     this._set(this.round, 'round', `ROUND ${v.round + 1}/${ROUND.COUNT}　${v.arenaName}`);
     const left = Math.max(0, Math.ceil(ROUND.TIME - Math.max(0, v.t)));
+    // 武器選び
+    const picking = v.phase === 'pick';
+    this.pick.hidden = !picking;
+    if (picking) {
+      const rest = Math.max(0, Math.ceil(-ROUND.INTRO - v.t));
+      this._set(this.pickInfo, 'pinfo', v.pick.picked ? `ほかの人を待っています…（あと ${rest} 秒）` : `あと ${rest} 秒で始まります`);
+      this.pickCards.forEach((c) => c.classList.toggle('on', v.pick.picked && Number(c.dataset.w) === v.pick.weapon));
+    }
+    // ボスの体力
+    this.bossBar.hidden = !v.boss;
+    if (v.boss) {
+      const pct = Math.max(0, v.boss.hp / v.boss.max);
+      this.bossFill.style.transform = `scaleX(${pct})`;
+      this._set(this.bossNum, 'bnum', `${Math.ceil(v.boss.hp)} / ${v.boss.max}`);
+      this.bossBar.classList.toggle('is-dizzy', v.boss.fx > 0);
+    }
+    this.scope.hidden = !v.zoom;
+    if (this.touch) {
+      this.touch.zoomBtn.hidden = v.me.weapon !== WEAPON.SNIPER;
+      this.touch.zoomBtn.classList.toggle('on', !!v.zoom);
+    }
     this._set(this.timer, 'timer', v.phase === 'play' ? `${left}` : '');
     this.timer.classList.toggle('is-low', v.phase === 'play' && left <= 10);
     // 体力
@@ -59,9 +99,9 @@ export class GomuHud {
     this._setHtml(this.hearts, 'hp', `${hpN}`, () => Array.from({ length: PLAYER.HP }, (_, k) => `<span class="gm-heart${k < hpN ? ' on' : ''}">${iconSvg('heart', 26)}</span>`).join(''));
     // 輪ゴム
     const ammoN = v.me.reload > 0 ? -1 : Math.max(0, v.me.ammo);
-    this._setHtml(this.ammo, 'ammo', `${ammoN}`, () => (ammoN < 0 ? '' : Array.from({ length: GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg('ring', 24)}</span>`).join('')));
+    this._setHtml(this.ammo, 'ammo', `${ammoN}:${v.me.weapon}`, () => (ammoN < 0 ? '' : Array.from({ length: v.me.maxAmmo || GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg(v.me.weapon === WEAPON.SNIPER ? 'target' : 'ring', 24)}</span>`).join('')));
     this.reloadBar.hidden = !(v.me.reload > 0);
-    if (v.me.reload > 0) this.reloadBar.firstChild.style.width = `${(1 - v.me.reload / GUN.RELOAD) * 100}%`;
+    if (v.me.reload > 0) this.reloadBar.firstChild.style.width = `${(1 - v.me.reload / (v.me.reloadT || GUN.RELOAD)) * 100}%`;
     this._setHtml(this.special, 'sp', v.me.sp ? `${v.me.sp}:${v.me.spN}` : '', () => (v.me.sp ? `${iconSvg(ITEM_INFO[v.me.sp].icon, 18)} ${ITEM_INFO[v.me.sp].name} ×${v.me.spN}` : ''));
     // アイテム
     const it = v.me.item ? ITEM_INFO[v.me.item] : null;
@@ -76,7 +116,10 @@ export class GomuHud {
     const bk = rows.map((p) => `${p.i}:${p.score}:${p.dead ? 1 : 0}`).join(',');
     if (this._key.board !== bk) {
       this._key.board = bk;
-      this.board.replaceChildren(...rows.map((p) => h(`div.gm-row${p.i === v.meIndex ? '.me' : ''}${p.dead ? '.dead' : ''}`, { style: { '--c': p.css } }, h('b'), h('span', null, p.name), h('em', null, String(p.score)))));
+      // チーム戦: いちばん上にチームの合計
+      const tot = [0, 1].map((t) => rows.filter((p) => p.team === t).reduce((n, p) => n + p.score, 0));
+      const head = this.mode === MODE.TEAM ? [0, 1].map((t) => h('div.gm-row.gm-team', { style: { '--c': TEAMS[t].css } }, h('b'), h('span', null, TEAMS[t].name), h('em', null, String(tot[t])))) : [];
+      this.board.replaceChildren(...head, ...rows.map((p) => h(`div.gm-row${p.i === v.meIndex ? '.me' : ''}${p.dead ? '.dead' : ''}`, { style: { '--c': p.css } }, h('b'), h('span', null, p.name), h('em', null, String(p.score)))));
     }
     // 真ん中の大きな文字
     let center = '';
@@ -89,11 +132,11 @@ export class GomuHud {
     const showTable = v.phase === 'end' || v.phase === 'done';
     this.table.hidden = !showTable;
     if (showTable) {
-      const tk = `${v.round}:${rows.map((p) => `${p.i}:${p.rs.join('/')}`).join(',')}`;
+      const tk = `${v.round}:${v.bossWon?.[v.round] ? 1 : 0}:${rows.map((p) => `${p.i}:${p.rs.join('/')}`).join(',')}`;
       if (this._key.table !== tk) {
         this._key.table = tk;
         this.table.replaceChildren(
-          h('h3', null, `ROUND ${v.round + 1} おわり！`),
+          h('h3', null, this.mode === MODE.BOSS ? `ROUND ${v.round + 1}: ${v.bossWon?.[v.round] ? `${BOSS.NAME}をやっつけた！` : `${BOSS.NAME}に逃げられた…`}` : `ROUND ${v.round + 1} おわり！`),
           h('table', null,
             h('tr', null, h('th', null, ''), ...Array.from({ length: ROUND.COUNT }, (_, r) => h('th', null, `R${r + 1}`)), h('th', null, '合計')),
             ...rows.map((p) => h(`tr${p.i === v.meIndex ? '.me' : ''}`, null, h('td', { style: { color: p.css } }, p.name), ...p.rs.map((x, r) => h('td', null, r <= v.round ? String(x) : '-')), h('td', null, h('b', null, String(p.score)))))),
@@ -212,7 +255,9 @@ export class GomuTouch {
     this.jumpBtn = btn('gt-jump', 'ジャンプ');
     this.dashBtn = btn('gt-dash', 'ダッシュ');
     this.crouchBtn = btn('gt-crouch', '伏せ');
-    this.el = h('div.gomu-touch', null, this.look, this.zone, this.fireBtn, this.jumpBtn, this.dashBtn, this.crouchBtn);
+    this.zoomBtn = btn('gt-zoom', 'のぞく');
+    this.onZoom = null;
+    this.el = h('div.gomu-touch', null, this.look, this.zone, this.fireBtn, this.jumpBtn, this.dashBtn, this.crouchBtn, this.zoomBtn);
     root.append(this.el);
     this._bindStick();
     this._bindLook(this.look);
@@ -220,6 +265,7 @@ export class GomuTouch {
     this._hold(this.fireBtn, (on) => (this.fire = on), true);
     this._press(this.jumpBtn, () => (this.jump = true));
     this._press(this.dashBtn, () => (this.dash = true));
+    this._press(this.zoomBtn, () => this.onZoom?.());
     this._press(this.crouchBtn, () => {
       this.crouch = !this.crouch;
       this.crouchBtn.classList.toggle('on', this.crouch);

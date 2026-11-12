@@ -5,7 +5,7 @@
 
 const GAME_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyE', 'KeyQ', 'KeyF', 'KeyR', 'ShiftLeft', 'ShiftRight', 'Enter', 'NumpadEnter',
-  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyZ', 'Digit1', 'Digit2', 'Numpad1', 'Numpad2',
 ]);
 
 function isEditable(target) {
