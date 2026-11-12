@@ -105,14 +105,14 @@ export const BOT = {
 };
 
 export const ITEM_INFO = {
-  [ITEM.THICK]: { name: '極太ゴム', icon: '💪', desc: '次の5発が太くて当たりやすい。当たると2ダメージ' },
-  [ITEM.TRIPLE]: { name: '3方向ゴム', icon: '🔱', desc: '次の5発が、扇の形に3本ずつ飛ぶ' },
-  [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: '🏓', desc: '次の5発が、壁や家具で2回まで跳ね返る' },
-  [ITEM.HOMING]: { name: '追いかけゴム', icon: '🎯', desc: '次の5発が、狙った近くの相手へゆるく曲がる' },
-  [ITEM.SMOKE]: { name: '煙幕', icon: '💨', desc: '狙った所に煙を投げる。中は見えない' },
-  [ITEM.SHAKE]: { name: '照準ぶれ', icon: '🌀', desc: '自分以外の全員の狙いが3秒ゆらゆら' },
-  [ITEM.NOAMMO]: { name: 'ゴム切れ', icon: '✂️', desc: '自分以外の全員が3秒撃てない' },
-  [ITEM.GUM]: { name: 'ネバネバガム', icon: '🍬', desc: '足もとに置く罠。踏んだ相手は2秒動けない' },
-  [ITEM.HEAL]: { name: '回復おやつ', icon: '🍖', desc: '体力が3回復する' },
-  [ITEM.STAR]: { name: '無敵スター', icon: '⭐', desc: '10秒間、輪ゴムもガムも効かない' },
+  [ITEM.THICK]: { name: '極太ゴム', icon: 'thick', desc: '次の5発が太くて当たりやすい。当たると2ダメージ' },
+  [ITEM.TRIPLE]: { name: '3方向ゴム', icon: 'triple', desc: '次の5発が、扇の形に3本ずつ飛ぶ' },
+  [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: 'bounce', desc: '次の5発が、壁や家具で2回まで跳ね返る' },
+  [ITEM.HOMING]: { name: '追いかけゴム', icon: 'target', desc: '次の5発が、狙った近くの相手へゆるく曲がる' },
+  [ITEM.SMOKE]: { name: '煙幕', icon: 'cloud', desc: '狙った所に煙を投げる。中は見えない' },
+  [ITEM.SHAKE]: { name: '照準ぶれ', icon: 'spiral', desc: '自分以外の全員の狙いが3秒ゆらゆら' },
+  [ITEM.NOAMMO]: { name: 'ゴム切れ', icon: 'scissors', desc: '自分以外の全員が3秒撃てない' },
+  [ITEM.GUM]: { name: 'ネバネバガム', icon: 'candy', desc: '足もとに置く罠。踏んだ相手は2秒動けない' },
+  [ITEM.HEAL]: { name: '回復おやつ', icon: 'heal', desc: '体力が3回復する' },
+  [ITEM.STAR]: { name: '無敵スター', icon: 'star', desc: '10秒間、輪ゴムもガムも効かない' },
 };

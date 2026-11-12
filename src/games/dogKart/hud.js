@@ -1,4 +1,5 @@
 // ゲーム中の HUD（DOM）。周回・順位・速度・アイテム・時間・接続状態・ミニマップ
+import { icon, iconSvg, iconText, noEmoji } from '../../core/icons.js';
 import { h, formatTime } from '../../core/util.js';
 import { ITEM_INFO } from './items.js';
 import { RACE, TIMING, FOOD } from './constants.js';
@@ -8,6 +9,14 @@ import { bubbleLayout } from './bubble.js';
 
 const BOSS_COLOR = '#2b2b3a'; // ミニマップのボス犬の色
 export const KART_COLORS = ['#ff4d5e', '#3d8bff', '#ff8fd0', '#22b573', '#ffc93c', '#8a63ff', '#c0182b', '#ff7a2f', '#2ec4d6', '#a0e05a', '#b07a52', '#e0e4ee', '#ff5fa2', '#3fb8a0', '#4a5fd8'];
+
+/** アイテムのアイコン（1 つ、または同じものを並べる）の SVG */
+function itemSvg(name, size) {
+  if (!name) return '';
+  const list = Array.isArray(name) ? name : [name];
+  const sz = list.length > 1 ? Math.round(size * (list.length > 2 ? 0.5 : 0.62)) : size;
+  return list.map((n) => iconSvg(n, sz)).join('');
+}
 
 export class Hud {
   /** @param {{ round?: number, races?: number }} series 連戦のとき、何戦目か */
@@ -28,21 +37,21 @@ export class Hud {
     this.net = h('div.hud-net', null, '');
     this.center = h('div.hud-center');
     this.cdBox = h('div.hud-cd');
-    this.warn = h('div.hud-warn', { hidden: true }, '⚠ 逆走してるワン！');
+    this.warn = h('div.hud-warn', { hidden: true }, iconText('⚠ 逆走してるワン！', 22));
     this.boostEdge = h('div.hud-boost-edge');
     this.speedLines = h('div.hud-speedlines');
     this.camBtn = h('button.hud-cam-btn', { ontap: () => this.onCameraToggle?.(), title: 'カメラ切り替え（C）' }, '');
-    this.camBtn.append(h('span.ic', null, '🎥'), (this.camLabel = h('span.lb', null, '三人称')));
+    this.camBtn.append(h('span.ic', null, icon('camera', 16)), (this.camLabel = h('span.lb', null, '三人称')));
     this.rankTotal = h('div.hud-rank-total', null, '/2');
     this.round = series.races > 1 ? h('div.hud-round', null, `第${series.round || 1}戦 / 全${series.races}戦`) : null;
     this.foodNum = h('b', null, '0');
-    this.food = h('div.hud-food', { title: 'ドッグフード（多いほど少し速い）' }, h('span.hud-food-ic', null, '🍖'), this.foodNum, h('small', null, `/${FOOD.MAX}`));
+    this.food = h('div.hud-food', { title: 'ドッグフード（多いほど少し速い）' }, h('span.hud-food-ic', null, icon('food', 22)), this.foodNum, h('small', null, `/${FOOD.MAX}`));
     this.qualityBtn = h('button.hud-cam-btn.hud-quality-btn', { ontap: () => this.onQuality?.(), title: '画質の切り替え' }, '');
-    this.qualityBtn.append(h('span.ic', null, '⚙'), (this.qualityLabel = h('span.lb', null, '画質: 自動')));
+    this.qualityBtn.append(h('span.ic', null, icon('gear', 16)), (this.qualityLabel = h('span.lb', null, '画質: 自動')));
     this.fsBtn = document.fullscreenEnabled || document.webkitFullscreenEnabled
-      ? h('button.hud-cam-btn.hud-fs-btn', { onclick: () => this._toggleFullscreen(), title: '全画面' }, h('span.ic', null, '⛶'), h('span.lb', null, '全画面'))
+      ? h('button.hud-cam-btn.hud-fs-btn', { onclick: () => this._toggleFullscreen(), title: '全画面' }, h('span.ic', null, icon('fullscreen', 16)), h('span.lb', null, '全画面'))
       : null;
-    this.rotateHint = h('div.hud-rotate', { 'data-ctl': '', onpointerdown: (e) => { e.preventDefault(); this.rotateHint.hidden = true; } }, '📱 横向きにすると遊びやすいワン！（タップで閉じる）');
+    this.rotateHint = h('div.hud-rotate', { 'data-ctl': '', onpointerdown: (e) => { e.preventDefault(); this.rotateHint.hidden = true; } }, iconText('📱 横向きにすると遊びやすいワン！（タップで閉じる）'));
     this.mapCanvas = h('canvas.hud-map', { width: 180, height: 180 });
     // タイミングブースト: 外側のリングが縮んで的に重なったら押す
     this.timingRing = h('div.hud-timing-ring');
@@ -53,11 +62,11 @@ export class Hud {
       this.timingRing,
       h('div.hud-timing-label', null, 'ここだ！で画面をタップ', h('small', null, 'クリック / タップ / Enter')),
     );
-    this.wetBadge = h('div.hud-wet', { hidden: true }, '☔ ずぶぬれ… スピードダウン');
+    this.wetBadge = h('div.hud-wet', { hidden: true }, '');
     this.thunderEl = h('div.hud-thunder');
     this.fallback = h('div.hud-fallback', { hidden: true }, '3D表示を開始できなかったため、簡易表示で遊んでいます');
     // レース中のミニゲーム「リズムを真似しろ！」
-    this.mgTitle = h('div.hud-mg-title', null, '🎵 ミニゲーム！ リズムを真似しろ！');
+    this.mgTitle = h('div.hud-mg-title', null, iconText('🎵 ミニゲーム！ リズムを真似しろ！', 22));
     this.mgSub = h('div.hud-mg-sub', null, '');
     this.mgTrack = h('div.hud-mg-track');
     this.mgList = h('div.hud-mg-list');
@@ -250,7 +259,7 @@ export class Hud {
     this.boostEdge.classList.toggle('on', d.boost > 0);
 
     // 枠は 2 つ（大きい丸 = 1 個目、左上の小さな丸 = 2 個目）。ルーレットは空いている枠で回す
-    const ROLL_ICONS = ['🦴', '🍌', '⚡', '🛡️', '🥏', '🧑', '☔', '🏠'];
+    const ROLL_ICONS = ['bone', 'banana', 'zap', 'shield', 'disc', 'person', 'umbrella', 'house'];
     const rollIcon = (off) => ROLL_ICONS[(Math.floor(performance.now() / 90) + off) % ROLL_ICONS.length];
     const rolls = (d.roll > 0 ? 1 : 0) + (d.roll2 > 0 ? 1 : 0);
     let icon = '';
@@ -276,17 +285,17 @@ export class Hud {
       icon2 = rollIcon(3);
       rolling2 = true;
     }
-    this._set('icon2', this.item2, icon2);
+    this._set('icon2', this.item2, itemSvg(icon2, 22), 'innerHTML');
     this.item2.classList.toggle('multi', multi2);
     this.item2.classList.toggle('has-item', !!d.item2);
     this.item2.classList.toggle('rolling', rolling2);
-    this._set('icon', this.itemIcon, icon);
+    this._set('icon', this.itemIcon, itemSvg(icon, 40), 'innerHTML');
     this.itemIcon.classList.toggle('multi', multi);
     this._set('iname', this.itemName, name);
     this.itemSlot.classList.toggle('has-item', !!d.item);
     this.itemSlot.classList.toggle('rolling', rolling1);
 
-    this._set('net', this.net, d.netText);
+    this._set('net', this.net, noEmoji(d.netText));
     if (d.netTone !== this._last.tone) {
       this._last.tone = d.netTone;
       this.net.className = `hud-net tone-${d.netTone}`;
@@ -299,7 +308,7 @@ export class Hud {
       this._last.badge = key;
       this.wetBadge.hidden = !st;
       if (st) {
-        this.wetBadge.textContent = st[0];
+        this.wetBadge.replaceChildren(iconText(st[0], 20));
         this.wetBadge.className = `hud-wet is-${st[1]}`;
       }
     }
@@ -403,7 +412,7 @@ export class Hud {
     }
     const sub = {
       intro: 'お手本のリズムをよく聞いてね！',
-      demo: '♪ お手本',
+      demo: 'お手本',
       wait: 'つぎは あなたの番…',
       play: '真似しろ！（画面タップ / Enter / Space）',
       result: '結果！ 上手いほど長く加速',
@@ -434,7 +443,7 @@ export class Hud {
         ...(list
           ? list.split(';').map((row) => {
               const [r, name, sc, b, me] = row.split('|');
-              return h(`div.hud-mg-row${me === '1' ? '.me' : ''}`, null, h('b', null, `${r}位`), h('span', null, name), h('span.pct', null, `${sc}%`), h('span.bst', null, `⚡${b}秒`));
+              return h(`div.hud-mg-row${me === '1' ? '.me' : ''}`, null, h('b', null, `${r}位`), h('span', null, name), h('span.pct', null, `${sc}%`), h('span.bst', null, icon('zap', 14), `${b}秒`));
             })
           : []),
       );
@@ -448,7 +457,7 @@ export class Hud {
   }
 
   flash(text, cls = '', ms = 1300) {
-    const el = h(`div.hud-flash.${cls || 'plain'}`, { style: { '--ms': `${ms / 1000}s` } }, text);
+    const el = h(`div.hud-flash.${cls || 'plain'}`, { style: { '--ms': `${ms / 1000}s` } }, iconText(text, 30));
     this.center.append(el);
     setTimeout(() => el.remove(), ms);
   }

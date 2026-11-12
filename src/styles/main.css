@@ -533,13 +533,11 @@ body[data-screen='game'] .app-main {
   box-shadow: 0 0 0 4px rgba(40, 30, 60, 0.25);
 }
 .hud-timing-target::after {
-  content: '⚡';
+  content: '';
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
-  font-size: 2.6rem;
-  text-shadow: none;
+  /* 稲妻のアイコン（絵文字は使わない） */
+  background: center / 42% no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffd23f' stroke='%23ffffff' stroke-width='1.5' stroke-linejoin='round'%3E%3Cpath d='M13 2 4 14h7l-1 8 9-12h-7z'/%3E%3C/svg%3E");
 }
 .hud-timing-ring {
   border: 7px solid var(--pink, #ff6fae);
@@ -2329,4 +2327,91 @@ body[data-screen='game'] {
     top: 176px;
     right: 14px;
   }
+}
+
+/* ---- ゲーム中のアイコン（絵文字の代わり） ---- */
+.icon-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+.icon-text .icon svg,
+.gm-st svg,
+.gm-special svg {
+  display: block;
+}
+.gm-hearts {
+  display: flex;
+  gap: 2px;
+}
+.gm-heart {
+  color: var(--paper);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+}
+.gm-heart.on {
+  color: var(--red);
+}
+.gm-heart.on svg {
+  fill: currentColor;
+}
+.gm-ammo {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+.gm-band {
+  color: rgba(255, 255, 255, 0.35);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+}
+.gm-band.on {
+  color: var(--orange);
+}
+.gm-band svg {
+  stroke-width: 3;
+}
+.gm-item-ic {
+  display: grid;
+  place-items: center;
+}
+.gm-special,
+.gm-status {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  justify-content: inherit;
+}
+.gm-st,
+.gm-special {
+  gap: 0.3em;
+}
+.gm-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+}
+.gm-name-hp {
+  display: inline-flex;
+  gap: 1px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.gm-name-hp svg {
+  fill: currentColor;
+}
+.hud-item-icon svg,
+.hud-item2 svg {
+  display: inline-block;
+}
+.hud-food-ic,
+.touch-small .icon {
+  display: inline-grid;
+  place-items: center;
+}
+.pswatch {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 3px;
+  margin-right: 0.35em;
+  vertical-align: -0.05em;
 }

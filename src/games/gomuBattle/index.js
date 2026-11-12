@@ -432,11 +432,11 @@ class GomuGame {
         case 'pick':
           if (e.i === this.me) {
             this.ctx.sound.play('itemReady');
-            this.hud.pushFeed(`🎁 ${ITEM_INFO[e.item]?.icon} ${ITEM_INFO[e.item]?.name} を拾った！`, 'mine');
+            this.hud.pushFeed(`🎁 ${ITEM_INFO[e.item]?.name} を拾った！`, 'mine');
           }
           break;
         case 'use':
-          if (e.i !== this.me) this.hud.pushFeed(`${ITEM_INFO[e.item]?.icon} ${name(e.i)} が ${ITEM_INFO[e.item]?.name} を使った！`);
+          if (e.i !== this.me) this.hud.pushFeed(`🎁 ${name(e.i)} が ${ITEM_INFO[e.item]?.name} を使った！`);
           else this.ctx.sound.play('drop');
           break;
         case 'sp':
@@ -746,7 +746,7 @@ class GomuGame {
         if (this._frame % 8 === i % 8) this._los[i] = canSee(this.cw, cx, cy + ey, cz, q.x, q.y + heightOf(q) * 0.8, q.z) && Math.hypot(q.x - cx, q.z - cz) < 45;
         if (!this._los[i]) return null;
         const s = w.project(q.x, q.y + heightOf(q) + 0.35, q.z);
-        return s ? { x: s.x, y: s.y, text: `${this.idents[i].name}${q.hp != null ? ' ' + '♥'.repeat(Math.max(0, q.hp)) : ''}`, css: this.idents[i].css } : null;
+        return s ? { x: s.x, y: s.y, text: this.idents[i].name, hp: q.hp, css: this.idents[i].css } : null;
       });
       this.hud.setNames(names);
       // 照準が相手に重なっていたら、照準を赤く（当たる目安）
@@ -774,7 +774,7 @@ class GomuGame {
       this._cd = n;
     }
     const locked = document.pointerLockElement === this._cv;
-    this.hud.setHint(this.paused || t ? '' : locked ? '' : '🖱 画面をクリックして操作開始（マウスで狙う・Esc で解除）');
+    this.hud.setHint(this.paused || t ? '' : locked ? '' : '画面をクリックして操作開始（マウスで狙う・Esc で解除）');
   }
 
   /** 照準の先（まっすぐ AIM_RANGE まで）に、見えている相手がいるか */
@@ -804,7 +804,7 @@ class GomuGame {
       const r = rankOf(q);
       return {
         slot: this.idents[q.i].slot,
-        headline: r === 1 && (st.length < 2 || st.filter((o) => o.score === q.score).length === 1) ? '🏆 優勝！' : `${r}位`,
+        headline: r === 1 && (st.length < 2 || st.filter((o) => o.score === q.score).length === 1) ? '優勝！' : `${r}位`,
         detail: `合計 ${q.score} 点（当てた ${q.hits}・倒した ${q.kills}）`,
       };
     });

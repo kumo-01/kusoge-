@@ -1,4 +1,5 @@
 // 画面の表示（照準・体力・残りの輪ゴム・アイテム・時間・点数・お知らせ）と、タッチ操作（左のスティック・右でなぞって視点・ボタン）
+import { iconSvg, iconText } from '../../core/icons.js';
 import { h } from '../../core/util.js';
 import { ITEM_INFO, GUN, PLAYER, ROUND } from './constants.js';
 
@@ -33,6 +34,13 @@ export class GomuHud {
     this._key = {};
   }
 
+  /** 中身を HTML で（key が変わったときだけ作り直す） */
+  _setHtml(el, key, k, make) {
+    if (this._key[key] === k) return;
+    this._key[key] = k;
+    el.innerHTML = make();
+  }
+
   _set(el, key, text) {
     if (this._key[key] === text) return;
     this._key[key] = text;
@@ -47,22 +55,22 @@ export class GomuHud {
     this._set(this.timer, 'timer', v.phase === 'play' ? `${left}` : '');
     this.timer.classList.toggle('is-low', v.phase === 'play' && left <= 10);
     // 体力
-    const hp = `${'❤️'.repeat(Math.max(0, v.me.hp))}${'🤍'.repeat(Math.max(0, PLAYER.HP - v.me.hp))}`;
-    this._set(this.hearts, 'hp', hp);
+    const hpN = Math.max(0, v.me.hp);
+    this._setHtml(this.hearts, 'hp', `${hpN}`, () => Array.from({ length: PLAYER.HP }, (_, k) => `<span class="gm-heart${k < hpN ? ' on' : ''}">${iconSvg('heart', 26)}</span>`).join(''));
     // 輪ゴム
-    const ammo = v.me.reload > 0 ? '' : '➰'.repeat(Math.max(0, v.me.ammo)) + '・'.repeat(Math.max(0, GUN.AMMO - v.me.ammo));
-    this._set(this.ammo, 'ammo', ammo);
+    const ammoN = v.me.reload > 0 ? -1 : Math.max(0, v.me.ammo);
+    this._setHtml(this.ammo, 'ammo', `${ammoN}`, () => (ammoN < 0 ? '' : Array.from({ length: GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg('ring', 24)}</span>`).join('')));
     this.reloadBar.hidden = !(v.me.reload > 0);
     if (v.me.reload > 0) this.reloadBar.firstChild.style.width = `${(1 - v.me.reload / GUN.RELOAD) * 100}%`;
-    this._set(this.special, 'sp', v.me.sp ? `${ITEM_INFO[v.me.sp].icon} ${ITEM_INFO[v.me.sp].name} ×${v.me.spN}` : '');
+    this._setHtml(this.special, 'sp', v.me.sp ? `${v.me.sp}:${v.me.spN}` : '', () => (v.me.sp ? `${iconSvg(ITEM_INFO[v.me.sp].icon, 18)} ${ITEM_INFO[v.me.sp].name} ×${v.me.spN}` : ''));
     // アイテム
     const it = v.me.item ? ITEM_INFO[v.me.item] : null;
-    this._set(this.itemIcon, 'itic', it ? it.icon : '');
+    this._setHtml(this.itemIcon, 'itic', it ? it.icon : '', () => (it ? iconSvg(it.icon, 34) : ''));
     this._set(this.itemName, 'itn', it ? it.name : 'アイテムなし');
     this.itemBox.classList.toggle('has', !!it);
     // 状態（照準ぶれ・ゴム切れ・ネバネバ）
-    const st = [v.me.shake > 0 ? '🌀 照準ぶれ' : '', v.me.noAmmo > 0 ? '✂️ ゴム切れ' : '', v.me.stuck > 0 ? '🍬 ネバネバ' : '', v.me.star > 0 ? `⭐ 無敵 ${Math.ceil(v.me.star)}` : v.me.inv > 0 ? '✨ 無敵' : ''].filter(Boolean).join('　');
-    this._set(this.status, 'st', st);
+    const st = [v.me.shake > 0 ? 'spiral:照準ぶれ' : '', v.me.noAmmo > 0 ? 'scissors:ゴム切れ' : '', v.me.stuck > 0 ? 'candy:ネバネバ' : '', v.me.star > 0 ? `star:無敵 ${Math.ceil(v.me.star)}` : v.me.inv > 0 ? 'star:無敵' : ''].filter(Boolean);
+    this._setHtml(this.status, 'st', st.join('|'), () => st.map((x) => { const [ic, t] = x.split(':'); return `<span class="gm-st">${iconSvg(ic, 18)}${t}</span>`; }).join(''));
     // 点数表（点の順）
     const rows = [...v.players].sort((a, b) => b.score - a.score || a.i - b.i);
     const bk = rows.map((p) => `${p.i}:${p.score}:${p.dead ? 1 : 0}`).join(',');
@@ -105,7 +113,7 @@ export class GomuHud {
 
   /** 倒した・アイテムを使った などのお知らせ（右上に数秒） */
   pushFeed(text, cls = '') {
-    const el = h(`div.gm-feed-item${cls ? `.${cls}` : ''}`, null, text);
+    const el = h(`div.gm-feed-item${cls ? `.${cls}` : ''}`, null, iconText(text, 18));
     this._feedItems.push({ el, until: performance.now() + 4000 });
     if (this._feedItems.length > 5) this._feedItems.shift();
     this.feed.replaceChildren(...this._feedItems.map((x) => x.el));
@@ -151,7 +159,14 @@ export class GomuHud {
         return;
       }
       el.hidden = false;
-      if (el.textContent !== n.text) el.textContent = n.text;
+      const k = `${n.text}|${n.hp ?? ''}`;
+      if (el.dataset.k !== k) {
+        el.dataset.k = k;
+        // 名前と、体力の数だけ小さなハート
+        el.innerHTML = '';
+        el.append(n.text);
+        if (n.hp != null) el.insertAdjacentHTML('beforeend', `<span class="gm-name-hp">${Array.from({ length: Math.max(0, n.hp) }, () => iconSvg('heart', 11)).join('')}</span>`);
+      }
       el.style.transform = `translate(${n.x.toFixed(0)}px, ${n.y.toFixed(0)}px) translate(-50%, -100%)`;
       el.style.setProperty('--c', n.css);
     });

@@ -1,6 +1,7 @@
 // スマホ・タブレット用のタッチ操作（ハンドル・アクセル・ブレーキ・アイテム）
 // 複数の指を同時に使えるよう、ボタンごとに Pointer Events で押している間だけ有効にする。
 
+import { icon } from '../../core/icons.js';
 import { h } from '../../core/util.js';
 import { IN } from './constants.js';
 
@@ -42,7 +43,7 @@ export class TouchControls {
     this.accelBtn = h('div.touch-pedal.tp-accel', { 'data-ctl': '' }, 'アクセル');
     this.pedals = h('div.touch-pedals', null, this.brakeBtn, this.accelBtn);
     this.autoLabel = h('small', null, 'オート');
-    this.autoBtn = h('div.touch-small', { 'data-ctl': '', title: 'オートアクセル' }, '🚗', this.autoLabel);
+    this.autoBtn = h('div.touch-small', { 'data-ctl': '', title: 'オートアクセル' }, icon('car', 20), this.autoLabel);
     // ハンドル（指でぐりぐり回して曲がる）。ボタンとどちらかを選ぶ
     this.wheelImg = h('div.touch-wheel-img', { html: WHEEL_SVG });
     this.wheel = h('div.touch-wheel', { 'data-ctl': '', hidden: true }, this.wheelImg);
@@ -50,7 +51,7 @@ export class TouchControls {
     this._wheelHeld = false;
     this._pwm = 0; // 角度を「押している割合」にするための積み立て
     this.wheelLabel = h('small', null, 'ボタン');
-    this.wheelBtn = h('div.touch-small', { 'data-ctl': '', title: 'ハンドル操作に切り替え' }, '🎡', this.wheelLabel);
+    this.wheelBtn = h('div.touch-small', { 'data-ctl': '', title: 'ハンドル操作に切り替え' }, icon('wheel', 20), this.wheelLabel);
     this.tools = h('div.touch-tools', null, this.autoBtn, this.wheelBtn);
     this.root.append(this.steer, this.wheel, this.pedals, this.tools);
 

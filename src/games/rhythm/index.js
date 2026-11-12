@@ -5,6 +5,7 @@
 // 刻んだ時刻は各自の端末で測る（押した間隔だけを使うので、通信の遅れは入らない）。
 // 計算はホスト（common2d.js）。ゲストは押した間隔（ミリ秒）の列をホストへ送る。
 
+import { icon } from '../../core/icons.js';
 import { h } from '../../core/util.js';
 import { HostedGame, gauss } from '../common2d.js';
 
@@ -217,13 +218,13 @@ class Rhythm extends HostedGame {
     const o = this.ctx.options || {};
     const races = o.races > 1 ? `第${o.round || 1}戦 / 全${o.races}戦　` : '';
     this.el = {
-      round: h('div.g2d-round', null, `${races}🥁 リズム刻みバトル`),
+      round: h('div.g2d-round', null, `${races}リズム刻みバトル`),
       prompt: h('div.g2d-prompt', null, ''),
       sub: h('div.g2d-sub', null, ''),
       pad: h('div.rh-pad', null, h('div.rh-ring'), h('div.rh-label', null, '')),
       count: h('div.rh-count', null, ''),
       players: h('div.rh-players', null),
-      foot: h('div.g2d-foot', { style: { color: me.col } }, `${me.icon} あなた（${me.name}）: 丸を押す（どこを押しても OK）/ スペースキー`),
+      foot: h('div.g2d-foot', { style: { color: me.col } }, h('span.pswatch', { style: { background: me.col } }), `あなた（${me.name}）: 丸を押す（どこを押しても OK）/ スペースキー`),
     };
     this.root.classList.add('rh');
     this.root.append(
@@ -313,11 +314,11 @@ class Rhythm extends HostedGame {
       const k = Math.floor((t - RHY.READY) / beat);
       const f = (t - RHY.READY) / beat - k;
       pulse = Math.max(0, 1 - f * 2.5);
-      sub = '🎧 お手本をよく聞いて…（まだ押さない）';
+      sub = 'お手本をよく聞いて…（まだ押さない）';
       label = `${Math.min(RHY.GUIDE, k + 1)}`;
       count = '●'.repeat(Math.min(RHY.GUIDE, k + 1)) + '○'.repeat(Math.max(0, RHY.GUIDE - k - 1));
     } else if (ph === 'gap') {
-      sub = '🎧 お手本おわり。テンポを覚えて…';
+      sub = 'お手本おわり。テンポを覚えて…';
       label = '…';
     } else if (ph === 'count') {
       const left = Math.ceil(this.playStart - t); // 3 → 2 → 1
@@ -329,7 +330,7 @@ class Rhythm extends HostedGame {
     } else if (ph === 'play') {
       const n = this.taps.length;
       sub = this.sent ? 'ほかの人を待っています…' : n === 0 ? '今！1 拍目' : '同じテンポで押し続けろ';
-      label = this.sent ? '✅' : n === 0 ? (t - this.playStart < 0.6 ? '0' : '押せ！') : `${n}`;
+      label = this.sent ? 'OK' : n === 0 ? (t - this.playStart < 0.6 ? '0' : '押せ！') : `${n}`;
       count = this.sent ? `${n} / ${s.taps} 回 おわり` : `あと ${s.taps - n} 回`;
       pulse = this._flashAt ? Math.max(0, 1 - (performance.now() - this._flashAt) / 180) : 0;
     } else {
@@ -363,7 +364,7 @@ class Rhythm extends HostedGame {
       this.el.players.replaceChildren(h('div.g2d-results', null, s.res.map((_, i) => {
         const p = this.who(i);
         const done = i === this.me ? this.sent : got[i];
-        return h('div.g2d-res', { style: { '--c': p.col } }, `${p.icon} ${p.name}　`, h('b', null, done ? '✅' : '🥁'));
+        return h('div.g2d-res', { style: { '--c': p.col } }, h('span.pswatch', { style: { background: p.col } }), `${p.name}　`, h('b', null, done ? icon('check', 16) : '…'));
       })));
       return;
     }
@@ -375,7 +376,7 @@ class Rhythm extends HostedGame {
       const sc = rhythmScore(iv, s.bpm);
       const win = sc.acc > 0 && sc.acc === best;
       return h(`div.rh-row${win ? '.best' : ''}`, { style: { '--c': p.col } },
-        h('div.rh-name', null, win ? '👑 ' : '', `${p.icon} ${p.name}`),
+        h('div.rh-name', null, win ? icon('crown', 16) : '', h('span.pswatch', { style: { background: p.col } }), p.name),
         h('div.rh-graph', { html: graphSvg(iv || [], target) }),
         h('div.rh-num', null, h('b', null, `${sc.acc.toFixed(1)}%`), h('small', null, (iv || []).length ? `BPM ${sc.bpm.toFixed(1)}・ずれ ${sc.dev.toFixed(1)}%` : '刻めず')));
     })), h('p.rh-legend', null, `グラフ: 押した間隔（真ん中の線 = お題の 1 拍 ${Math.round(target)} ms。上は遅い・下は速い）`));

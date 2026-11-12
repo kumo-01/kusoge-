@@ -3,10 +3,10 @@ import { h } from '../core/util.js';
 
 /** 席ごとの見た目（席 0 = ホスト, 1〜3 = ゲスト）。ゲーム中の車の見た目・名前と同じ */
 export const PLAYERS = [
-  { name: '柴犬', role: 'ホスト', kind: 'shiba', color: 'red', colorName: '赤', icon: '🔴' },
-  { name: 'コーギー', role: 'ゲスト1', kind: 'corgi', color: 'blue', colorName: '青', icon: '🔵' },
-  { name: 'プードル', role: 'ゲスト2', kind: 'poodle', color: 'pink', colorName: 'ピンク', icon: '🩷' },
-  { name: 'パグ', role: 'ゲスト3', kind: 'pug', color: 'green', colorName: '緑', icon: '🟢' },
+  { name: '柴犬', role: 'ホスト', kind: 'shiba', color: 'red', colorName: '赤' },
+  { name: 'コーギー', role: 'ゲスト1', kind: 'corgi', color: 'blue', colorName: '青' },
+  { name: 'プードル', role: 'ゲスト2', kind: 'poodle', color: 'pink', colorName: 'ピンク' },
+  { name: 'パグ', role: 'ゲスト3', kind: 'pug', color: 'green', colorName: '緑' },
 ];
 
 /** 犬の顔の SVG（外部画像なし） */

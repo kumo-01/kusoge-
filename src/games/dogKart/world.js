@@ -32,7 +32,7 @@ function canvasTexture(w, hgt, draw, { repeat = false } = {}) {
   return tex;
 }
 
-const FONT = '"League Gothic", "Reggae One", sans-serif';
+const FONT = '"Yusei Magic", sans-serif';
 
 // コースごとの見た目（track.theme）
 const THEMES = {
@@ -596,9 +596,9 @@ export class World {
         x.textBaseline = 'middle';
         x.lineWidth = 14;
         x.strokeStyle = '#ffffff';
-        x.strokeText('🐾 わんわんGP 🐾', w / 2, h / 2 + 4);
+        x.strokeText('わんわんGP', w / 2, h / 2 + 4);
         x.fillStyle = '#c81d4e';
-        x.fillText('🐾 わんわんGP 🐾', w / 2, h / 2 + 4);
+        x.fillText('わんわんGP', w / 2, h / 2 + 4);
       }),
     );
     const banner = new THREE.Mesh(this._track(new THREE.BoxGeometry((t.wallDist + 1.6) * 2, 2.8, 0.5)), [
@@ -795,8 +795,6 @@ export class World {
           x.textBaseline = 'middle';
           x.fillStyle = '#5a3e2b';
           x.fillText(txt, w / 2, h / 2 - 10);
-          x.font = `48px ${FONT}`;
-          x.fillText('🐾🦴🐾', w / 2, h - 50);
         }),
       ),
     );

@@ -3,6 +3,7 @@
 // 角度は、基準線（0°）から反時計回り（左回り）に測る。制限時間の間は何度でも直せる。
 // 計算はホスト（common2d.js）。ゲストは自分の角度をホストへ送り、ホストは時間切れで締め切って答え合わせを配る。
 
+import { icon } from '../../core/icons.js';
 import { h } from '../../core/util.js';
 import { HostedGame, fitCanvas, topbarInset, bottomInset, easeOut, easeInOut, gauss } from '../common2d.js';
 
@@ -185,14 +186,14 @@ class AngleDuel extends HostedGame {
     const o = this.ctx.options || {};
     const races = o.races > 1 ? `第${o.round || 1}戦 / 全${o.races}戦　` : '';
     this.el = {
-      round: h('div.ang-round', null, `${races}🎯 人間感覚角度対決`),
+      round: h('div.ang-round', null, `${races}人間感覚角度対決`),
       prompt: h('div.ang-prompt', null, ''),
       sub: h('div.ang-sub', null, '基準線から 反時計回り（左回り）に測ります'),
       timer: h('div.g2d-timer', null, h('div.g2d-timer-bar'), h('span.g2d-timer-num', null, '')),
       canvas: h('canvas.ang-canvas'),
       foot: h('div.ang-foot', { style: { color: me.col } },
         // 角度を少しずつ動かすボタン・キーは置かない（押した回数を数えれば、お題の角度ぴったりにできてしまうので）
-        h('div', null, `${me.icon} あなた（${me.name}）: 外周の丸をドラッグ、または円の中をタップ（0.1° 単位）`)),
+        h('div', null, h('span.pswatch', { style: { background: me.col } }), `あなた（${me.name}）: 外周の丸をドラッグ、または円の中をタップ（0.1° 単位）`)),
     };
     this.root.classList.add('ang'); // 「ad」で始まる名前は広告ブロッカーに隠されるので使わない
     // 左の列（横長で低い画面のとき）にまとめる部品は .g2d-side に入れる（ふつうの画面では、上下にばらして並ぶ）
@@ -293,9 +294,9 @@ class AngleDuel extends HostedGame {
       g.textAlign = 'center';
       g.textBaseline = 'top';
       g.fillStyle = '#4a3426';
-      g.font = '900 26px "Newsreader", "Zen Old Mincho", serif';
+      g.font = '500 26px "Kiwi Maru", serif';
       g.fillText(`${fmtDeg(s.target)}° までもっていけ！`, w / 2, fy);
-      g.font = '700 16px "Newsreader", "Zen Old Mincho", serif';
+      g.font = '500 16px "Kiwi Maru", serif';
       g.fillStyle = ph === 'play' && remain < 3 ? '#e0344a' : '#7a6152';
       g.fillText(this.el.timer.querySelector('.g2d-timer-num').textContent, w / 2, fy + 34);
       top = Math.min(hh * 0.45, fy + 60);
@@ -353,7 +354,7 @@ class AngleDuel extends HostedGame {
       if (label) {
         const [lx0, ly0] = pt(deg, lr);
         const ly = Math.max(12, Math.min(hh - 12, ly0));
-        g.font = '700 15px "Newsreader", "Zen Old Mincho", serif';
+        g.font = '500 15px "Kiwi Maru", serif';
         const tw = g.measureText(label).width / 2 + 4;
         const lx = Math.max(tw, Math.min(w - tw, lx0)); // 画面からはみ出さない
         g.textAlign = 'center';
@@ -378,7 +379,7 @@ class AngleDuel extends HostedGame {
     // 基準線
     arm(0, '#7a6152', 5, 0, '');
     const [bx, by] = pt(0, R * 0.62);
-    g.font = '700 13px "Newsreader", "Zen Old Mincho", serif';
+    g.font = '500 13px "Kiwi Maru", serif';
     g.fillStyle = '#7a6152';
     g.textAlign = 'center';
     g.textBaseline = 'bottom';
@@ -417,7 +418,7 @@ class AngleDuel extends HostedGame {
         labels.push({ text: `${p.name} ${fmtDeg(a)}°`, col: p.col, x, y, alpha: appear });
       });
       // 名前のラベル: 画面からはみ出さず、重ならないように上下にずらす
-      g.font = '700 15px "Newsreader", "Zen Old Mincho", serif';
+      g.font = '500 15px "Kiwi Maru", serif';
       const LH = 19;
       for (const L of labels) {
         L.hw = g.measureText(L.text).width / 2 + 4;
@@ -452,7 +453,7 @@ class AngleDuel extends HostedGame {
       g.textAlign = 'center';
       g.textBaseline = 'middle';
       g.fillStyle = '#4a3426';
-      g.font = '900 22px "Newsreader", "Zen Old Mincho", serif';
+      g.font = '500 22px "Kiwi Maru", serif';
       g.fillText(`お題 ${fmtDeg(s.target)}°`, cx, Math.max(16, cy - R - 40));
       if (rt > 1.9 + this.n * 0.45 + 0.3 && !this._fanfare) {
         this._fanfare = true;
@@ -462,7 +463,7 @@ class AngleDuel extends HostedGame {
           h('div.g2d-results', null,
             lines.map((x) => {
               const p = this.who(x.i);
-              return h(`div.g2d-res${x.e === best ? '.best' : ''}`, { style: { '--c': p.col } }, x.e === best ? '👑 ' : '', `${p.name}`, h('b', null, ` ずれ ${fmtDeg(x.e)}°`), h('small', null, `（${fmtDeg(s.ans[x.i])}°）`));
+              return h(`div.g2d-res${x.e === best ? '.best' : ''}`, { style: { '--c': p.col } }, x.e === best ? icon('crown', 16) : '', `${p.name}`, h('b', null, ` ずれ ${fmtDeg(x.e)}°`), h('small', null, `（${fmtDeg(s.ans[x.i])}°）`));
             })),
         );
       }

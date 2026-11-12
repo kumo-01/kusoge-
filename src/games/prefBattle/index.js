@@ -9,6 +9,7 @@
 // 計算はホスト（common2d.js）。描いた線は、遊んでいる間ときどきと、時間切れのときにホストへ送る。
 // 地図: 国土地理院の色別標高図。県境: 地球地図日本（国土地理院）を加工して作成（tools/japan-map/）。
 
+import { icon, iconSvg } from '../../core/icons.js';
 import { h } from '../../core/util.js';
 import { HostedGame, fitCanvas, topbarInset, easeOut, easeInOut, gauss } from '../common2d.js';
 import DATA from './japan-prefs.json';
@@ -256,25 +257,25 @@ class PrefBattle extends HostedGame {
     const o = this.ctx.options || {};
     const races = o.races > 1 ? `第${o.round || 1}戦 / 全${o.races}戦　` : '';
     const me = this.who(this.me);
-    const tool = (id, icon, label) => h('button.pb-tool', { 'data-tool': id, onclick: () => this._setTool(id), title: label }, icon, h('small', null, label));
-    const act = (icon, label, fn) => h('button.pb-tool', { onclick: fn, title: label }, icon, h('small', null, label));
+    const tool = (id, ic, label) => h('button.pb-tool', { 'data-tool': id, onclick: () => this._setTool(id), title: label }, icon(ic, 20), h('small', null, label));
+    const act = (ic, label, fn) => h('button.pb-tool', { onclick: fn, title: label }, icon(ic, 20), h('small', null, label));
     this.el = {
-      round: h('div.pb-round', null, `${races}🗾 都道府県県境バトル`),
+      round: h('div.pb-round', null, `${races}都道府県県境バトル`),
       prompt: h('div.pb-prompt', null, ''),
       sub: h('div.pb-sub', null, 'となりの都道府県と接している陸の境だけ（海岸線・島は描かない）'),
       timer: h('div.g2d-timer', null, h('div.g2d-timer-bar'), h('span.g2d-timer-num', null, '')),
       tools: h('div.pb-tools', null,
-        tool('pen', '✏️', 'ペン'),
-        tool('erase', '🧽', '消しゴム'),
-        tool('move', '✋', '移動'),
-        act('↩️', '戻す', () => this._undo()),
-        act('🗑️', '全部リセット', () => this._reset()),
-        act('➕', '拡大', () => this._zoomBy(1.5)),
-        act('➖', '縮小', () => this._zoomBy(1 / 1.5)),
-        act('🗾', '全体', () => this._fit())),
+        tool('pen', 'pen', 'ペン'),
+        tool('erase', 'eraser', '消しゴム'),
+        tool('move', 'hand', '移動'),
+        act('undo', '戻す', () => this._undo()),
+        act('trash', '全部リセット', () => this._reset()),
+        act('plus', '拡大', () => this._zoomBy(1.5)),
+        act('minus', '縮小', () => this._zoomBy(1 / 1.5)),
+        act('map', '全体', () => this._fit())),
       canvas: h('canvas.pb-canvas'),
       foot: h('div.pb-foot', null,
-        h('span', { style: { color: me.col } }, `${me.icon} あなた（${me.name}）: 線をなぞって県境を描こう。2本指でつまむと拡大・移動`),
+        h('span', { style: { color: me.col } }, h('span.pswatch', { style: { background: me.col } }), `あなた（${me.name}）: 線をなぞって県境を描こう。2本指でつまむと拡大・移動`),
         h('span.pb-credit', null, '地図: 国土地理院（色別標高図・地球地図日本を加工）')),
     };
     this.root.classList.add('pb');
@@ -559,7 +560,7 @@ class PrefBattle extends HostedGame {
       g.fillRect(0, 0, w, hh);
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.font = '900 34px "Newsreader", "Zen Old Mincho", serif';
+      g.font = '500 34px "Kiwi Maru", serif';
       g.lineWidth = 6;
       g.strokeStyle = 'rgba(0,0,0,0.35)';
       const txt = `${prefOf(this.s.code).name}`;
@@ -633,11 +634,12 @@ class PrefBattle extends HostedGame {
         g.beginPath();
         roundRect(g, R, 14);
         g.stroke();
-        g.font = '900 16px "Newsreader", "Zen Old Mincho", serif';
+        g.font = '500 16px "Kiwi Maru", serif';
         g.textAlign = 'left';
         g.textBaseline = 'top';
         g.fillStyle = p.col;
-        g.fillText(`${p.icon} ${p.name}`, R.x + 10, R.y + 8);
+        g.fillRect(R.x + 10, R.y + 10, 12, 12); // 犬の色の四角
+        g.fillText(p.name, R.x + 28, R.y + 8);
         g.restore();
       }
       const map = toRect(R);
@@ -668,9 +670,10 @@ class PrefBattle extends HostedGame {
       // 凡例（地図の左下）
       g.save();
       g.globalAlpha = bandT;
-      g.font = '700 12px "Newsreader", "Zen Old Mincho", serif';
-      const lines2 = [`🟨 濃い帯: 県境から ${(T * FULL_RATIO).toFixed(1)}km 以内 = 満点`, `🟨 うすい帯: ${(T * ZERO_RATIO).toFixed(1)}km 以内 = 遠いほど減点（外は 0 点）`];
-      const bw = Math.max(...lines2.map((x) => g.measureText(x).width)) + 16;
+      g.font = '500 12px "Kiwi Maru", serif';
+      const lines2 = [`濃い帯: 県境から ${(T * FULL_RATIO).toFixed(1)}km 以内 = 満点`, `うすい帯: ${(T * ZERO_RATIO).toFixed(1)}km 以内 = 遠いほど減点（外は 0 点）`];
+      const swatch = ['rgba(255,225,90,0.95)', 'rgba(255,240,150,0.6)']; // 帯の色の四角
+      const bw = Math.max(...lines2.map((x) => g.measureText(x).width)) + 34;
       const bx = C.x + 8;
       const by = C.y + C.h - 8 - lines2.length * 17 - 8;
       g.fillStyle = 'rgba(30,20,40,0.7)';
@@ -680,7 +683,12 @@ class PrefBattle extends HostedGame {
       g.fillStyle = '#fff';
       g.textAlign = 'left';
       g.textBaseline = 'top';
-      lines2.forEach((x, k) => g.fillText(x, bx + 8, by + 5 + k * 17));
+      lines2.forEach((x, k) => {
+        g.fillStyle = swatch[k];
+        g.fillRect(bx + 8, by + 7 + k * 17, 11, 11);
+        g.fillStyle = '#fff';
+        g.fillText(x, bx + 26, by + 5 + k * 17);
+      });
       g.restore();
     }
 
@@ -731,7 +739,7 @@ class PrefBattle extends HostedGame {
       g.globalAlpha = a;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.font = `900 ${Math.min(64, w * 0.12) * (1 + 0.15 * (1 - Math.min(1, rt / 0.3)))}px "Newsreader", "Zen Old Mincho", serif`;
+      g.font = `${Math.min(64, w * 0.12) * (1 + 0.15 * (1 - Math.min(1, rt / 0.3)))}px "Yusei Magic", sans-serif`;
       g.lineWidth = 10;
       g.strokeStyle = '#4a3426';
       g.strokeText('そこまで！', w / 2, hh / 2);
@@ -743,7 +751,7 @@ class PrefBattle extends HostedGame {
     if (merge >= 1) {
       g.textAlign = 'center';
       g.textBaseline = 'top';
-      g.font = '900 20px "Newsreader", "Zen Old Mincho", serif';
+      g.font = '500 20px "Kiwi Maru", serif';
       g.lineWidth = 5;
       g.strokeStyle = 'rgba(0,0,0,0.45)';
       g.strokeText(`お題: ${pref.name}`, w / 2, C.y + 8);
@@ -762,7 +770,7 @@ class PrefBattle extends HostedGame {
           const num = h('b', null, '0.0%');
           const sx = s.scores[i];
           const det = h('small.pb-detail', null, `位置 ${(sx.pos * WEIGHTS.pos).toFixed(1)} + 形 ${(sx.shape * WEIGHTS.shape).toFixed(1)} + 長さ ${(sx.lenS * sx.shape * WEIGHTS.len).toFixed(1)}${sx.over > OVER_LIMIT ? `・線が多すぎ ×${(OVER_LIMIT / sx.over).toFixed(2)}` : ''}・平均のずれ ${sx.dev.toFixed(1)}km`);
-          const el = h('div.g2d-res', { style: { '--c': p.col } }, h('span.pb-crown', null, ''), `${p.icon} ${p.name}　`, num, det);
+          const el = h('div.g2d-res', { style: { '--c': p.col } }, h('span.pb-crown', null, ''), h('span.pswatch', { style: { background: p.col } }), `${p.name}　`, num, det);
           return { el, num, i, det };
         });
         this.el.foot.replaceChildren(h('div.g2d-results', null, this._chips.map((x) => x.el)));
@@ -772,7 +780,7 @@ class PrefBattle extends HostedGame {
         ch2.num.textContent = `${v.toFixed(1)}%`;
         const win = done && s.scores[ch2.i].pct === best;
         ch2.el.classList.toggle('best', win);
-        ch2.el.querySelector('.pb-crown').textContent = win ? '👑 ' : '';
+        ch2.el.querySelector('.pb-crown').innerHTML = win ? iconSvg('crown', 16) : '';
         ch2.det.classList.toggle('on', done);
       }
       if (done && !this._fanfare) {

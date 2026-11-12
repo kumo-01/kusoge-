@@ -5,6 +5,7 @@
 // 色が変わる前に押すと「フライング」で失格。
 // 計算はホスト（common2d.js）。ゲストは自分の結果（ミリ秒 / フライング）をホストへ送る。
 
+import { icon } from '../../core/icons.js';
 import { h } from '../../core/util.js';
 import { HostedGame, gauss } from '../common2d.js';
 
@@ -34,13 +35,13 @@ export function reactionPoints(ms, win) {
 
 /** 反応の速さの評価 */
 export function reactionRank(ms) {
-  if (ms === FOUL) return '💥 フライング';
+  if (ms === FOUL) return 'フライング';
   if (!(ms >= 0)) return '⌛ 時間切れ';
-  if (ms < 180) return '⚡ 神反応';
-  if (ms < 230) return '🔥 超はやい';
-  if (ms < 290) return '😺 はやい';
-  if (ms < 380) return '🐶 ふつう';
-  return '🐢 のんびり';
+  if (ms < 180) return '神反応';
+  if (ms < 230) return '超はやい';
+  if (ms < 290) return 'はやい';
+  if (ms < 380) return 'ふつう';
+  return 'のんびり';
 }
 
 /** 色の組み合わせ（待ち → 合図）。毎回変える */
@@ -200,13 +201,13 @@ class Reaction extends HostedGame {
     const o = this.ctx.options || {};
     const races = o.races > 1 ? `第${o.round || 1}戦 / 全${o.races}戦　` : '';
     this.el = {
-      round: h('div.g2d-round', null, `${races}⚡ 反応速度バトル`),
+      round: h('div.g2d-round', null, `${races}反応速度バトル`),
       prompt: h('div.g2d-prompt', null, ''),
       sub: h('div.g2d-sub', null, ''),
       big: h('div.rx-big', null, ''),
       mine: h('div.rx-mine', null, ''),
       players: h('div.rx-players', null),
-      foot: h('div.g2d-foot', { style: { color: me.col } }, `${me.icon} あなた（${me.name}）: 画面のどこでもクリック / タップ / スペースキー`),
+      foot: h('div.g2d-foot', { style: { color: me.col } }, h('span.pswatch', { style: { background: me.col } }), `あなた（${me.name}）: 画面のどこでもクリック / タップ / スペースキー`),
     };
     this.root.classList.add('rx');
     this.root.append(
@@ -288,16 +289,16 @@ class Reaction extends HostedGame {
       bg = pal.wait;
       prompt = 'まだ…';
       sub = `${pal.name}になったら押す！`;
-      big = this.mine === FOUL ? '💥 フライング！' : 'まだ押すな…';
+      big = this.mine === FOUL ? 'フライング！' : 'まだ押すな…';
     } else if (ph === 'go') {
       bg = pal.go;
       prompt = '今だ！';
       sub = '';
-      big = this.mine === null ? '押せ！！' : this.mine >= 0 ? `${this.mine} ms` : this.mine === FOUL ? '💥 フライング！' : '⌛ 時間切れ';
+      big = this.mine === null ? '押せ！！' : this.mine >= 0 ? `${this.mine} ms` : this.mine === FOUL ? 'フライング！' : '時間切れ';
     } else {
       bg = '';
       prompt = '結果発表';
-      sub = this.n > 1 ? (this._iWon() ? '🏆 あなたがいちばん速い！' : '') : '';
+      sub = this.n > 1 ? (this._iWon() ? 'あなたがいちばん速い！' : '') : '';
       big = fmtMs(s.res[this.me]);
     }
     this.root.style.setProperty('--rx-bg', bg || 'transparent');
@@ -327,10 +328,10 @@ class Reaction extends HostedGame {
       const p = this.who(i);
       if (ph === 'reveal') {
         const win = x >= 0 && x === best;
-        return h(`div.g2d-res${win ? '.best' : ''}`, { style: { '--c': p.col } }, win ? '👑 ' : '', `${p.icon} ${p.name}　`, h('b', null, fmtMs(x)), h('small', null, `　${reactionRank(x)}`));
+        return h(`div.g2d-res${win ? '.best' : ''}`, { style: { '--c': p.col } }, win ? icon('crown', 16) : '', h('span.pswatch', { style: { background: p.col } }), `${p.name}　`, h('b', null, fmtMs(x)), h('small', null, `　${reactionRank(x)}`));
       }
       const got = i === this.me ? (this.mine === null ? 0 : this.mine === FOUL ? 2 : 1) : this.isHost ? (x === null ? 0 : x === FOUL ? 2 : 1) : (this._got || [])[i] || 0;
-      return h('div.g2d-res', { style: { '--c': p.col } }, `${p.icon} ${p.name}　`, h('b', null, got === 0 ? '…' : got === 2 ? '💥' : '✅'));
+      return h('div.g2d-res', { style: { '--c': p.col } }, h('span.pswatch', { style: { background: p.col } }), `${p.name}　`, h('b', null, got === 0 ? '…' : got === 2 ? 'フライング' : icon('check', 16)));
     });
     this.el.players.replaceChildren(h('div.g2d-results', null, chips));
   }
