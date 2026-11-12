@@ -128,7 +128,7 @@ export function unpackState(o, n) {
 // ---- 配信のバイト列（毎秒 40 回。JSON の約 1/4 の大きさ） ----
 // 犬 1 匹 18 バイト（位置 1mm・向き・状態・体力・アイテム・点数）。ラウンドごとの点は 10 回に 1 回だけ載せる。
 // 起きたこと（撃った・当たった…）は、数を丸めた JSON を後ろにつける（少ないので）
-const BIN_V = 2;
+const BIN_V = 3;
 const PH = ['intro', 'play', 'end', 'done', 'pick'];
 /** 猫の動きの番号 */
 const BOSS_ST = ['walk', 'wind', 'crouch', 'pounce', 'rest', 'down'];
@@ -229,7 +229,8 @@ export function packBin(s, withRs = true, ev = null) {
     w.u16((((p.yaw % TAU) + TAU) % TAU) * (65536 / TAU));
     w.i8((p.pitch / 1.5) * 127);
     w.u8((p.crouch ? FL.CROUCH : 0) | (p.moving ? FL.MOVING : 0) | (p.inv > 0 ? FL.INV : 0) | (p.stun > 0 ? FL.STUN : 0) | (p.stuck > 0 ? FL.STUCK : 0) | (p.shake > 0 ? FL.SHAKE : 0) | (p.noAmmo > 0 ? FL.NOAMMO : 0) | (p.reload > 0 ? FL.RELOAD : 0));
-    w.u8((p.hp & 15) | ((p.item & 15) << 4));
+    w.u8(Math.max(0, Math.min(255, p.hp)));
+    w.u8(p.item & 15);
     w.u8(p.g);
     w.u8(Math.ceil(p.dead * 20));
     w.u16(p.score);
@@ -302,9 +303,8 @@ export function unpackBin(u8, n, prevRs = null) {
       p.pitch = (r.i8() / 127) * 1.5;
       const fl = r.u8();
       Object.assign(p, { crouch: !!(fl & FL.CROUCH), moving: !!(fl & FL.MOVING), inv: fl & FL.INV ? 1 : 0, stun: fl & FL.STUN ? 1 : 0, stuck: fl & FL.STUCK ? 1 : 0, shake: fl & FL.SHAKE ? 1 : 0, noAmmo: fl & FL.NOAMMO ? 1 : 0, reloading: !!(fl & FL.RELOAD) });
-      const hi = r.u8();
-      p.hp = hi & 15;
-      p.item = hi >> 4;
+      p.hp = r.u8();
+      p.item = r.u8() & 15;
       p.g = r.u8();
       p.dead = r.u8() / 20;
       p.score = r.u16();

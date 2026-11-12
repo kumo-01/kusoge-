@@ -3,10 +3,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GomuSim } from '../src/games/gomuBattle/sim.js';
 import { ARENAS, ROOM, SCALE } from '../src/games/gomuBattle/arena.js';
-import { createBody, stepMove, fits, aimDir, heightOf, movableBox, shoveMovables, bandSpec } from '../src/games/gomuBattle/physics.js';
+import { createBody, stepMove, fits, aimDir, heightOf, movableBox, shoveMovables, bandSpec, weaponDamage } from '../src/games/gomuBattle/physics.js';
 import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE } from '../src/games/gomuBattle/constants.js';
 
 const DT = 1 / 60;
+// 当たった数を数えやすいように、ふだんは毎秒の回復を止める（回復のテストだけ戻す）
+const REGEN = PLAYER.REGEN;
+PLAYER.REGEN = 0;
 const run = (sim, sec) => {
   for (let i = 0; i < sec * 60; i++) sim.step(DT);
 };
@@ -44,7 +47,7 @@ test('会場: 3 つとも、出発地点・アイテムの箱・押せるもの�
   }
   assert.ok(Math.abs((ROOM.W * ROOM.D) / (52 * 40) - 1.5) < 0.01, '前の 1.5 倍の広さ');
   assert.equal(ROUND.TIME, 360);
-  assert.equal(PLAYER.HP, 5);
+  assert.equal(PLAYER.HP, 100);
 });
 
 test('動き: 歩く・ベンチの座面にぶつかって止まる・ジャンプで座面に乗る・座面の下は伏せでくぐる', () => {
@@ -87,20 +90,23 @@ test('動き: ダッシュは速く、使ったあとは待ち時間。壁は抜
   assert.ok(w.x <= ROOM.W / 2 - PLAYER.RADIUS + 1e-6 && w.x > 25, `壁を抜けない (${w.x})`);
 });
 
-test('撃つ: 当たると体力が減って点が入り、5 発で倒れて +3 点。3 秒で復活し、2 秒は無敵', () => {
+test('撃つ: 近くから 14 ずつ減って 8 発で倒れる。与えたダメージ 10 ごとに 1 点、倒すと +3 点。3 秒で復活し、2 秒は無敵', () => {
   const sim = ready();
   const [a, b] = sim.s.players;
   Object.assign(a, { x: -4, z: 2, y: 0 });
   Object.assign(b, { x: 4, z: 2, y: 0 });
   face(a, b);
-  for (let n = 0; n < PLAYER.HP; n++) {
+  assert.ok(sim.fire(0, eye(a), chestDir(a, b)));
+  run(sim, 0.4);
+  assert.equal(b.hp, PLAYER.HP - 14, '8 より近いので 14');
+  for (let n = 1; n < 8; n++) {
     assert.ok(sim.fire(0, eye(a), chestDir(a, b)));
-    run(sim, 0.6);
+    run(sim, 0.4);
   }
   const ev = sim.drainEvents();
-  assert.equal(ev.filter((e) => e.t === 'hit').length, PLAYER.HP);
+  assert.equal(ev.filter((e) => e.t === 'hit').length, 8);
   assert.equal(ev.filter((e) => e.t === 'kill').length, 1);
-  assert.equal(a.score, SCORE.HIT * PLAYER.HP + SCORE.KILL);
+  assert.equal(a.score, PLAYER.HP / SCORE.DMG_PER_POINT + SCORE.KILL);
   assert.equal(a.rs[0], a.score);
   assert.equal(a.kills, 1);
   assert.equal(b.deaths, 1);
@@ -159,7 +165,7 @@ test('アイテム: 箱に近づくと取れて、10 秒後にまた出る。ゴ
   assert.equal(sim.drainEvents().find((e) => e.t === 'shot').k, 0);
 });
 
-test('アイテム: 極太は 2 ダメージ、跳ね返りは壁で跳ね返る、追いかけは曲がって当たる', () => {
+test('アイテム: 極太は 1.6 倍のダメージ、跳ね返りは壁で跳ね返る、追いかけは曲がって当たる', () => {
   const sim = ready();
   const [a, b] = sim.s.players;
   Object.assign(a, { x: -4, z: 2, y: 0 });
@@ -168,7 +174,7 @@ test('アイテム: 極太は 2 ダメージ、跳ね返りは壁で跳ね返る
   a.spN = 5;
   sim.fire(0, eye(a), chestDir(a, b), ITEM.THICK);
   run(sim, 0.8);
-  assert.equal(b.hp, PLAYER.HP - ITEMS.THICK_DAMAGE);
+  assert.equal(b.hp, PLAYER.HP - Math.round(14 * 1.6));
   // 跳ね返り: 壁へ撃つと戻ってくる
   b.hp = PLAYER.HP;
   a.sp = ITEM.BOUNCE;
@@ -330,7 +336,7 @@ test('撃った人の画面で当たりを決める: ホストでは当てず、
   assert.equal(sim.remoteHit(1, key + 1, 0, [a.x, 0.6, a.z]), false, '撃っていない番号');
   assert.equal(sim.remoteHit(1, key, 0, [a.x + 8, 0.6, a.z]), false, '相手から遠すぎる');
   assert.equal(sim.remoteHit(1, key, 0, [a.x + 0.3, 0.6, a.z]), true);
-  assert.equal(a.hp, PLAYER.HP - 1);
+  assert.equal(a.hp, PLAYER.HP - 14, '撃った場所から当たった場所までの距離でダメージ（近いので 14）');
   assert.equal(b.score, 1);
   assert.equal(sim.remoteHit(1, key, 0, [a.x, 0.6, a.z]), false, '同じ輪ゴムは 1 回だけ');
   const ev = sim.drainEvents();
@@ -338,7 +344,7 @@ test('撃った人の画面で当たりを決める: ホストでは当てず、
   // ホスト自身・CPU の輪ゴムは、今までどおりホストが当てる
   sim.fire(0, eye(a), chestDir(a, b));
   run(sim, 0.8);
-  assert.equal(b.hp, PLAYER.HP - 1);
+  assert.equal(b.hp, PLAYER.HP - 14);
 });
 
 test('配信のバイト列: 位置・向き・体力・アイテム・点・押せるもの・煙・ガム・起きたことが戻る。JSON より小さい', () => {
@@ -369,13 +375,14 @@ test('配信のバイト列: 位置・向き・体力・アイテム・点・押
   assert.ok(packBin(sim.s, false, null).length < 240, '7 匹で 240 バイト未満（煙・ガムの数で少し変わる）');
 });
 
-test('アイテム: 回復おやつは体力が 3 回復（5 まで）、無敵スターは 10 秒間 輪ゴムもガムも効かない', () => {
+test('アイテム: 回復おやつは体力が 40 回復（100 まで）、無敵スターは 10 秒間 輪ゴムもガムも効かない', () => {
   const sim = ready();
   const [a, b] = sim.s.players;
   a.hp = 1;
   a.item = ITEM.HEAL;
   assert.ok(sim.useItem(0, eye(a), [1, 0, 0]));
   assert.equal(a.hp, 1 + ITEMS.HEAL);
+  a.hp = PLAYER.HP - 10;
   a.item = ITEM.HEAL;
   sim.useItem(0, eye(a), [1, 0, 0]);
   assert.equal(a.hp, PLAYER.HP, '最大を超えない');
@@ -394,7 +401,7 @@ test('アイテム: 回復おやつは体力が 3 回復（5 まで）、無敵�
   assert.equal(b.inv, 0, '10 秒で切れる');
   sim.fire(0, eye(a), chestDir(a, b));
   run(sim, 0.6);
-  assert.equal(b.hp, PLAYER.HP - 1);
+  assert.equal(b.hp, PLAYER.HP - 14);
   // 箱から出る（拾うと 1〜COUNT-1 のどれか）
   assert.ok(ITEM.HEAL < ITEM.COUNT && ITEM.STAR < ITEM.COUNT);
 });
@@ -434,7 +441,7 @@ test('武器えらび: ラウンドの前に選ぶ。全員選べば早く始ま
   assert.equal(s2.s.phase, 'intro');
 });
 
-test('スナイパー: 速くまっすぐ飛んで 4 ダメージ。5 発で補充。連射は遅い', () => {
+test('スナイパー: 速くまっすぐ飛んで、遠いほど痛い。5 発で補充。連射は遅い', () => {
   const sim = ready();
   const [a, b] = sim.s.players;
   a.weapon = WEAPON.SNIPER;
@@ -446,7 +453,8 @@ test('スナイパー: 速くまっすぐ飛んで 4 ダメージ。5 発で補�
   assert.ok(sim.tryFire(a, eye(a), [d[0] / l, 0, 0]));
   assert.equal(sim.tryFire(a, eye(a), [1, 0, 0]), false, 'すぐには次を撃てない');
   run(sim, 0.8); // 40 先まで 0.6 秒くらい
-  assert.equal(b.hp, PLAYER.HP - WEAPONS[WEAPON.SNIPER].dmg, '35 離れていても 4 ダメージ');
+  const sd = PLAYER.HP - b.hp;
+  assert.ok(sd > 45 && sd <= 60, `35 離れているので、近く（30）より痛い: ${sd}`);
   for (let k = 1; k < WEAPONS[WEAPON.SNIPER].ammo; k++) {
     run(sim, 1.1);
     assert.ok(sim.tryFire(a, eye(a), [1, 0, 0]));
@@ -458,7 +466,16 @@ test('スナイパー: 速くまっすぐ飛んで 4 ダメージ。5 発で補�
 test('輪ゴム: ふつうは 10 発・壁で 1 回跳ね返る。跳ね返りゴムは 3 回', () => {
   assert.equal(WEAPONS[WEAPON.NORMAL].ammo, 10);
   assert.equal(WEAPONS[WEAPON.SNIPER].ammo, 5);
-  assert.equal(WEAPONS[WEAPON.SNIPER].dmg, 4);
+  // ダメージは距離で: 鉄砲は近いほど、スナイパーは遠いほど痛い
+  assert.equal(weaponDamage(WEAPON.NORMAL, 3), 14);
+  assert.equal(weaponDamage(WEAPON.NORMAL, 24), 10);
+  assert.equal(weaponDamage(WEAPON.NORMAL, 60), 6);
+  assert.equal(weaponDamage(WEAPON.SNIPER, 5), 30);
+  assert.equal(weaponDamage(WEAPON.SNIPER, 50), 60);
+  assert.ok(weaponDamage(WEAPON.SNIPER, 30) > weaponDamage(WEAPON.SNIPER, 15));
+  assert.equal(weaponDamage(WEAPON.BOMB, 0), WEAPONS[WEAPON.BOMB].dmg[0]);
+  assert.equal(weaponDamage(WEAPON.BOMB, WEAPONS[WEAPON.BOMB].blast + 0.1), 0, '爆発の外は 0');
+  assert.equal(bandSpec(0, WEAPON.BOMB).bounce, 0, '爆弾は跳ね返らずに爆発');
   assert.equal(bandSpec(0).bounce, 1);
   assert.equal(bandSpec(0, WEAPON.SNIPER).bounce, 1);
   assert.equal(bandSpec(ITEM.BOUNCE).bounce, 3);
@@ -480,7 +497,7 @@ test('チーム戦: 2 チームに分かれ、味方には当たらない。照�
   assert.equal(c.hp, PLAYER.HP, '味方には当たらない（すり抜ける）');
   sim.fire(0, eye(a), chestDir(a, b));
   run(sim, 0.6);
-  assert.equal(b.hp, PLAYER.HP - 1, '敵には当たる');
+  assert.ok(b.hp < PLAYER.HP, '敵には当たる');
   a.item = ITEM.NOAMMO;
   sim.useItem(0, eye(a), [1, 0, 0]);
   assert.ok(b.noAmmo > 0 && c.noAmmo === 0, 'ゴム切れは敵だけ');
@@ -509,8 +526,8 @@ test('ボス戦: 猫の体力は人数で変わる。犬どうしは当たらな
   const tl = Math.hypot(...to);
   sim.fire(0, eye(a), to.map((v) => v / tl));
   run(sim, 0.4);
-  assert.equal(boss.hp, boss.max - 1);
-  assert.equal(a.score, 1);
+  assert.equal(boss.hp, boss.max - 14, '近いので 14');
+  assert.equal(a.score, 1, 'ダメージ 10 ごとに 1 点');
   assert.ok(sim.drainEvents().some((e) => e.t === 'bhit' && e.by === 0));
   // とどめ
   boss.hp = 1;
@@ -565,4 +582,54 @@ test('配信のバイト列: 武器・選んだか・猫の位置と体力・倒
   assert.equal(d.st.boss.hp, 77);
   assert.equal(d.st.boss.max, sim.s.boss.max);
   assert.deepEqual(d.st.bossWon, [true, false, false]);
+});
+
+test('体力: 生きている間は 1 秒に 1 ずつ回復する（100 まで）', () => {
+  PLAYER.REGEN = REGEN;
+  try {
+    const sim = ready();
+    const [a] = sim.s.players;
+    a.hp = 50;
+    run(sim, 3.02);
+    assert.equal(a.hp, 53);
+    a.hp = PLAYER.HP - 1;
+    run(sim, 5);
+    assert.equal(a.hp, PLAYER.HP);
+  } finally {
+    PLAYER.REGEN = 0;
+  }
+});
+
+test('爆弾: 山なりに投げて、当たると爆発。まわりの相手にまとめて、中心に近いほど大きなダメージ。ホストが爆発させる', async () => {
+  const { lobPitch } = await import('../src/games/gomuBattle/bot.js');
+  const sim = new GomuSim({ humans: 3, bots: 0, seed: 11 });
+  run(sim, ROUND.INTRO + 0.1);
+  sim.clientJudge = () => true; // ゲストの爆弾でもホストが当たりを決める
+  const [a, b, c] = sim.s.players;
+  a.weapon = WEAPON.BOMB;
+  a.ammo = WEAPONS[WEAPON.BOMB].ammo;
+  assert.equal(a.ammo, 4);
+  Object.assign(a, { x: -8, z: 2, y: 0 });
+  Object.assign(b, { x: 2, z: 2, y: 0 });
+  Object.assign(c, { x: 2, z: 4.2, y: 0 }); // b の近く（巻きこまれる）
+  sim.drainEvents();
+  const W = WEAPONS[WEAPON.BOMB];
+  const e = eye(a);
+  const pitch = lobPitch(W.speed, W.gravity, b.x - a.x, 0.3 - e[1]);
+  assert.ok(pitch != null && pitch > 0.05, '山なり');
+  assert.ok(sim.tryFire(a, e, aimDir(Math.PI / 2, pitch)));
+  assert.equal(sim.s.bands[0].cj, false, '爆弾は撃った人の端末では当てない');
+  assert.equal(sim.tryFire(a, e, [1, 0, 0]), false, '続けては投げられない');
+  run(sim, 1.5);
+  const ev = sim.drainEvents();
+  const boom = ev.find((x) => x.t === 'boom');
+  assert.ok(boom, '爆発した');
+  assert.ok(b.hp < PLAYER.HP && c.hp < PLAYER.HP, '2 匹とも巻きこまれる');
+  assert.ok(PLAYER.HP - b.hp > PLAYER.HP - c.hp, '中心に近い方が痛い');
+  assert.equal(a.hp, PLAYER.HP, '自分は巻きこまれない');
+  for (let k = 1; k < 4; k++) {
+    assert.ok(sim.tryFire(a, e, [0, 0.6, 0.8]));
+    run(sim, W.gap + 0.05);
+  }
+  assert.ok(a.reload > 0, '4 発で補充');
 });

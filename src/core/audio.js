@@ -244,6 +244,11 @@ class Sound {
         case 'miss':
           this._tone({ type: 'triangle', from: 500, to: 300, dur: 0.25, vol: 0.18 });
           break;
+        case 'boom':
+          // 爆弾: ボンッ
+          this._noise({ dur: 0.55, vol: 0.75, filter: 'lowpass', from: 1800, to: 120, q: 0.6 });
+          this._tone({ from: 110, to: 40, dur: 0.45, vol: 0.45 });
+          break;
         case 'thunder':
           // ゴロゴロ…ドーン
           this._noise({ dur: 1.6, vol: 0.7, filter: 'lowpass', from: 900, to: 80, q: 0.5 });

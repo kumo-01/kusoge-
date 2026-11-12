@@ -1,0 +1,17 @@
+[package]
+name = "gomu-collide"
+version = "0.1.0"
+edition = "2021"
+description = "いぬいぬゴム鉄砲バトルの当たり判定（線分と箱）。WebAssembly にしてブラウザで使う"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

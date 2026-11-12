@@ -3,6 +3,8 @@ import { iconSvg, iconText } from '../../core/icons.js';
 import { h } from '../../core/util.js';
 import { ITEM_INFO, GUN, PLAYER, ROUND, WEAPON, WEAPONS, MODE, TEAMS, BOSS } from './constants.js';
 
+const AMMO_ICON = { [WEAPON.NORMAL]: 'ring', [WEAPON.SNIPER]: 'target', [WEAPON.BOMB]: 'bomb' };
+
 export class GomuHud {
   constructor(root, { touch, mode = MODE.FFA }) {
     this.mode = mode;
@@ -14,7 +16,10 @@ export class GomuHud {
     this.timer = h('div.gm-timer');
     this.board = h('div.gm-board');
     this.feed = h('div.gm-feed');
-    this.hearts = h('div.gm-hearts');
+    // 体力（100）: ハートと数と横のバー
+    this.hpNum = h('b.gm-hp-num');
+    this.hpFill = h('i');
+    this.hearts = h('div.gm-hp', null, h('span.gm-hp-ic', { html: iconSvg('heart', 22) }), this.hpNum, h('div.gm-hp-bar', null, this.hpFill));
     this.ammo = h('div.gm-ammo');
     this.reloadBar = h('div.gm-reload', null, h('i'));
     this.special = h('div.gm-special');
@@ -26,6 +31,7 @@ export class GomuHud {
     this.vignette = h('div.gm-vignette');
     this.smoke = h('div.gm-smoke');
     this.hurtDirs = h('div.gm-hurtdirs');
+    this.dmg = h('div.gm-dmgpop');
     this._hurtEls = [];
     this.hint = h('div.gm-hint');
     this.table = h('div.gm-table');
@@ -35,17 +41,17 @@ export class GomuHud {
     this.bossBar = h('div.gm-boss', { hidden: true }, h('div.gm-boss-name', null, BOSS.NAME, this.bossNum), h('div.gm-boss-bar', null, this.bossFill));
     // スナイパーでのぞいたときの丸い視界
     this.scope = h('div.gm-scope', { hidden: true });
-    // ラウンドの前の武器選び（カードを押すか、1 / 2 キー）
+    // ラウンドの前の武器選び（カードを押すか、1 / 2 / 3 キー）
     const card = (w, ic) =>
       h('button.gm-pick-card', { type: 'button', 'data-ctl': '', 'data-w': String(w), ontap: () => this.onPick?.(w) },
         h('span.gm-pick-ic', { html: iconSvg(ic, 44) }),
         h('b', null, WEAPONS[w].name),
         h('small', null, WEAPONS[w].desc),
         h('kbd', null, String(w + 1)));
-    this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target')];
+    this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.BOMB, 'bomb')];
     this.pickInfo = h('p.gm-pick-info');
     this.pick = h('div.gm-pick', { hidden: true }, h('h2', null, '武器をえらぶ'), h('div.gm-pick-row', null, ...this.pickCards), this.pickInfo);
-    this.root.append(this.scope, this.smoke, this.vignette, this.hurtDirs, this.cross, h('div.gm-top', null, this.round, this.timer), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.status), h('div.gm-br', null, this.special, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
+    this.root.append(this.scope, this.smoke, this.vignette, this.hurtDirs, this.cross, this.dmg, h('div.gm-top', null, this.round, this.timer), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.status), h('div.gm-br', null, this.special, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
     this.touch = touch ? new GomuTouch(this.root) : null;
     this.root.classList.add(`mode-${mode}`);
     this.root.classList.toggle('is-touch', !!touch);
@@ -95,11 +101,16 @@ export class GomuHud {
     this._set(this.timer, 'timer', v.phase === 'play' ? `${left}` : '');
     this.timer.classList.toggle('is-low', v.phase === 'play' && left <= 10);
     // 体力
-    const hpN = Math.max(0, v.me.hp);
-    this._setHtml(this.hearts, 'hp', `${hpN}`, () => Array.from({ length: PLAYER.HP }, (_, k) => `<span class="gm-heart${k < hpN ? ' on' : ''}">${iconSvg('heart', 26)}</span>`).join(''));
+    const hpN = Math.max(0, Math.min(PLAYER.HP, v.me.hp | 0));
+    if (this._key.hp !== hpN) {
+      this._key.hp = hpN;
+      this.hpNum.textContent = String(hpN);
+      this.hpFill.style.transform = `scaleX(${hpN / PLAYER.HP})`;
+      this.hearts.classList.toggle('is-low', hpN <= 30);
+    }
     // 輪ゴム
     const ammoN = v.me.reload > 0 ? -1 : Math.max(0, v.me.ammo);
-    this._setHtml(this.ammo, 'ammo', `${ammoN}:${v.me.weapon}`, () => (ammoN < 0 ? '' : Array.from({ length: v.me.maxAmmo || GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg(v.me.weapon === WEAPON.SNIPER ? 'target' : 'ring', (v.me.maxAmmo || GUN.AMMO) > 5 ? 18 : 24)}</span>`).join('')));
+    this._setHtml(this.ammo, 'ammo', `${ammoN}:${v.me.weapon}`, () => (ammoN < 0 ? '' : Array.from({ length: v.me.maxAmmo || GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg(AMMO_ICON[v.me.weapon] || 'ring', (v.me.maxAmmo || GUN.AMMO) > 5 ? 18 : 24)}</span>`).join('')));
     this.reloadBar.hidden = !(v.me.reload > 0);
     if (v.me.reload > 0) this.reloadBar.firstChild.style.width = `${(1 - v.me.reload / (v.me.reloadT || GUN.RELOAD)) * 100}%`;
     this._setHtml(this.special, 'sp', v.me.sp ? `${v.me.sp}:${v.me.spN}` : '', () => (v.me.sp ? `${iconSvg(ITEM_INFO[v.me.sp].icon, 18)} ${ITEM_INFO[v.me.sp].name} ×${v.me.spN}` : ''));
@@ -163,6 +174,15 @@ export class GomuHud {
   }
 
   /** 当てた（照準に印） */
+  /** 与えたダメージの数（照準の右上にぽんと出る） */
+  dmgPop(n) {
+    if (!(n > 0)) return;
+    this.dmg.textContent = String(n);
+    this.dmg.classList.remove('on');
+    void this.dmg.offsetWidth;
+    this.dmg.classList.add('on');
+  }
+
   hitMarker(kill = false) {
     this.cross.classList.remove('is-hit', 'is-kill');
     void this.cross.offsetWidth;

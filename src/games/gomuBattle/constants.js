@@ -26,7 +26,8 @@ export const PLAYER = {
   GRAVITY: 22,
   STEP: 0.5, // これより低い段差は歩いて上がれる（ラグ・クッション・犬のベッド）
   PUSH_SPEED: 2.4, // 押せるもの（段ボールなど）を押して進む速さ（ズルズル）
-  HP: 5,
+  HP: 100,
+  REGEN: 1, // 生きている間、1 秒に回復する体力
   RESPAWN: 3, // 倒れてから復活するまで（秒）
   INVINCIBLE: 2, // 復活してから無敵の時間
   STUN: 0.3, // 当てられてよろける時間
@@ -87,12 +88,12 @@ export const ITEMS = {
   GUM_TIME: 25, // 置いたガムが残る時間
   GUM_RADIUS: 0.6,
   GUM_STUCK: 2, // 踏むと動けない時間
-  HEAL: 3, // 回復する体力
+  HEAL: 40, // 回復する体力
   STAR_TIME: 10, // 無敵の時間
 };
 
 export const SCORE = {
-  HIT: 1,
+  DMG_PER_POINT: 10, // 相手に与えたダメージ 10 ごとに 1 点
   KILL: 3,
 };
 
@@ -107,7 +108,7 @@ export const BOT = {
 };
 
 export const ITEM_INFO = {
-  [ITEM.THICK]: { name: '極太ゴム', icon: 'thick', desc: '次の5発が太くて当たりやすい。当たると2ダメージ' },
+  [ITEM.THICK]: { name: '極太ゴム', icon: 'thick', desc: '次の5発が太くて当たりやすく、ダメージ1.6倍' },
   [ITEM.TRIPLE]: { name: '3方向ゴム', icon: 'triple', desc: '次の5発が、扇の形に3本ずつ飛ぶ' },
   [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: 'bounce', desc: '次の5発が、壁や家具で3回まで跳ね返る' },
   [ITEM.HOMING]: { name: '追いかけゴム', icon: 'target', desc: '次の5発が、狙った近くの相手へゆるく曲がる' },
@@ -115,17 +116,24 @@ export const ITEM_INFO = {
   [ITEM.SHAKE]: { name: '照準ぶれ', icon: 'spiral', desc: '自分以外の全員の狙いが3秒ゆらゆら' },
   [ITEM.NOAMMO]: { name: 'ゴム切れ', icon: 'scissors', desc: '自分以外の全員が3秒撃てない' },
   [ITEM.GUM]: { name: 'ネバネバガム', icon: 'candy', desc: '足もとに置く罠。踏んだ相手は2秒動けない' },
-  [ITEM.HEAL]: { name: '回復おやつ', icon: 'heal', desc: '体力が3回復する' },
+  [ITEM.HEAL]: { name: '回復おやつ', icon: 'heal', desc: '体力が40回復する' },
   [ITEM.STAR]: { name: '無敵スター', icon: 'star', desc: '10秒間、輪ゴムもガムも効かない' },
 };
 
-/** 武器（ラウンドの前の選択画面で選ぶ） */
-export const WEAPON = { NORMAL: 0, SNIPER: 1 };
+/**
+ * 武器（ラウンドの前の選択画面で選ぶ）
+ * ダメージは距離で決まる: dmg = [近い, 遠い]、fall = [この距離まで「近い」, この距離から「遠い」]（間はなめらかに）
+ * ふつうの鉄砲は近いほど強く、スナイパーは遠いほど強い。爆弾は爆発の中心からの距離（blast = 半径）
+ */
+export const WEAPON = { NORMAL: 0, SNIPER: 1, BOMB: 2 };
 export const WEAPONS = {
-  [WEAPON.NORMAL]: { name: '輪ゴム鉄砲', desc: '10発ずつ。連射がきいて扱いやすい', ammo: 10, reload: 1.5, gap: 0.18, speed: 50.4, gravity: 2.5, dmg: 1, r: 0.08, life: 1.8 },
-  // スナイパー: 遠くまでまっすぐ速く飛んで 4 ダメージ。5 発ずつで連射は遅い。のぞくと拡大
-  [WEAPON.SNIPER]: { name: 'スナイパー', desc: '5発ずつ。遠くまでまっすぐ飛んで4ダメージ。のぞくと拡大', ammo: 5, reload: 2.4, gap: 1.0, speed: 72, gravity: 0.3, dmg: 4, r: 0.06, life: 1.6, zoomFov: 24 },
+  [WEAPON.NORMAL]: { name: '輪ゴム鉄砲', desc: '10発ずつ。連射がきく。近いほど痛い（14〜6）', ammo: 10, reload: 1.5, gap: 0.18, speed: 50.4, gravity: 2.5, dmg: [14, 6], fall: [8, 40], r: 0.08, life: 1.8 },
+  [WEAPON.SNIPER]: { name: 'スナイパー', desc: '5発ずつ。まっすぐ飛ぶ。遠いほど痛い（30〜60）。のぞくと拡大', ammo: 5, reload: 2.4, gap: 1.0, speed: 72, gravity: 0.3, dmg: [30, 60], fall: [10, 45], r: 0.06, life: 1.6, zoomFov: 24 },
+  [WEAPON.BOMB]: { name: '爆弾', desc: '4発ずつ。山なりに投げて、当たると爆発。まわりの相手まとめて（中心36〜はじ8）', ammo: 4, reload: 3.5, gap: 0.9, speed: 19, gravity: 15, dmg: [36, 8], blast: 3.5, r: 0.2, life: 3.2 },
 };
+export const WEAPON_LIST = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.BOMB];
+/** 極太ゴムのダメージの倍率 */
+export const THICK_MUL = 1.6;
 
 /** 遊び方 */
 export const MODE = { FFA: 'ffa', TEAM: 'team', BOSS: 'boss' };
@@ -140,8 +148,8 @@ export const teamOf = (mode, i) => (mode === MODE.TEAM ? i % 2 : -1);
 /** ボス戦: でけぇ猫 */
 export const BOSS = {
   NAME: 'でけぇ猫',
-  HP_BASE: 60, // 体力 = HP_BASE + HP_PER × 人数（CPU も入れた全員）× ラウンドの倍率
-  HP_PER: 80,
+  HP_BASE: 600, // 体力 = HP_BASE + HP_PER × 人数（CPU も入れた全員）× ラウンドの倍率
+  HP_PER: 800,
   ROUND_MUL: [1, 1.2, 1.4],
   RADIUS: 2.1, // ぶつかる太さ
   HIT_RADIUS: 2.3, // 輪ゴムが当たる太さ
@@ -150,16 +158,16 @@ export const BOSS = {
   TURN: 3,
   SWIPE_RANGE: 3.9, // ひっかきが届く距離
   SWIPE_WIND: 0.55, // 前ぶり（よけられる）
-  SWIPE_DMG: 2,
+  SWIPE_DMG: 25,
   POUNCE_EVERY: [4, 7], // とびかかりの間隔（秒）
   POUNCE_WIND: 0.7,
   POUNCE_TIME: 0.9,
   POUNCE_RADIUS: 3.8,
-  POUNCE_DMG: 2,
+  POUNCE_DMG: 25,
   SPIT_EVERY: [2.6, 4.5], // 毛玉を吐く間隔
   SPIT_SPEED: 20,
   SPIT_RADIUS: 0.35,
-  SPIT_DMG: 1,
+  SPIT_DMG: 12,
   KILL_BONUS: 5, // とどめを刺した人
   DIZZY: 3, // 照準ぶれ・ゴム切れを使われると、ふらふらで攻撃しない
   STUCK: 2, // ガムを踏むと動けない

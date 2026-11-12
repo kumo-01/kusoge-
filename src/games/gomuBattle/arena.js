@@ -4,11 +4,14 @@
 //
 // 広さ: 下の配置は「52 × 40 の部屋」の座標で書き、SCALE 倍に広げて使う（家具の大きさはそのまま、置き場所だけ離れる）。
 
+import { wasmSegmentHit } from './collide.js';
+
 /** 配置を広げる倍率（1.225 倍 × 1.225 倍 = 広さ 1.5 倍） */
 export const SCALE = 1.225;
 
 /** 部屋の広さ（x: -W/2〜W/2、z: -D/2〜D/2） */
 export const ROOM = { W: 52 * SCALE, D: 40 * SCALE, WALL: 9 };
+
 
 let sc = SCALE; // いま作っている家具の置き場所の倍率（grp の中では 1 = 家具の中の位置）
 
@@ -112,6 +115,26 @@ function lookout(cx, cz, top, c, dir = 'e') {
 }
 
 /**
+ * スナイパー向けの高台: 歩いて上れる段々の丘（1 段 0.45）と、上のふちの土のうの壁。
+ * 壁は高さ 0.55: 伏せると隠れて、立つと上から撃てる。face: 壁を置く向き（会場の真ん中の方）
+ * 上の広さは w - 2(L-1) × d - 1.6(L-1)、高さは 0.45 × L
+ */
+function hill(cx, cz, w, d, face, L = 4, c = 0x7fb069) {
+  return grp(cx, cz, () => {
+    const out = [];
+    for (let i = 0; i < L; i++) out.push(box(0, 0, w - i * 2, d - i * 1.6, 0, 0.45 * (i + 1), c, 'hill'));
+    const tw = w - (L - 1) * 2;
+    const td = d - (L - 1) * 1.6;
+    const top = 0.45 * L;
+    const bag = 0xc2a878;
+    // 壁はふちの真ん中だけ（両はしは空けて、上り下りできるように）
+    if (face === 'e' || face === 'w') out.push(box((face === 'e' ? 1 : -1) * (tw / 2 - 0.3), 0, 0.6, Math.max(1.2, td - 1.8), top, 0.55, bag, 'sandbag'));
+    else out.push(box(0, (face === 's' ? 1 : -1) * (td / 2 - 0.3), Math.max(1.2, tw - 1.8), 0.6, top, 0.55, bag, 'sandbag'));
+    return out;
+  });
+}
+
+/**
  * 体当たりで押して動かせるもの（木箱・バケツ・ビーチボールなど）。{ x, z, w, d, h, c, k }
  * 位置は試合の状態に入る（ラウンドの始めにここへ戻る）
  */
@@ -145,6 +168,9 @@ const PARK = spread({
     hedge(-14, -4, 7, 1.4),
     hedge(8, -7, 1.4, 6),
     hedge(0, 10, 8, 1.4),
+    // スナイパー向けの高台（両はし。真ん中の広場を見わたせる）
+    ...hill(-20.8, 9.8, 10, 8, 'e'),
+    ...hill(21.2, -7.35, 10, 8, 'w'),
     // すべり台: 階段で上の台へ（上から遠くまで見渡せる）。反対側もすべり台の段
     ...grp(16, -1, () => [box(0, 0, 2.4, 2.4, 0, 2.4, 0xe76f51, 'play'), ...stairs(-6.7, 0, 'e', 5, 0.42, 1.6, 0xf4a261), ...stairs(5.7, 0, 'w', 5, 0.42, 1.6, 0x2a9d8f)]),
     // 砂場（低いふち）
@@ -223,6 +249,9 @@ const BEACH = spread({
     box(7, 16, 5, 0.9, 0, 0.7, 0xa47148, 'log'),
     // 監視台（階段で上る）
     ...lookout(0, 13, 2.6, 0xf8f9fa, 'e'),
+    // スナイパー向けの砂丘（両はし）
+    ...hill(-21.2, 8.6, 10, 7, 'e', 3, 0xe9c46a),
+    ...hill(21.6, 13.3, 9, 6.5, 'w', 3, 0xe9c46a),
   ],
   movables: [mov(-6, -10, 1.6, 1.6, 1.6, 0xff006e, 'toybox'), mov(12, -2, 1.6, 1.6, 1.6, 0x3a86ff, 'toybox'), mov(-17, 0, 1.8, 1.4, 1.0, 0xffffff, 'basket'), mov(16, 15, 1.6, 1.6, 1.2, 0xc8a165), mov(-10, 15, 1.6, 1.6, 1.2, 0xc8a165), mov(4, -12, 1.8, 1.4, 1.0, 0x48cae4, 'basket')],
   decor: [
@@ -285,6 +314,9 @@ const CAMP = spread({
     box(16, 8, 5.4, 2.6, 0, 1.8, 0xe63946, 'car'),
     // 見張り台
     ...lookout(-2, -12, 3, 0xb08968, 'e'),
+    // スナイパー向けの高台（両はし）
+    ...hill(-21.2, -2.04, 10, 7, 'e', 3),
+    ...hill(21.2, 11.2, 10, 5.4, 'w', 3),
     // 切り株・岩・まき
     box(8, -10, 1.4, 1.4, 0, 0.6, 0x9c6644, 'stump'),
     box(-8, -2, 1.4, 1.4, 0, 0.6, 0x9c6644, 'stump'),
@@ -318,7 +350,7 @@ const CAMP = spread({
     [0, -6, 0],
     [-6, 4, 0],
     [6, 7, 0],
-    [-18, -2, 0],
+    [-21.2, -2.04, 1.35], // 高台の上
     [19, 2, 0],
     [12, -14, 0],
     [-12, 16, 0],
@@ -338,6 +370,14 @@ export const overlapXZ = (b, x, z, r) => x + r > b.x0 && x - r < b.x1 && z + r >
  * 当たったものは out に { t, nx, ny, nz }（当たった面の向き）。床・壁・天井・箱
  */
 export function segmentHit(arena, ax, ay, az, bx, by, bz, r = 0, out = null) {
+  // Rust（WebAssembly）が使えればそちらで（collide.js）。結果は下の JavaScript と同じ
+  const w = wasmSegmentHit(arena.boxes, ROOM.W, ROOM.D, ax, ay, az, bx, by, bz, r, out);
+  if (w !== null) return w;
+  return segmentHitJs(arena, ax, ay, az, bx, by, bz, r, out);
+}
+
+/** segmentHit の JavaScript 版（Rust 版と同じ計算） */
+export function segmentHitJs(arena, ax, ay, az, bx, by, bz, r = 0, out = null) {
   let best = 1;
   let n = [0, 0, 0];
   const dx = bx - ax;

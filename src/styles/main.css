@@ -1986,10 +1986,6 @@ body[data-screen='game'] {
   left: 14px;
   bottom: 14px;
 }
-.gm-hearts {
-  font-size: 1.6rem;
-  letter-spacing: 2px;
-}
 .gm-status {
   font-weight: 900;
   font-size: 0.9rem;
@@ -2321,19 +2317,45 @@ body[data-screen='game'] {
 .gm-special svg {
   display: block;
 }
-.gm-hearts {
+/* 体力（100）: ハート・数・横のバー */
+.gm-hp {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 10px;
+  border-radius: 10px;
+  background: oklch(25% 0.03 280 / 0.45);
 }
-.gm-heart {
-  color: var(--paper);
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
-}
-.gm-heart.on {
+.gm-hp-ic {
   color: var(--red);
+  display: flex;
 }
-.gm-heart.on svg {
+.gm-hp-ic svg {
   fill: currentColor;
+}
+.gm-hp-num {
+  min-width: 2.2em;
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--paper);
+  text-align: right;
+}
+.gm-hp-bar {
+  width: min(200px, 34vw);
+  height: 12px;
+  border-radius: 6px;
+  background: oklch(20% 0.02 280 / 0.55);
+  overflow: hidden;
+}
+.gm-hp-bar i {
+  display: block;
+  height: 100%;
+  background: oklch(72% 0.17 145);
+  transform-origin: left center;
+  transition: transform 0.15s, background-color 0.3s;
+}
+.gm-hp.is-low .gm-hp-bar i {
+  background: var(--red);
 }
 .gm-ammo {
   display: flex;
@@ -2417,7 +2439,7 @@ body[data-screen='game'] {
 }
 .gm-pick-card {
   font: inherit;
-  width: min(260px, 42vw);
+  width: min(230px, 29vw);
   display: grid;
   justify-items: center;
   gap: 6px;
@@ -2583,4 +2605,52 @@ body[data-screen='game'] {
 .gm-hurtdir path.tip {
   fill: var(--red);
   stroke: none;
+}
+/* 与えたダメージの数 */
+.gm-dmgpop {
+  position: absolute;
+  left: calc(50% + 22px);
+  top: calc(50% - 40px);
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: var(--paper);
+  text-shadow: 0 0 4px var(--red-d), 0 1px 2px oklch(0% 0 0 / 0.6);
+  opacity: 0;
+  pointer-events: none;
+}
+.gm-dmgpop.on {
+  animation: gm-dmgpop 0.7s ease-out;
+}
+@keyframes gm-dmgpop {
+  0% {
+    opacity: 1;
+    transform: translateY(6px) scale(1.25);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-14px) scale(1);
+  }
+}
+/* タッチ: 体力は小さめに（下の真ん中。視界をふさがない） */
+.gomu-hud.is-touch .gm-hp {
+  padding: 3px 10px 3px 8px;
+  gap: 6px;
+}
+.gomu-hud.is-touch .gm-hp-num {
+  font-size: 1rem;
+}
+.gomu-hud.is-touch .gm-hp-bar {
+  width: min(120px, 24vw);
+  height: 9px;
+}
+.gomu-hud.is-touch .gm-hp-ic svg {
+  width: 16px;
+  height: 16px;
+}
+/* 武器えらびの間は、体力などの下の表示を出さない（説明の文字と重ならないように） */
+.gomu-hud:has(.gm-pick:not([hidden])) .gm-bl {
+  visibility: hidden;
 }

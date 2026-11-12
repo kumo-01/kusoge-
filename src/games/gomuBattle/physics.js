@@ -1,7 +1,7 @@
 // 犬の動き（歩く・ジャンプ・ダッシュ・伏せ）と、輪ゴムの飛び方。
 // 自分の犬は自分の端末で、CPU の犬はホストが、同じ stepMove で動かす。輪ゴムはホストが正本（ゲストは見た目だけ同じ計算）
 
-import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL } from './constants.js';
+import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL, THICK_MUL } from './constants.js';
 import { ROOM, overlapXZ, segmentHit } from './arena.js';
 
 /** 動く体（犬）の初期値 */
@@ -232,14 +232,32 @@ export function aimDir(yaw, pitch) {
   return [Math.sin(yaw) * cp, Math.sin(pitch), Math.cos(yaw) * cp];
 }
 
-/** 輪ゴムの種類ごとの速さ・太さ・ダメージ・跳ね返り・飛んでいられる時間 */
+/**
+ * 輪ゴムの種類ごとの速さ・太さ・ダメージの倍率・跳ね返り・飛んでいられる時間・重力。
+ * ダメージは当たった距離で決まる（weaponDamage）。爆弾は跳ね返らずに、何かに当たると爆発する
+ */
 export function bandSpec(kind, weapon = WEAPON.NORMAL) {
-  const w = WEAPONS[weapon] || WEAPONS[WEAPON.NORMAL];
-  const base = { speed: w.speed, r: w.r, dmg: w.dmg, bounce: GUN.BOUNCES, life: w.life, g: w.gravity };
-  if (kind === ITEM.THICK) return { ...base, speed: weapon === WEAPON.SNIPER ? w.speed * 0.8 : ITEMS.THICK_SPEED, r: ITEMS.THICK_RADIUS, dmg: weapon === WEAPON.SNIPER ? w.dmg + 1 : ITEMS.THICK_DAMAGE };
-  if (kind === ITEM.BOUNCE) return { ...base, bounce: ITEMS.BOUNCES, life: Math.max(w.life, ITEMS.BOUNCE_LIFE) };
-  if (kind === HAIRBALL) return { speed: BOSS.SPIT_SPEED, r: BOSS.SPIT_RADIUS, dmg: BOSS.SPIT_DMG, bounce: 0, life: 3, g: 4 };
+  if (kind === HAIRBALL) return { speed: BOSS.SPIT_SPEED, r: BOSS.SPIT_RADIUS, mul: 1, bounce: 0, life: 3, g: 4, w: -1 };
+  const w = WEAPONS[weapon] ? weapon : WEAPON.NORMAL;
+  const W = WEAPONS[w];
+  const bomb = w === WEAPON.BOMB;
+  const base = { speed: W.speed, r: W.r, mul: 1, bounce: bomb ? 0 : GUN.BOUNCES, life: W.life, g: W.gravity, w };
+  if (kind === ITEM.THICK) return { ...base, speed: w === WEAPON.NORMAL ? ITEMS.THICK_SPEED : W.speed * (bomb ? 1 : 0.8), r: bomb ? W.r * 1.3 : ITEMS.THICK_RADIUS, mul: THICK_MUL };
+  if (kind === ITEM.BOUNCE) return { ...base, bounce: ITEMS.BOUNCES, life: Math.max(W.life, ITEMS.BOUNCE_LIFE) };
   return base;
+}
+
+/**
+ * 武器 weapon で、距離 dist で当たったときのダメージ（整数・1 以上）。mul: 極太ゴムなどの倍率。
+ * 鉄砲・スナイパーは撃った場所からの距離、爆弾は爆発の中心からの距離（半径の外は 0）
+ */
+export function weaponDamage(weapon, dist, mul = 1) {
+  const W = WEAPONS[weapon] || WEAPONS[WEAPON.NORMAL];
+  const [near, far] = W.dmg;
+  const [d0, d1] = W.fall || [0, W.blast];
+  if (W.blast && dist > W.blast) return 0;
+  const t = Math.max(0, Math.min(1, (dist - d0) / (d1 - d0)));
+  return Math.max(1, Math.round((near + (far - near) * t) * mul));
 }
 
 const hitOut = { t: 1, nx: 0, ny: 0, nz: 0 };

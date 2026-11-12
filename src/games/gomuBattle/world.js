@@ -4,10 +4,26 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { buildDog } from '../dogKart/dog.js';
 import { device } from '../../core/device.js';
 import { ROOM } from './arena.js';
-import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS } from './constants.js';
+import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS, WEAPON } from './constants.js';
 
 /** 輪ゴムの色（種類ごと） */
 export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]: 0x2a9d8f, [ITEM.BOUNCE]: 0x3a86ff, [ITEM.HOMING]: 0x9b5de5 };
+
+/** 爆弾の見た目（半径 0.2 の黒い玉・導火線・火花）。spark は点滅させる */
+function makeBomb() {
+  const g = new THREE.Group();
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), new THREE.MeshToonMaterial({ color: 0x2b2d42 }));
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.07, 10), new THREE.MeshToonMaterial({ color: 0x6c757d }));
+  cap.position.y = 0.2;
+  const fuse = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.12, 6), new THREE.MeshToonMaterial({ color: 0xc9a27e }));
+  fuse.position.set(0.03, 0.27, 0);
+  fuse.rotation.z = -0.4;
+  const spark = new THREE.Mesh(new THREE.IcosahedronGeometry(0.04, 0), new THREE.MeshBasicMaterial({ color: 0xffd23f }));
+  spark.position.set(0.06, 0.33, 0);
+  g.add(ball, cap, fuse, spark);
+  g.userData.spark = spark;
+  return g;
+}
 const DOG_SCALE = 0.6;
 
 const toon = (c, o = {}) => new THREE.MeshToonMaterial({ color: c, ...o });
@@ -336,6 +352,23 @@ export class GomuWorld {
     } else if (b.k === 'rock') {
       o = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5, 0), mat);
       o.scale.set(w, h * 1.1, d);
+    } else if (b.k === 'hill') {
+      // 高台の段（草のかたまり。ふちを少し丸く）
+      o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, Math.min(0.18, h * 0.3)), mat);
+    } else if (b.k === 'sandbag') {
+      // 土のう: 小さな袋を積んだ形
+      o = new THREE.Group();
+      const along = w >= d;
+      const len = along ? w : d;
+      const n = Math.max(2, Math.round(len / 0.7));
+      for (let row = 0; row < 2; row++) {
+        for (let i = 0; i < n - row; i++) {
+          const bagM = new THREE.Mesh(new RoundedBoxGeometry(along ? len / n : Math.min(w, d), h / 2, along ? Math.min(w, d) : len / n, 2, 0.08), mat);
+          const t = -len / 2 + (i + 0.5 + row * 0.5) * (len / n);
+          bagM.position.set(along ? t : 0, -h / 4 + (row * h) / 2, along ? 0 : t);
+          o.add(bagM);
+        }
+      }
     } else if (b.k === 'hedge' || b.k === 'sand') {
       o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, Math.min(0.4, Math.min(w, d, h) * 0.3)), mat);
     } else if (b.k === 'log') {
@@ -773,16 +806,30 @@ export class GomuWorld {
       // 猫の毛玉（ふわふわの玉）
       const hair = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), toon(0xc9a27e));
       hair.visible = false;
-      this.scene.add(m, hair);
+      // 爆弾（黒い玉と導火線）
+      const bomb = makeBomb();
+      bomb.visible = false;
+      this.scene.add(m, hair, bomb);
       m.userData.hair = hair;
+      m.userData.bomb = bomb;
       this.bands.push(m);
     }
     this.bands.forEach((m, k) => {
       const b = list[k];
       const hair = m.userData.hair;
+      const bomb = m.userData.bomb;
       const isHair = !!b && b.kind === HAIRBALL;
+      const isBomb = !!b && b.w === WEAPON.BOMB;
       hair.visible = isHair;
-      m.visible = !!b && !isHair;
+      bomb.visible = isBomb;
+      m.visible = !!b && !isHair && !isBomb;
+      if (isBomb) {
+        bomb.position.set(b.x, b.y, b.z);
+        bomb.scale.setScalar(b.kind === ITEM.THICK ? 1.3 : 1);
+        bomb.rotation.set(b.age * 7, b.age * 3, 0);
+        bomb.userData.spark.material.color.setHex((b.age * 12) % 2 < 1 ? 0xffd23f : 0xff6b35);
+        return;
+      }
       if (isHair) {
         hair.position.set(b.x, b.y, b.z);
         hair.scale.setScalar(BOSS.SPIT_RADIUS * 1.2);
@@ -882,11 +929,66 @@ export class GomuWorld {
     }
   }
 
+  /** 爆発: ふくらんで消える光の玉と、火の粉・煙 */
+  explode(x, y, z, r) {
+    const m = new THREE.Mesh(this._flashGeo ||= new THREE.SphereGeometry(1, 20, 14), new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.85, depthWrite: false }));
+    m.position.set(x, y, z);
+    m.scale.setScalar(0.3);
+    m.userData = { flash: true, r, life: 0.42, age: 0 };
+    this.scene.add(m);
+    this.fxList.push(m);
+    this.burst(x, y + 0.2, z, 0xff6b35, 22, 7, 0.14);
+    this.burst(x, y + 0.2, z, 0xffd23f, 14, 5, 0.1);
+    this.burst(x, y + 0.3, z, 0x8d8d8d, 10, 2.5, 0.22);
+  }
+
+  /** 爆弾の飛ぶ道（点の列 [[x, y, z], ...]。null で隠す）と、落ちる所の輪 */
+  setLobArc(points) {
+    if (!this._arc) {
+      const N = 64;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+      const line = new THREE.Line(g, new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.35, gapSize: 0.25, transparent: true, opacity: 0.85, depthTest: false }));
+      line.renderOrder = 900;
+      line.frustumCulled = false;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.95, 28), new THREE.MeshBasicMaterial({ color: 0xff6b35, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2;
+      this.scene.add(line, ring);
+      this._arc = { line, ring, N };
+    }
+    const a = this._arc;
+    const on = !!points && points.length > 1;
+    a.line.visible = on;
+    a.ring.visible = on;
+    if (!on) return;
+    const pos = a.line.geometry.attributes.position;
+    const n = Math.min(points.length, a.N);
+    for (let i = 0; i < n; i++) pos.setXYZ(i, points[i][0], points[i][1], points[i][2]);
+    pos.needsUpdate = true;
+    a.line.geometry.setDrawRange(0, n);
+    a.line.computeLineDistances();
+    const e = points[n - 1];
+    a.ring.position.set(e[0], e[1] + 0.04, e[2]);
+    // 目の前の壁に当たるとき（落ちる所がすぐそば）は輪を出さない（画面いっぱいに広がってしまう）
+    a.ring.visible = Math.hypot(e[0] - points[0][0], e[2] - points[0][2]) > 2.5;
+  }
+
   _stepFx(dt) {
     for (let i = this.fxList.length - 1; i >= 0; i--) {
       const m = this.fxList[i];
       const u = m.userData;
       u.age += dt;
+      if (u.flash) {
+        const k = Math.min(1, u.age / u.life);
+        m.scale.setScalar(0.3 + (u.r - 0.3) * (1 - (1 - k) ** 3));
+        m.material.opacity = 0.85 * (1 - k);
+        if (k >= 1) {
+          this.scene.remove(m);
+          m.material.dispose();
+          this.fxList.splice(i, 1);
+        }
+        continue;
+      }
       u.vy -= 9 * dt;
       m.position.x += u.vx * dt;
       m.position.y = Math.max(0.02, m.position.y + u.vy * dt);
@@ -917,7 +1019,12 @@ export class GomuWorld {
     scope.position.set(0, 0.06, -0.1);
     sn.add(longB, scope);
     sn.visible = false;
-    vm.add(gun, paw, sn);
+    // 爆弾を持っているとき（鉄砲の代わり）
+    const bm = makeBomb();
+    bm.scale.setScalar(0.15);
+    bm.position.set(-0.02, 0.0, -0.1);
+    bm.visible = false;
+    vm.add(gun, paw, sn, bm);
     vm.position.set(0.2, -0.19, -0.36);
     vm.traverse((o) => {
       if (o.material) {
@@ -927,14 +1034,16 @@ export class GomuWorld {
       o.renderOrder = 1000;
     });
     this.camera.add(vm);
-    this.vm = { root: vm, gun, paw, sn, recoil: 0, bob: 0 };
+    this.vm = { root: vm, gun, paw, sn, bm, recoil: 0, bob: 0 };
   }
 
   /** 自分の鉄砲の見た目: 撃った反動・補充中は下げる・輪ゴムの色・歩きの揺れ */
-  setViewModel({ fired = false, reloading = false, kind = 0, moving = false, visible = true, sniper = false, furColor = null }, dt) {
+  setViewModel({ fired = false, reloading = false, kind = 0, moving = false, visible = true, sniper = false, bomb = false, furColor = null }, dt) {
     const v = this.vm;
     v.root.visible = visible;
-    v.sn.visible = sniper;
+    v.sn.visible = sniper && !bomb;
+    v.gun.visible = !bomb;
+    v.bm.visible = bomb && !reloading;
     if (fired) v.recoil = 1;
     v.recoil = Math.max(0, v.recoil - dt * 8);
     v.bob += dt * (moving ? 10 : 2);

@@ -4,7 +4,7 @@
 
 import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOT, WEAPON, WEAPONS, MODE, teamOf, BOSS, HAIRBALL } from './constants.js';
 import { ARENAS, segmentHit, ROOM } from './arena.js';
-import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits } from './physics.js';
+import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage } from './physics.js';
 import { botThink } from './bot.js';
 
 /** 決定的な乱数（状態に種を持つ） */
@@ -118,7 +118,10 @@ export class GomuSim {
     }
     s.players.forEach((p, k) => {
       // CPU はすぐ武器を選ぶ（3 匹に 1 匹くらいスナイパー）
-      if (p.bot) p.weapon = nextRandom(s) < 0.33 ? WEAPON.SNIPER : WEAPON.NORMAL;
+      if (p.bot) {
+        const r = nextRandom(s); // CPU: ふつう 50%・スナイパー 25%・爆弾 25%
+        p.weapon = r < 0.5 ? WEAPON.NORMAL : r < 0.75 ? WEAPON.SNIPER : WEAPON.BOMB;
+      }
       p.picked = p.bot || !this.usePick;
       Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, star: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bot2: null });
       this._place(p, this.arena.spawns[spots[k % spots.length]]);
@@ -219,6 +222,15 @@ export class GomuSim {
       p.reload = Math.max(0, p.reload - dt);
       if (p.reload === 0) p.ammo = WEAPONS[p.weapon].ammo;
     }
+    // 1 秒に 1 ずつ回復
+    if (p.hp < PLAYER.HP) {
+      p.rg = (p.rg || 0) + dt * PLAYER.REGEN;
+      if (p.rg >= 1) {
+        const n = Math.floor(p.rg);
+        p.hp = Math.min(PLAYER.HP, p.hp + n);
+        p.rg -= n;
+      }
+    } else p.rg = 0;
     if (!p.bot) return; // 人の犬はその人の端末が動かす
     const inp = botThink(this, p, dt);
     const slow = p.stuck > 0 ? 0 : p.stun > 0 ? PLAYER.STUN_SPEED : 1;
@@ -267,7 +279,7 @@ export class GomuSim {
     const pitch = Math.asin(Math.max(-1, Math.min(1, d[1] / dl)));
     const spec = bandSpec(k, p.weapon);
     // 撃った人の端末で当たりを決める輪ゴムか（遅れをなくすため。人がゲストのとき）
-    const cj = !!this.clientJudge?.(i);
+    const cj = !!this.clientJudge?.(i) && p.weapon !== WEAPON.BOMB; // 爆弾はホストが爆発させる
     p.shots++;
     dirs.forEach((off, idx) => {
       const v = aimDir(yaw + off, pitch);
@@ -284,7 +296,11 @@ export class GomuSim {
         vy: v[1] * spec.speed,
         vz: v[2] * spec.speed,
         r: spec.r,
-        dmg: spec.dmg,
+        w: spec.w,
+        mul: spec.mul,
+        ox: o[0], // 撃った場所（ダメージは距離で決まる）
+        oy: o[1],
+        oz: o[2],
         bounce: spec.bounce,
         life: spec.life,
         g: spec.g,
@@ -294,7 +310,7 @@ export class GomuSim {
       this.events.push({ t: 'shot', id: b.id, o: i, cid: b.cid, k, w: p.weapon, x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz });
       if (cj && b.cid) {
         const log = (this.shotLog[i] ||= new Map());
-        log.set(b.cid, { dmg: b.dmg, vx: b.vx, vz: b.vz, id: b.id, t: s.t, used: false });
+        log.set(b.cid, { w: b.w, mul: b.mul, ox: b.ox, oy: b.oy, oz: b.oz, vx: b.vx, vz: b.vz, id: b.id, t: s.t, used: false });
         if (log.size > 40) log.delete(log.keys().next().value);
       }
     });
@@ -317,7 +333,7 @@ export class GomuSim {
     const n = s.bands.findIndex((b) => b.id === rec.id);
     if (n >= 0) s.bands.splice(n, 1);
     this.events.push({ t: 'end', id: rec.id, x: pos[0], y: pos[1], z: pos[2], h: v });
-    this._hit(q, { o: i, dmg: rec.dmg, vx: rec.vx, vz: rec.vz });
+    this._hit(q, { o: i, dmg: weaponDamage(rec.w, Math.hypot(pos[0] - rec.ox, pos[1] - rec.oy, pos[2] - rec.oz), rec.mul), vx: rec.vx, vz: rec.vz });
     return true;
   }
 
@@ -384,26 +400,69 @@ export class GomuSim {
           hit = boss;
         }
       }
-      if (hit === boss && boss) {
-        s.bands.splice(n, 1);
-        this.events.push({ t: 'end', id: b.id, x: ax + (b.x - ax) * ht, y: ay + (b.y - ay) * ht, z: az + (b.z - az) * ht, h: -2 });
-        this._bossHit(b.dmg, b.o);
-        if (s.phase !== 'play') return; // 猫を倒した（ラウンドおわり）
-        continue;
-      }
       if (hit) {
         const hx = ax + (b.x - ax) * ht;
         const hy = ay + (b.y - ay) * ht;
         const hz = az + (b.z - az) * ht;
         s.bands.splice(n, 1);
-        this.events.push({ t: 'end', id: b.id, x: hx, y: hy, z: hz, h: hit.i });
-        this._hit(hit, b);
+        if (b.w === WEAPON.BOMB) {
+          this.events.push({ t: 'end', id: b.id, x: hx, y: hy, z: hz, h: -1 });
+          this._explode(b, hx, hy, hz);
+        } else if (hit === boss) {
+          this.events.push({ t: 'end', id: b.id, x: hx, y: hy, z: hz, h: -2 });
+          this._bossHit(this._dmgOf(b, hx, hy, hz), b.o);
+        } else {
+          this.events.push({ t: 'end', id: b.id, x: hx, y: hy, z: hz, h: hit.i });
+          this._hit(hit, { o: b.o, dmg: this._dmgOf(b, hx, hy, hz), vx: b.vx, vz: b.vz });
+        }
+        if (s.phase !== 'play') return; // 猫を倒した（ラウンドおわり）
         continue;
       }
       if (res === 'end') {
         s.bands.splice(n, 1);
         this.events.push({ t: 'end', id: b.id, x: b.x, y: b.y, z: b.z, h: -1 });
+        if (b.w === WEAPON.BOMB) {
+          this._explode(b, b.x, b.y, b.z);
+          if (s.phase !== 'play') return;
+        }
       }
+    }
+  }
+
+  /** 輪ゴム b が (x, y, z) で当たったときのダメージ（撃った場所からの距離で決まる。毛玉は決まった値） */
+  _dmgOf(b, x, y, z) {
+    if (b.kind === HAIRBALL) return BOSS.SPIT_DMG;
+    return weaponDamage(b.w, Math.hypot(x - b.ox, y - b.oy, z - b.oz), b.mul);
+  }
+
+  /** 爆弾が (x, y, z) で爆発: 半径の中の相手（と猫）に、中心に近いほど大きなダメージ。物の陰にいれば当たらない */
+  _explode(b, x, y, z) {
+    const s = this.s;
+    const W = WEAPONS[WEAPON.BOMB];
+    const R = W.blast * (b.mul > 1 ? 1.25 : 1); // 極太ゴムの爆弾は少し広い
+    this.events.push({ t: 'boom', x, y, z, o: b.o, r: R });
+    for (const q of s.players) {
+      if (!this.foes(b.o, q.i) || q.dead > 0) continue;
+      const cy = Math.max(q.y, Math.min(q.y + heightOf(q), y)); // 体のいちばん近い高さ
+      const d = Math.max(0, Math.hypot(q.x - x, cy - y, q.z - z) - PLAYER.RADIUS);
+      if (d > R || segmentHit(this.cw, x, y + 0.05, z, q.x, cy, q.z) < 0.999) continue;
+      const hl = Math.hypot(q.x - x, q.z - z) || 1;
+      this._hit(q, { o: b.o, dmg: weaponDamage(WEAPON.BOMB, (d * W.blast) / R, b.mul), vx: (q.x - x) / hl, vz: (q.z - z) / hl });
+    }
+    const boss = s.boss;
+    if (boss && boss.hp > 0 && b.o >= 0) {
+      const d = Math.max(0, Math.hypot(boss.x - x, boss.z - z) - BOSS.RADIUS);
+      if (d <= R && y < boss.y + BOSS.HEIGHT + R) this._bossHit(weaponDamage(WEAPON.BOMB, (d * W.blast) / R, b.mul), b.o);
+    }
+  }
+
+  /** p が与えたダメージを点に（10 ごとに 1 点） */
+  _dealt(p, dmg) {
+    p.dmgAcc = (p.dmgAcc || 0) + dmg;
+    const pts = Math.floor(p.dmgAcc / SCORE.DMG_PER_POINT);
+    if (pts > 0) {
+      p.dmgAcc -= pts * SCORE.DMG_PER_POINT;
+      this._addScore(p, pts);
     }
   }
 
@@ -428,7 +487,7 @@ export class GomuSim {
     if (by) {
       by.hits++;
       by.landed++;
-      this._addScore(by, SCORE.HIT);
+      this._dealt(by, dmg);
     }
     this.events.push({ t: 'hit', v: q.i, by: b.o, d: dmg, hp: q.hp, kx, kz });
     if (q.hp <= 0) {
@@ -576,7 +635,7 @@ export class GomuSim {
     if (p) {
       p.hits++;
       p.landed++;
-      this._addScore(p, SCORE.HIT * d);
+      this._dealt(p, d);
     }
     this.events.push({ t: 'bhit', by, d, hp: b.hp });
     if (b.hp <= 0) {
@@ -666,7 +725,7 @@ export class GomuSim {
         const v = [dx / l, dy / l + 0.08 * (l / 10), dz / l];
         const vl = Math.hypot(...v);
         const spec = bandSpec(HAIRBALL);
-        const band = { id: s.nextId++, o: -1, cid: 0, cj: false, kind: HAIRBALL, x: ox, y: oy, z: oz, vx: (v[0] / vl) * spec.speed, vy: (v[1] / vl) * spec.speed, vz: (v[2] / vl) * spec.speed, r: spec.r, dmg: spec.dmg, bounce: 0, life: spec.life, g: spec.g, age: 0 };
+        const band = { id: s.nextId++, o: -1, cid: 0, cj: false, kind: HAIRBALL, x: ox, y: oy, z: oz, vx: (v[0] / vl) * spec.speed, vy: (v[1] / vl) * spec.speed, vz: (v[2] / vl) * spec.speed, r: spec.r, w: -1, mul: 1, bounce: 0, life: spec.life, g: spec.g, age: 0 };
         s.bands.push(band);
         this.events.push({ t: 'shot', id: band.id, o: -1, cid: 0, k: HAIRBALL, w: 0, x: band.x, y: band.y, z: band.z, vx: band.vx, vy: band.vy, vz: band.vz });
         this.events.push({ t: 'bact', a: 'spit' });

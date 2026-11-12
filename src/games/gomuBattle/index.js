@@ -8,7 +8,7 @@ import { PLAYERS } from '../../screens/common.js';
 import { device } from '../../core/device.js';
 import { GomuSim } from './sim.js';
 import { ARENAS } from './arena.js';
-import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder, rayCylinder } from './physics.js';
+import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder, rayCylinder, weaponDamage } from './physics.js';
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
@@ -233,6 +233,7 @@ class GomuGame {
     if (phase === 'pick') {
       if (i.consume('Digit1', 'Numpad1')) this._pickWeapon(WEAPON.NORMAL);
       if (i.consume('Digit2', 'Numpad2')) this._pickWeapon(WEAPON.SNIPER);
+      if (i.consume('Digit3', 'Numpad3')) this._pickWeapon(WEAPON.BOMB);
     }
     // のぞく（スナイパー）: 右クリックか Z を押している間、タッチはボタンで切り替え
     const canZoom = p.weapon === WEAPON.SNIPER && act;
@@ -336,7 +337,7 @@ class GomuGame {
     const offs = kind === ITEM.TRIPLE ? [-ITEMS.TRIPLE_SPREAD, 0, ITEMS.TRIPLE_SPREAD] : [0];
     offs.forEach((off, idx) => {
       const v = aimDir(yaw + off, pitch);
-      this.bands.push({ id: 0, cid: cid * 4 + idx, o: this.me, kind, g: spec.g, x: o[0] + v[0] * GUN.MUZZLE, y: o[1] + v[1] * GUN.MUZZLE - 0.08, z: o[2] + v[2] * GUN.MUZZLE, vx: v[0] * spec.speed, vy: v[1] * spec.speed, vz: v[2] * spec.speed, r: spec.r, bounce: spec.bounce, life: spec.life, age: 0, mine: performance.now() });
+      this.bands.push({ id: 0, cid: cid * 4 + idx, o: this.me, kind, w: spec.w, mul: spec.mul, ox: o[0], oy: o[1], oz: o[2], g: spec.g, x: o[0] + v[0] * GUN.MUZZLE, y: o[1] + v[1] * GUN.MUZZLE - 0.08, z: o[2] + v[2] * GUN.MUZZLE, vx: v[0] * spec.speed, vy: v[1] * spec.speed, vz: v[2] * spec.speed, r: spec.r, bounce: spec.bounce, life: spec.life, age: 0, mine: performance.now() });
     });
   }
 
@@ -377,7 +378,7 @@ class GomuGame {
       const ay = b.y;
       const az = b.z;
       const res = stepBand(b, dt, this.cw, target);
-      if (b.o === this.me && views && this._localHit(b, ax, ay, az, views)) {
+      if (b.o === this.me && b.w !== WEAPON.BOMB && views && this._localHit(b, ax, ay, az, views)) {
         this.bands.splice(n, 1);
         continue;
       }
@@ -413,6 +414,7 @@ class GomuGame {
     const hz = az + (b.z - az) * ht;
     this.ctx.sendGameMessage({ t: 'h', c: b.cid, v: hit, p: [hx, hy, hz].map((x) => Math.round(x * 1000) / 1000) });
     this.hud.hitMarker(false);
+    this.hud.dmgPop(weaponDamage(b.w, Math.hypot(hx - b.ox, hy - b.oy, hz - b.oz), b.mul));
     this.ctx.sound.play('pickup');
     this.world?.burst(hx, hy, hz, 0xffd23f, 12, 3, 0.07);
     this._judged.add(b.cid); // ホストからの「当たった」の知らせで、印と音を 2 回出さない
@@ -464,8 +466,10 @@ class GomuGame {
             this.pilot.vx += e.kx; // 押される
             this.pilot.vz += e.kz;
           }
-          if (e.by === this.me && this.isHost) {
+          // 自分が当てた（ゲストの輪ゴムは自分の画面で当たりを出しているので、ホストが決める爆弾だけ）
+          if (e.by === this.me && (this.isHost || this.pilot.weapon === WEAPON.BOMB)) {
             this.hud.hitMarker(false);
+            this.hud.dmgPop(e.d);
             this.ctx.sound.play('pickup');
           }
           break;
@@ -542,10 +546,20 @@ class GomuGame {
         case 'bhit':
           if (e.by === this.me) {
             this.hud.hitMarker(false);
+            this.hud.dmgPop(e.d);
             this.ctx.sound.play('pickup');
           }
           this.world?.bossFlash();
           break;
+        case 'boom': {
+          // 爆弾の爆発: 光と音。近ければ画面がゆれる
+          this.world?.explode(e.x, e.y, e.z, e.r);
+          const p = this.pilot;
+          const d = Math.hypot(e.x - p.x, e.z - p.z);
+          if (d < 30) this.ctx.sound.play('boom');
+          if (d < e.r * 2.5) this.shakeCam = Math.max(this.shakeCam || 0, Math.max(0.15, 0.6 - d * 0.05));
+          break;
+        }
         case 'bdown':
           this.hud.pushFeed(`🏆 ${BOSS.NAME}をやっつけた！${e.by >= 0 ? `（とどめ: ${name(e.by)}）` : ''}`, 'mine');
           if (e.by === this.me) this.hud.hitMarker(true);
@@ -591,7 +605,7 @@ class GomuGame {
     }
     if (this.bands.some((x) => x.id === e.id)) return;
     const spec = bandSpec(e.k, e.w | 0);
-    const b = { id: e.id, o: e.o, kind: e.k, g: spec.g, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, r: spec.r, bounce: spec.bounce, life: spec.life, age: 0 };
+    const b = { id: e.id, o: e.o, kind: e.k, w: spec.w, g: spec.g, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, r: spec.r, bounce: spec.bounce, life: spec.life, age: 0 };
     // ホストで撃たれてから届くまでの時間（片道）だけ先へ進めて出す（相手の輪ゴムが遅れて見えないように）
     const ahead = Math.min(0.25, this._oneWay());
     for (let t = 0; t < ahead - 1e-6 && !(stepBand(b, Math.min(1 / 60, ahead - t), this.cw) === 'end'); t += 1 / 60);
@@ -765,6 +779,22 @@ class GomuGame {
   }
 
   /** ゲスト: 猫の、少し前の時刻の位置（ほかの犬と同じ遅れで、2 つの要約の間をなめらかに） */
+  /** 爆弾を今投げたら飛ぶ道（何かに当たるまで）。点の列 */
+  _lobPath() {
+    const { o, d } = this._aim();
+    const spec = bandSpec(this.pilot.sp && this.pilot.spN > 0 ? this.pilot.sp : 0, WEAPON.BOMB);
+    const b = { x: o[0] + d[0] * GUN.MUZZLE, y: o[1] + d[1] * GUN.MUZZLE - 0.08, z: o[2] + d[2] * GUN.MUZZLE, vx: d[0] * spec.speed, vy: d[1] * spec.speed, vz: d[2] * spec.speed, r: spec.r, g: spec.g, bounce: 0, life: spec.life, age: 0, kind: 0 };
+    const pts = (this._lobPts ||= []);
+    pts.length = 0;
+    pts.push([b.x, b.y, b.z]);
+    for (let k = 0; k < 63; k++) {
+      const res = stepBand(b, 1 / 30, this.cw);
+      pts.push([b.x, b.y, b.z]);
+      if (res === 'end') break;
+    }
+    return pts;
+  }
+
   /** 当てられたとき、撃ってきた犬（猫）の場所を覚えて、画面に向きを出す */
   _addHurtDir(e) {
     let src = null;
@@ -877,7 +907,9 @@ class GomuGame {
         w.camera.fov = nf;
         w.camera.updateProjectionMatrix();
       }
-      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), sniper: p.weapon === WEAPON.SNIPER, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
+      // 爆弾: 飛ぶ道と落ちる所を見せる
+      w.setLobArc(p.weapon === WEAPON.BOMB && !dead && this.phase === 'play' && !(p.reload > 0) ? this._lobPath() : null);
+      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), sniper: p.weapon === WEAPON.SNIPER, bomb: p.weapon === WEAPON.BOMB, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
       this._fired = false;
       w.render(dt);
       this._frame++;
