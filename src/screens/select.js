@@ -1,5 +1,6 @@
 // ③ ゲーム選択画面: 登録されたゲームをカードで表示。選べるのはホストだけ
 // 一番上の「ランダムで選ぶ」: カードを順に光らせるルーレットのあと、選ばれたゲームのカードが光り続ける
+import { icon, GAME_ICON } from '../core/icons.js';
 import { h } from '../core/util.js';
 import { GAMES } from '../games/registry.js';
 
@@ -47,7 +48,7 @@ export function mount(el, app) {
           h('h2.screen-title', null, 'ゲームを選ぶ'),
           isHost
             ? h('div.random-row', null,
-                h('button.btn.btn-light.btn-random', { onclick: spin, disabled: spinning }, spinning ? '🎲 選んでいます…' : picked ? '🎲 もう一度ランダム' : '🎲 ランダムで選ぶ'))
+                h('button.btn.btn-light.btn-random', { onclick: spin, disabled: spinning }, icon('dice'), spinning ? '選んでいます…' : picked ? 'もう一度ランダム' : 'ランダムで選ぶ'))
             : null),
         isHost ? null : h('p.sub', null, 'ホストがゲームを選んでいます。'),
         isHost && picked && lit ? h('p.sub', { role: 'status' }, `「${GAMES.find((g) => g.id === lit)?.title}」に決まりました。光っている札を押すと始まります。`) : null,
@@ -63,7 +64,7 @@ export function mount(el, app) {
                 style: { '--g': g.color || '#1d2747' },
                 'aria-label': `${g.title}を選ぶ`,
               },
-              h('div.game-card-art', { 'aria-hidden': 'true' }, h('span.emo', null, g.emoji)),
+              h('div.game-card-art', { 'aria-hidden': 'true' }, h('span.emo', null, icon(GAME_ICON[g.id] || 'dice', 28))),
               h('div.game-card-body', null,
                 h('div.game-card-title', null, g.title),
                 h('div.game-card-tag', null, g.players),

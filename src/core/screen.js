@@ -1,4 +1,5 @@
 // 画面の切り替えと共通UI（ヘッダー・確認ダイアログ・トースト・接続オーバーレイ）
+import { icon, spinner, noEmoji } from './icons.js';
 import { h } from './util.js';
 import * as connect from '../screens/connect.js';
 import * as home from '../screens/home.js';
@@ -68,8 +69,8 @@ export class ScreenRouter {
           h('span.header-logo', null, 'わんわんパーティー'),
           h('span.role-badge.red', null, 'ひとりで遊ぶ')),
         h('div.header-right', null,
-          h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ', 'aria-label': '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
-          h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ', 'aria-label': 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'),
+          h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ', 'aria-label': '効果音のオン/オフ' }, icon(app.sound.muted ? 'mute' : 'volume')),
+          h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ', 'aria-label': 'BGM のオン/オフ' }, icon(app.music.muted ? 'musicOff' : 'music')),
           h('button.btn.btn-small.btn-light', { onclick: () => app.disband() }, 'タイトルに戻る')),
       );
       return;
@@ -88,14 +89,14 @@ export class ScreenRouter {
     this.header.replaceChildren(
       h('div.header-left', null,
         h('span.header-logo', null, 'わんわんパーティー'),
-        h(`span.role-badge.${mine.color}`, null, `${mine.icon} ${mine.role}（${mine.name}）`)),
+        h(`span.role-badge.${mine.color}`, null, `${mine.role}（${mine.name}）`)),
       h('div.header-right', null,
         status,
         isHost && room.signaling !== 'online' ? h('span.pill.pill-warn', { title: 'シグナリングサーバーとの接続。ゲーム中のデータ通信には影響しません' }, '仲介サーバー再接続中') : null,
-        isHost ? h('button.btn.btn-small.btn-light', { onclick: () => app.showInvite() }, '招待URL') : null,
+        isHost ? h('button.btn.btn-small.btn-light', { onclick: () => app.showInvite() }, icon('link', 16), '招待URL') : null,
         ...waiting.map((slot) => h('button.btn.btn-small.btn-light', { onclick: () => app.confirmFreeSlot(slot) }, waiting.length > 1 ? `${PLAYERS[slot].role}の席を空ける` : '新しいゲストを招待')),
-        h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ', 'aria-label': '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
-        h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ', 'aria-label': 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'),
+        h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ', 'aria-label': '効果音のオン/オフ' }, icon(app.sound.muted ? 'mute' : 'volume')),
+        h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ', 'aria-label': 'BGM のオン/オフ' }, icon(app.music.muted ? 'musicOff' : 'music')),
         isHost
           ? h('button.btn.btn-small.btn-danger', { onclick: () => app.disband() }, '解散')
           : h('button.btn.btn-small.btn-ghost', { onclick: () => app.leave() }, '退出')),
@@ -123,7 +124,7 @@ export class ScreenRouter {
                 h('button.btn.btn-ghost', { onclick: () => this.app.goTop() }, '接続画面へ戻る')),
             ]
           : [
-              h('div.waiting.big', null, h('span.paw-spinner', null, '🐾'), 'ホストに再接続しています…'),
+              h('div.waiting.big', null, spinner(), 'ホストに再接続しています…'),
               h('p.small', null, '通信が切れました。自動で再接続を試みています。'),
               h('button.btn.btn-ghost', { onclick: () => this.app.goTop() }, 'あきらめて接続画面へ戻る'),
             ]),
@@ -131,7 +132,7 @@ export class ScreenRouter {
   }
 
   toast(text, ms = 3200) {
-    const t = h('div.toast', null, text);
+    const t = h('div.toast', null, noEmoji(text));
     this.toasts.append(t);
     requestAnimationFrame(() => t.classList.add('show'));
     setTimeout(() => {

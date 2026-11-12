@@ -1,4 +1,5 @@
 // ⑥ 結果画面（1 レースだけのとき / 連戦の途中経過 / 連戦の最終結果）
+import { icon, spinner, noEmoji } from '../core/icons.js';
 import { h } from '../core/util.js';
 import { getGame } from '../games/registry.js';
 import { dogAvatar, PLAYERS, roomSummary } from './common.js';
@@ -33,33 +34,33 @@ export function mount(el, app) {
     const col = (p, i) => {
       const pl = PLAYERS[p.slot];
       return h(`div.result-player.player-${pl.color}${winner === p.slot ? '.is-winner' : ''}`, null,
-        winner === p.slot ? h('div.crown', null, '👑') : null,
+        winner === p.slot ? h('div.crown', null, icon('crown', 36)) : null,
         h('div.avatar', { html: dogAvatar(pl.kind, 96) }),
         p.slot === me ? h('span.me-badge.inline', null, 'あなた') : null,
-        h('div.player-name', null, cpu.has(p.slot) ? `🤖 ${pl.name}（CPU）` : nick(p.slot) ? `${nick(p.slot)}（${pl.name}）` : `${pl.name}（${pl.role}）`),
-        h('div.result-headline', null, se ? (se.final ? `${se.scores[p.slot]} pt` : p.headline) : p.headline),
-        h('div.small', null, se ? (se.final ? `${se.total}戦の合計ポイント` : `${r?.points?.[i] ?? 0} pt 獲得（合計 ${se.scores[p.slot]} pt）`) : p.detail));
+        h('div.player-name', null, cpu.has(p.slot) ? `${pl.name}（CPU）` : nick(p.slot) ? `${nick(p.slot)}（${pl.name}）` : `${pl.name}（${pl.role}）`),
+        h('div.result-headline', null, noEmoji(se ? (se.final ? `${se.scores[p.slot]} pt` : p.headline) : p.headline)),
+        h('div.small', null, se ? (se.final ? `${se.total}戦の合計ポイント` : `${r?.points?.[i] ?? 0} pt 獲得（合計 ${se.scores[p.slot]} pt）`) : noEmoji(p.detail)));
     };
 
-    const head = ['', ...players.map((p) => `${PLAYERS[p.slot].icon} ${nameOf(p.slot)}`)];
+    const head = ['', ...players.map((p) => h(`span.swatch-name.player-${PLAYERS[p.slot].color}`, null, nameOf(p.slot)))];
     const table = (rows) =>
       h('div.card.stats-card', null,
         h('table.stats', null,
           h('thead', null, h('tr', null, head.map((t) => h('th', null, t)))),
           h('tbody', null, rows.map((x) =>
             h(`tr${x.total ? '.is-total' : ''}`, null,
-              h('th', null, x.label),
-              x.text != null ? h('td', { colspan: players.length }, x.text) : x.values.map((v) => h('td', null, v)))))));
+              h('th', null, noEmoji(x.label)),
+              x.text != null ? h('td', { colspan: players.length }, noEmoji(x.text)) : x.values.map((v) => h('td', null, noEmoji(v))))))));
 
-    let title = r?.title || '結果';
+    let title = noEmoji(r?.title) || '結果';
     if (se) {
-      if (se.final && players.length === 1) title = `🏁 ${se.total}${word}の合計 ${se.scores[players[0].slot]} pt！`;
-      else if (se.final) title = winner != null ? `🏆 ${nameOf(winner)}がシリーズ優勝！ワン！` : '🤝 シリーズ引き分け！';
-      else title = `第${se.round}戦 / 全${se.total}戦　${r?.title || ''}`;
+      if (se.final && players.length === 1) title = `${se.total}${word}の合計 ${se.scores[players[0].slot]} pt！`;
+      else if (se.final) title = winner != null ? `${nameOf(winner)}がシリーズ優勝！` : 'シリーズ引き分け';
+      else title = `第${se.round}戦 / 全${se.total}戦　${noEmoji(r?.title) || ''}`;
     }
     const seriesRows = se
       ? [
-          ...se.history.map((x, i) => ({ label: `第${i + 1}戦 ${x.name}`, values: players.map((p) => `${x.points[p.slot]} pt`) })),
+          ...se.history.map((x, i) => ({ label: `第${i + 1}戦 ${noEmoji(x.name)}`, values: players.map((p) => `${x.points[p.slot]} pt`) })),
           { label: '合計', values: players.map((p) => `${se.scores[p.slot]} pt`), total: true },
         ]
       : null;
@@ -70,7 +71,7 @@ export function mount(el, app) {
     el.replaceChildren(
       h('div.screen.screen-result', null,
         h('div.confetti', { 'aria-hidden': 'true' }, Array.from({ length: 24 }, (_, i) => h('i', { style: { '--i': i } }))),
-        h('p.sub', null, def ? `${def.emoji} ${def.title}${r?.course ? `（${r.course}）` : ''}` : ''),
+        h('p.sub', null, def ? `${def.title}${r?.course ? `（${noEmoji(r.course)}）` : ''}` : ''),
         h('h2.result-title', null, title),
         h('div.result-row', null, players.map(col)),
         se && r?.score?.length ? [h('h3.result-sub', null, `第${se.round}戦のポイント`), table(r.score)] : null,
@@ -85,7 +86,7 @@ export function mount(el, app) {
                 next ? h('button.btn.btn-ghost', { onclick: () => room.goSelect() }, 'ここでやめて、ゲームを選び直す') : null,
                 next && !canNext ? h('p.small.warn-text', null, '参加者の接続を待っています…') : null,
               ]
-            : h('div.waiting', null, h('span.paw-spinner', null, '🐾'), next ? `ホストが次の${word}を始めるのを待っています…` : 'ホストの操作を待っています…'))),
+            : h('div.waiting', null, spinner(), next ? `ホストが次の${word}を始めるのを待っています…` : 'ホストの操作を待っています…'))),
     );
   }
   render();

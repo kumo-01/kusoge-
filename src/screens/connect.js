@@ -1,4 +1,5 @@
 // ① 接続画面: 部屋の作成・招待URLの表示・ゲストの参加
+import { spinner } from '../core/icons.js';
 import { h } from '../core/util.js';
 import { dogAvatar, PLAYERS } from './common.js';
 
@@ -75,7 +76,7 @@ export function mount(el, app) {
           input,
           h('button.btn.btn-primary', { onclick: () => app.copyText(url) }, 'URLをコピー')),
         h('p.small.muted', null, room.net?.transport === 'relay' ? '通信: サーバー経由' : '通信: P2P（直接）'),
-        h('div.waiting', null, h('span.paw-spinner', null, '🐾'), 'ゲストの参加を待っています。1人参加すれば先へ進めます。'),
+        h('div.waiting', null, spinner(), 'ゲストの参加を待っています。1人参加すれば先へ進めます。'),
         signalingNote(room),
         h('details.hint', null,
           h('summary', null, '1台のPCでテストするには？'),
@@ -112,7 +113,7 @@ export function mount(el, app) {
       h(
         'div.card.connect-card',
         null,
-        h('div.waiting.big', null, h('span.paw-spinner', null, '🐾'), label),
+        h('div.waiting.big', null, spinner(), label),
         h('p.small.muted', null, 'あなたはゲストとして参加します。参加した順に、コーギー・プードル・パグになります。'),
         h('button.btn.btn-ghost', { onclick: () => app.goTop() }, 'やめて戻る'),
       ),
@@ -141,7 +142,7 @@ export function mount(el, app) {
 
   function signalingNote(room) {
     if (room.signaling === 'online') return null;
-    return h('p.small.warn-text', null, '⚠ 接続仲介サーバーに再接続しています。しばらくお待ちください…');
+    return h('p.small.warn-text', null, '接続仲介サーバーに再接続しています。しばらくお待ちください。');
   }
 
   function troubleshooting() {

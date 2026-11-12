@@ -1,9 +1,14 @@
+/* Hallmark · shape: app screen · genre: playful · theme: brand · redesign: restyle
+ * paper: #edf1f8 · accent: #d4ea3a · display: RocknRoll One · body: Murecho
+ * nav: kept · signature: the four dogs over the board (kept) · states: waiting, error, disabled, picked
+ * axes: light/rounded-sans/chromatic-yellow-green · posture: kept · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E3 S4 R4 V4 · weakest: E, emoji icons replaced by one stroke icon set */
 /*
  * わんわんパーティー: メニュー画面と共通部品のデザイン（「犬のおもちゃ箱」）
  *
  * 色はおもちゃ箱から: ロープのおもちゃのデニム紺（文字・線）、テニスボールの黄緑（いちばん大事なボタン）、
  * ゴムボールの赤（中止・解散）。部品は「シール」のように、紺の線で縁どりして、下に紺の影を落とす。
- * 文字: 見出し・ロゴは Dela Gothic One（太くて丸みのある、おもちゃの箱の文字）、本文は Zen Kaku Gothic New。
+ * 文字: 見出し・ロゴは RocknRoll One（太くて丸い、ゲームの箱の文字）、本文は Murecho。
  * ゲームごとに 1 色を持つ（--g）。選択画面のアイコンと準備画面の見出しに使う。
  */
 :root {
@@ -11,7 +16,21 @@
   --ink-soft: #56607d;
   --ink-faint: rgba(29, 39, 71, 0.18);
   --floor: #edf1f8; /* 下地（遊び部屋の床） */
-  --paper: #ffffff;
+  --paper: #fbfcfe; /* 紙: 紺に少し寄せた白 */
+  --on-ink: #fbfcfe; /* 紺や色の上の文字 */
+  --neutral-2: #e6e9f1;
+  --neutral-3: #d9deea;
+  --ink-mute: #5b6480;
+  --scrim: rgba(29, 39, 71, 0.5);
+  --scrim-strong: rgba(29, 39, 71, 0.84);
+  --floor-veil: rgba(237, 241, 248, 0.94);
+  --ok-soft: #dcf3e6;
+  --ok-ink: #0f6b3e;
+  --warn-soft: #fdeccc;
+  --warn-ink: #8a4700;
+  --info-soft: #dfe8fb;
+  --bad-soft: #fbe0dd;
+  --bad-ink: #a5261c;
   --ball: #d4ea3a; /* テニスボール: いちばん大事なボタン */
   --ball-soft: #f3f9c6;
   --rubber: #e9473a; /* ゴムボール: 中止・解散・注意 */
@@ -43,8 +62,8 @@
 
   --radius: 20px;
   --shadow: 0 4px 0 var(--ink);
-  --display: 'Dela Gothic One', 'Hiragino Sans', 'Yu Gothic', system-ui, sans-serif;
-  --font: 'Zen Kaku Gothic New', 'Hiragino Sans', 'BIZ UDPGothic', 'Yu Gothic', 'Meiryo', system-ui, sans-serif;
+  --display: 'RocknRoll One', 'Hiragino Maru Gothic ProN', sans-serif; /* 見出し: 太く丸い、ゲームの箱の文字 */
+  --font: 'Murecho', 'Hiragino Sans', 'Yu Gothic', sans-serif; /* 本文 */
 }
 
 * {
@@ -73,8 +92,12 @@ body {
   background: var(--floor);
   -webkit-font-smoothing: antialiased;
 }
+html,
+body {
+  overflow-x: clip;
+}
 body[data-screen='game'] {
-  overflow: hidden;
+  overflow: clip;
 }
 #app {
   min-height: 100vh;
@@ -88,6 +111,10 @@ h3 {
   margin: 0 0 0.5em;
   line-height: 1.3;
   font-weight: 900;
+  font-synthesis: none;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 p {
   margin: 0.4em 0;
@@ -145,7 +172,10 @@ p {
   box-shadow: 0 0 0 var(--ink);
 }
 .btn:disabled {
-  opacity: 0.45;
+  --c: var(--neutral-2);
+  --fg: var(--ink-mute);
+  border-color: var(--neutral-3);
+  box-shadow: none;
   cursor: not-allowed;
 }
 .btn-primary {
@@ -153,11 +183,11 @@ p {
 }
 .btn-secondary {
   --c: var(--denim);
-  --fg: #fff;
+  --fg: var(--on-ink);
 }
 .btn-danger {
   --c: var(--rubber);
-  --fg: #fff;
+  --fg: var(--on-ink);
 }
 .btn-ghost {
   --c: transparent;
@@ -194,7 +224,7 @@ p {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
-  margin-top: 14px;
+  margin-top: 16px;
 }
 .btn-col {
   display: flex;
@@ -205,7 +235,7 @@ p {
 }
 .btn-pair {
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* ---------- 面（カード） ---------- */
@@ -214,7 +244,7 @@ p {
   border: 2px solid var(--ink);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 22px;
+  padding: 24px;
 }
 
 /* ---------- ヘッダー ---------- */
@@ -225,9 +255,9 @@ p {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+  padding: 8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
   background: var(--paper);
   border-bottom: 2px solid var(--ink);
 }
@@ -248,7 +278,7 @@ p {
   font-weight: 900;
   padding: 0.15em 0.75em;
   border-radius: 999px;
-  color: #fff;
+  color: var(--on-ink);
   border: 2px solid var(--ink);
 }
 .role-badge.red {
@@ -275,12 +305,12 @@ p {
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 0.78rem;
   font-weight: 700;
   padding: 0.1em 0.7em;
   border-radius: 999px;
-  background: #e9ecf3;
+  background: var(--neutral-2);
   color: var(--ink-soft);
 }
 .pill .dot {
@@ -290,28 +320,28 @@ p {
   background: currentColor;
 }
 .pill-ok {
-  background: #dcf3e6;
-  color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok-ink);
 }
 .pill-warn {
-  background: #fdeccc;
-  color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn-ink);
 }
 .pill-warn .dot,
 .pill-info .dot {
   animation: blink 1s infinite;
 }
 .pill-info {
-  background: #dfe8fb;
+  background: var(--info-soft);
   color: var(--denim);
 }
 .pill-bad {
-  background: #fbe0dd;
-  color: var(--rubber);
+  background: var(--bad-soft);
+  color: var(--bad-ink);
 }
 .pill-off {
-  background: #e9ecf3;
-  color: #8a91a6;
+  background: var(--neutral-2);
+  color: var(--ink-mute);
 }
 @keyframes blink {
   50% {
@@ -344,46 +374,72 @@ p {
 .waiting {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   color: var(--ink-soft);
-  margin: 10px 0;
+  margin: 8px 0;
   font-weight: 700;
 }
 .waiting.big {
   font-size: 1.1rem;
   color: var(--ink);
 }
-.paw-spinner {
-  display: inline-block;
-  animation: paw 1.2s ease-in-out infinite;
-  font-size: 1.3em;
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  line-height: 0;
 }
-@keyframes paw {
-  0%,
-  100% {
-    transform: rotate(-15deg);
+.icon svg {
+  display: block;
+}
+/* 読み込み中: 回る輪 */
+.spin svg {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
-  50% {
-    transform: rotate(15deg);
-  }
+}
+/* 結果の表の見出し: 名前の前に、その犬の色の四角 */
+.swatch-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.swatch-name::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  border: 2px solid var(--ink);
+  background: var(--pc, var(--p-red));
+}
+.swatch-name.player-blue {
+  --pc: var(--p-blue);
+}
+.swatch-name.player-pink {
+  --pc: var(--p-pink);
+}
+.swatch-name.player-green {
+  --pc: var(--p-green);
 }
 .notice {
-  background: #dfe8fb;
+  background: var(--info-soft);
   color: var(--denim);
   border-radius: 12px;
-  padding: 10px 14px;
+  padding: 8px 16px;
   font-weight: 700;
 }
 .error-box {
-  background: #fbe0dd;
-  color: #a5261c;
+  background: var(--bad-soft);
+  color: var(--bad-ink);
   border-radius: 12px;
-  padding: 10px 14px;
+  padding: 8px 16px;
   font-weight: 700;
 }
 .hint {
   border-radius: 12px;
-  padding: 8px 14px;
+  padding: 8px 16px;
   font-size: 0.9rem;
   background: var(--floor);
 }
@@ -393,7 +449,7 @@ p {
 }
 .hint ul {
   padding-left: 1.2em;
-  margin: 6px 0;
+  margin: 8px 0;
 }
 .invite-row {
   display: flex;
@@ -417,7 +473,7 @@ p {
 .name-input:focus,
 .invite-input:focus {
   outline: none;
-  background: #fff;
+  background: var(--paper);
   box-shadow: 0 0 0 3px var(--ball);
 }
 
@@ -426,7 +482,7 @@ p {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 22px;
+  gap: 24px;
 }
 .hero {
   width: min(760px, 100%);
@@ -437,9 +493,9 @@ p {
 .hero-board {
   position: relative;
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
   border-radius: 28px;
-  padding: 72px 20px 26px;
+  padding: 72px 20px 24px;
 }
 .hero-dogs {
   position: absolute;
@@ -448,7 +504,7 @@ p {
   top: -62px;
   display: flex;
   justify-content: center;
-  gap: clamp(4px, 2vw, 18px);
+  gap: clamp(4px, 2vw, 16px);
 }
 .hero-dog {
   width: clamp(76px, 17vw, 120px);
@@ -479,7 +535,7 @@ p {
 }
 .hero-tag {
   display: inline-block;
-  margin-top: 14px;
+  margin-top: 16px;
   background: var(--ball);
   color: var(--ink);
   font-weight: 900;
@@ -489,7 +545,7 @@ p {
 }
 .lead {
   color: var(--ink-soft);
-  margin-top: 14px;
+  margin-top: 16px;
 }
 .app-version {
   font-size: 0.75rem;
@@ -506,13 +562,13 @@ p {
   width: min(760px, 100%);
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-  gap: 18px;
+  gap: 16px;
   align-items: stretch;
 }
 .choice {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .choice h2 {
   font-family: var(--display);
@@ -541,7 +597,7 @@ p {
 .mode-picker {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .mode-picker .chips {
   display: grid;
@@ -567,7 +623,7 @@ p {
 .option-label {
   font-weight: 900;
   font-size: 0.92rem;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .option-label .muted {
   font-weight: 500;
@@ -576,7 +632,7 @@ p {
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 .chip {
   font: inherit;
@@ -592,27 +648,32 @@ p {
 .chip.on {
   background: var(--ink);
   border-color: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
 }
 .chip:disabled {
-  opacity: 0.4;
-  cursor: default;
+  background: var(--neutral-2);
+  color: var(--ink-mute);
+  border-color: var(--neutral-3);
+  cursor: not-allowed;
 }
 .chip.on:disabled {
-  opacity: 1;
+  background: var(--ink);
+  color: var(--on-ink);
+  border-color: var(--ink);
+  cursor: default;
 }
 .options-card {
   width: 100%;
-  padding: 16px 18px;
+  padding: 16px 16px;
 }
 .option-row + .option-row {
-  margin-top: 14px;
+  margin-top: 16px;
 }
 .option-row.is-toggle {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 .option-row.is-toggle .option-label {
   margin: 0;
@@ -637,17 +698,17 @@ p {
   touch-action: pan-y;
 }
 .opt-range:disabled {
-  cursor: default;
-  opacity: 0.6;
+  cursor: not-allowed;
+  filter: grayscale(1);
 }
 .opt-range::-webkit-slider-runnable-track {
-  height: 10px;
+  height: 12px;
   border-radius: 999px;
   border: 2px solid var(--ink);
   background: linear-gradient(90deg, var(--ink) var(--fill), var(--paper) var(--fill));
 }
 .opt-range::-moz-range-track {
-  height: 10px;
+  height: 12px;
   border-radius: 999px;
   border: 2px solid var(--ink);
   background: linear-gradient(90deg, var(--ink) var(--fill), var(--paper) var(--fill));
@@ -655,9 +716,9 @@ p {
 .opt-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 26px;
-  height: 26px;
-  margin-top: -10px;
+  width: 24px;
+  height: 24px;
+  margin-top: -8px;
   border-radius: 50%;
   background: var(--ball);
   border: 2px solid var(--ink);
@@ -719,10 +780,10 @@ p {
   left: 4px;
   top: 4px;
   max-width: calc(100% - 8px);
-  padding: 1px 6px;
+  padding: 1px 8px;
   border-radius: 6px;
-  background: rgba(29, 39, 71, 0.82);
-  color: #fff;
+  background: var(--scrim-strong);
+  color: var(--on-ink);
   font-size: 0.7rem;
   font-weight: 700;
   line-height: 1.3;
@@ -743,7 +804,7 @@ p {
   display: grid;
   place-items: center;
   font-size: 2.2rem;
-  padding-top: 10px;
+  padding-top: 8px;
 }
 .opt-tile.on {
   border-color: var(--ink);
@@ -765,11 +826,14 @@ p {
   border: 2px solid var(--ink);
 }
 .opt-tile:disabled {
-  cursor: default;
-  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(1);
+  border-color: var(--neutral-3);
 }
 .opt-tile.on:disabled {
-  opacity: 1;
+  filter: none;
+  border-color: var(--ink);
+  cursor: default;
 }
 .opt-toggle-row {
   display: flex;
@@ -787,7 +851,7 @@ p {
   height: 30px;
   border-radius: 999px;
   border: 2px solid var(--ink);
-  background: #dfe3ec;
+  background: var(--neutral-3);
   cursor: pointer;
   padding: 0;
   transition: background 0.15s;
@@ -796,8 +860,8 @@ p {
   background: var(--ball);
 }
 .opt-toggle:disabled {
-  cursor: default;
-  opacity: 0.6;
+  cursor: not-allowed;
+  filter: grayscale(1);
 }
 .opt-knob {
   position: absolute;
@@ -806,7 +870,7 @@ p {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--paper);
   border: 2px solid var(--ink);
   transition: transform 0.15s;
 }
@@ -815,7 +879,7 @@ p {
 }
 .name-card {
   width: 100%;
-  padding: 14px 18px;
+  padding: 16px 16px;
 }
 
 /* ---------- プレイヤーの札（首輪の名札。上に色の帯） ---------- */
@@ -823,7 +887,7 @@ p {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
-  margin: 18px 0 24px;
+  margin: 16px 0 24px;
 }
 .player-card {
   --pc: var(--p-red);
@@ -833,7 +897,7 @@ p {
   border-top: 8px solid var(--pc);
   border-radius: 18px;
   box-shadow: var(--shadow);
-  padding: 14px 8px 12px;
+  padding: 16px 8px 12px;
   text-align: center;
   display: flex;
   flex-direction: column;
@@ -909,8 +973,8 @@ p {
   font-weight: 900;
   padding: 0.1em 0.8em;
   border-radius: 999px;
-  background: #e9ecf3;
-  color: #8a91a6;
+  background: var(--neutral-2);
+  color: var(--ink-mute);
 }
 .ready-badge.on {
   background: var(--ball);
@@ -923,7 +987,7 @@ p {
   width: 100%;
 }
 .players-row.compact .player-card {
-  padding: 10px 4px 8px;
+  padding: 8px 4px 8px;
   border-top-width: 6px;
 }
 .players-row.compact .avatar svg {
@@ -979,7 +1043,7 @@ p {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 .select-head .screen-title {
   margin: 0;
@@ -987,7 +1051,7 @@ p {
 .random-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 .random-row p {
@@ -1027,7 +1091,7 @@ p {
 }
 .game-card:disabled {
   color: inherit;
-  opacity: 1;
+  cursor: default;
 }
 .game-card-art {
   background: var(--g);
@@ -1044,11 +1108,10 @@ p {
   border: 2px solid var(--ink);
   display: grid;
   place-items: center;
-  font-size: 1.9rem;
-  line-height: 1;
+  color: var(--ink);
 }
 .game-card-body {
-  padding: 14px 16px 14px;
+  padding: 16px 16px 16px;
 }
 .game-card-title {
   font-family: var(--display);
@@ -1086,7 +1149,7 @@ p {
   }
 }
 .select-foot {
-  margin-top: 22px;
+  margin-top: 24px;
 }
 
 /* ---------- 準備画面 ---------- */
@@ -1094,14 +1157,14 @@ p {
   --g: var(--ink);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px 18px;
+  gap: 8px 16px;
   align-items: center;
   background: var(--paper);
-  background: color-mix(in srgb, var(--g) 13%, #fff);
+  background: color-mix(in srgb, var(--g) 13%, var(--paper));
   border: 2px solid var(--ink);
   border-radius: 22px;
-  padding: 18px 22px;
-  margin-bottom: 22px;
+  padding: 16px 24px;
+  margin-bottom: 24px;
 }
 .ready-icon {
   grid-row: span 2;
@@ -1124,14 +1187,14 @@ p {
 .ready-layout {
   display: grid;
   grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
-  gap: 22px;
+  gap: 24px;
   align-items: start;
 }
 .ready-side {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 14px;
+  gap: 16px;
 }
 /* スタートのボタンは、設定が長くても画面の下に見えたまま */
 .ready-actions {
@@ -1142,7 +1205,7 @@ p {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 10px 0 max(12px, env(safe-area-inset-bottom));
+  padding: 8px 0 max(12px, env(safe-area-inset-bottom));
   background: linear-gradient(transparent, var(--floor) 26%);
 }
 .ready-actions .btn-xl {
@@ -1164,14 +1227,14 @@ p {
   margin-top: 0;
 }
 .howto * + h3 {
-  margin-top: 18px;
+  margin-top: 16px;
 }
 .controls {
   border-collapse: collapse;
   width: 100%;
 }
 .controls td {
-  padding: 7px 4px;
+  padding: 8px 4px;
   border-bottom: 1px solid var(--ink-faint);
   vertical-align: top;
   font-size: 0.92rem;
@@ -1208,7 +1271,7 @@ kbd {
   cursor: pointer;
   font-weight: 900;
   color: var(--denim);
-  margin-top: 10px;
+  margin-top: 8px;
 }
 .tips-more .tips {
   margin-top: 8px;
@@ -1221,14 +1284,14 @@ kbd {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(237, 241, 248, 0.86);
-  backdrop-filter: blur(3px);
+  background: var(--floor-veil);
 }
 .cd-label {
   font-size: 1.3rem;
   font-weight: 900;
 }
 .cd-num {
+  font-variant-numeric: tabular-nums;
   font-family: var(--display);
   font-size: 9rem;
   line-height: 1.1;
@@ -1250,9 +1313,9 @@ kbd {
 .result-row {
   display: flex;
   justify-content: center;
-  gap: 14px;
+  gap: 16px;
   flex-wrap: wrap;
-  margin: 34px 0 22px;
+  margin: 32px 0 24px;
 }
 .result-player {
   --pc: var(--p-red);
@@ -1263,7 +1326,7 @@ kbd {
   border: 2px solid var(--ink);
   border-top: 8px solid var(--pc);
   border-radius: 18px;
-  padding: 18px 12px 16px;
+  padding: 16px 12px 16px;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
@@ -1274,9 +1337,13 @@ kbd {
   background: var(--ball-soft);
   box-shadow: 0 4px 0 var(--ink), 0 0 0 5px var(--ball);
 }
+.crown svg {
+  fill: var(--ball);
+}
 .crown {
   position: absolute;
-  top: -34px;
+  top: -32px;
+  color: var(--ink);
   font-size: 2.4rem;
   animation: bounce 1.4s ease-in-out infinite;
 }
@@ -1292,7 +1359,7 @@ kbd {
   width: min(680px, 100%);
   margin: 0 auto 20px;
   overflow-x: auto;
-  padding: 10px 16px;
+  padding: 8px 16px;
 }
 .stats {
   width: 100%;
@@ -1301,7 +1368,7 @@ kbd {
 }
 .stats th,
 .stats td {
-  padding: 8px 10px;
+  padding: 8px 8px;
   border-bottom: 1px solid var(--ink-faint);
 }
 .stats thead th {
@@ -1325,7 +1392,7 @@ kbd {
 .result-sub {
   font-family: var(--display);
   font-weight: 400;
-  margin: 18px 0 8px;
+  margin: 16px 0 8px;
   font-size: 1.05rem;
 }
 .confetti {
@@ -1342,8 +1409,21 @@ kbd {
   width: 10px;
   height: 14px;
   border-radius: 3px;
-  background: hsl(calc(var(--i) * 47), 80%, 58%);
+  background: var(--c, var(--ball));
   animation: fall calc(3s + var(--i) * 0.13s) linear calc(var(--i) * -0.4s) infinite;
+}
+/* 紙ふぶきは 4 匹の色とテニスボール */
+.confetti i:nth-child(5n + 1) {
+  --c: var(--p-red);
+}
+.confetti i:nth-child(5n + 2) {
+  --c: var(--p-blue);
+}
+.confetti i:nth-child(5n + 3) {
+  --c: var(--p-pink);
+}
+.confetti i:nth-child(5n + 4) {
+  --c: var(--p-green);
 }
 @keyframes fall {
   to {
@@ -1362,7 +1442,7 @@ kbd {
   z-index: 60;
   display: grid;
   place-items: center;
-  background: rgba(29, 39, 71, 0.5);
+  background: var(--scrim);
 }
 .overlay-card,
 .modal,
@@ -1381,7 +1461,7 @@ kbd {
   z-index: 80;
   display: grid;
   place-items: center;
-  background: rgba(29, 39, 71, 0.5);
+  background: var(--scrim);
   animation: fade 0.15s;
 }
 .modal {
@@ -1416,7 +1496,7 @@ kbd {
 }
 .toast {
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
   font-weight: 700;
   padding: 0.55em 1.2em;
   border-radius: 12px;
@@ -1464,8 +1544,8 @@ body[data-screen='game'] .toasts {
     position: static;
   }
   .ready-head {
-    padding: 14px 16px;
-    gap: 6px 14px;
+    padding: 16px 16px;
+    gap: 8px 16px;
   }
   .ready-icon {
     width: 56px;
@@ -1485,7 +1565,7 @@ body[data-screen='game'] .toasts {
   /* 操作の表: キーの下に説明 */
   .controls tr {
     display: block;
-    padding: 6px 0;
+    padding: 8px 0;
     border-bottom: 1px solid var(--ink-faint);
   }
   .controls tr:last-child {
@@ -1545,7 +1625,7 @@ body[data-screen='game'] .toasts {
 
 @media (prefers-reduced-motion: reduce) {
   .hero-dog,
-  .paw-spinner,
+  .spin svg,
   .crown,
   .confetti i,
   .game-card.is-picked,

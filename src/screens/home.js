@@ -1,4 +1,5 @@
 // ② ホーム画面: 参加している人の接続状態。ホストがゲーム選択へ進める
+import { spinner } from '../core/icons.js';
 import { h } from '../core/util.js';
 import { playerCard, linkFor, roomSummary } from './common.js';
 import { MAX_PLAYERS } from '../core/protocol.js';
@@ -27,7 +28,7 @@ export function mount(el, app) {
                 !sum.enough || !sum.allConnected ? h('p.small.warn-text', null, 'ゲームは先に選べます。始めるには2人以上が必要です（最大4人）。') : null,
                 h('p.small.muted', null, '招待URLは、上の「招待URL」からいつでも見られます。3人まで参加できます。'),
               ]
-            : h('div.waiting', null, h('span.paw-spinner', null, '🐾'), 'ホストがゲームを選ぶのを待っています…'),
+            : h('div.waiting', null, spinner(), 'ホストがゲームを選ぶのを待っています…'),
         ),
       ),
     );

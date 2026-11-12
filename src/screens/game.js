@@ -1,5 +1,6 @@
 // ⑤ ゲーム画面のオーバーレイ（3D描画とHUDはゲームモジュールが担当）
 // ホスト専用ボタン（一時停止・中止・解散）と、一時停止/再接続/再開カウントダウンの表示。
+import { icon, spinner } from '../core/icons.js';
 import { h, now } from '../core/util.js';
 import { PLAYERS } from './common.js';
 
@@ -56,13 +57,13 @@ export function mount(el, app) {
     lastCd = null;
 
     const muteBtn = h('span.btn-pair', null,
-      h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ', 'aria-label': '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
-      h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ', 'aria-label': 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'));
+      h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ', 'aria-label': '効果音のオン/オフ' }, icon(app.sound.muted ? 'mute' : 'volume')),
+      h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ', 'aria-label': 'BGM のオン/オフ' }, icon(app.music.muted ? 'musicOff' : 'music')));
     const topButtons = isHost
       ? h('div.game-topbar', null,
           muteBtn,
-          h('button.btn.btn-small.btn-light', { onclick: () => room.pauseGame(), disabled: m?.status !== 'running', title: '一時停止（Esc）', 'aria-label': '一時停止' }, '⏸', h('span.btn-label', null, ' 一時停止')),
-          h('button.btn.btn-small.btn-danger', { onclick: () => confirmAbort(), title: 'ゲームを中止', 'aria-label': 'ゲームを中止' }, '✕', h('span.btn-label', null, ' 中止')))
+          h('button.btn.btn-small.btn-light', { onclick: () => room.pauseGame(), disabled: m?.status !== 'running', title: '一時停止（Esc）', 'aria-label': '一時停止' }, icon('pause', 16), h('span.btn-label', null, ' 一時停止')),
+          h('button.btn.btn-small.btn-danger', { onclick: () => confirmAbort(), title: 'ゲームを中止', 'aria-label': 'ゲームを中止' }, icon('close', 16), h('span.btn-label', null, ' 中止')))
       : h('div.game-topbar', null, muteBtn);
 
     let panel = null;
@@ -71,12 +72,12 @@ export function mount(el, app) {
     if (sitting) {
       // この試合に参加していない人（試合の途中で入ってきた人）は、終わるまで待つ
       panel = h('div.pause-panel.card', null,
-        h('div.waiting.big', null, h('span.paw-spinner', null, '🐾'), 'いま対戦中です。終わるまでお待ちください'),
+        h('div.waiting.big', null, spinner(), 'いま対戦中です。終わるまでお待ちください'),
         h('p.small.muted', null, '次のレースから参加できます。'));
     } else if (m && m.status === 'loading') {
       const away = guests.some((g) => s.players[g].link !== 'connected' && s.players[g].link !== 'syncing');
       panel = h('div.pause-panel.card', null,
-        h('div.waiting.big', null, h('span.paw-spinner', null, '🐾'), isHost ? (away ? 'みんなの接続を待っています…' : 'みんなの読み込みを待っています…') : 'ゲームを読み込んでいます…'),
+        h('div.waiting.big', null, spinner(), isHost ? (away ? 'みんなの接続を待っています…' : 'みんなの読み込みを待っています…') : 'ゲームを読み込んでいます…'),
         isHost ? hostPanelButtons(false) : null);
     } else if (m && m.status === 'paused') {
       panel = h('div.pause-panel.card', null,
@@ -98,15 +99,15 @@ export function mount(el, app) {
       const waiting = guests.filter((g) => room.state.players[g].link === 'waiting');
       const left = guests.filter((g) => room.state.players[g].link === 'none');
       const syncing = guests.filter((g) => room.state.players[g].link === 'syncing');
-      if (waiting.length) return h('div.waiting', null, h('span.paw-spinner', null, '🐾'), `${waiting.map(name).join('・')}の再接続を待っています…（時間制限なし）`);
+      if (waiting.length) return h('div.waiting', null, spinner(), `${waiting.map(name).join('・')}の再接続を待っています…（時間制限なし）`);
       if (left.length) return h('p.warn-text', null, `${left.map(name).join('・')}が退出しました。ゲームを中止してください。`);
-      if (syncing.length) return h('div.waiting', null, h('span.paw-spinner', null, '🔄'), `${syncing.map(name).join('・')}にゲーム状態を送っています…`);
+      if (syncing.length) return h('div.waiting', null, spinner(), `${syncing.map(name).join('・')}にゲーム状態を送っています…`);
       if (room.state.hostHidden) return h('p.small', null, 'このタブに戻ると再開できます。');
-      return h('p.ok-text', null, '✔ みんなと同期しました。再開できます！');
+      return h('p.ok-text', null, 'みんなと同期しました。再開できます。');
     }
-    if (room.linkState !== 'connected') return h('div.waiting', null, h('span.paw-spinner', null, '🐾'), 'ホストに再接続しています…');
-    if (!room.isSynced) return h('div.waiting', null, h('span.paw-spinner', null, '🔄'), 'ゲーム状態を復元しています…');
-    return h('p.ok-text', null, '✔ 復元完了。ホストの再開を待っています');
+    if (room.linkState !== 'connected') return h('div.waiting', null, spinner(), 'ホストに再接続しています…');
+    if (!room.isSynced) return h('div.waiting', null, spinner(), 'ゲーム状態を復元しています…');
+    return h('p.ok-text', null, '復元できました。ホストの再開を待っています。');
   }
 
   function hostPanelButtons(withResume) {

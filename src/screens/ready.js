@@ -1,4 +1,5 @@
 // ④ 準備画面: 遊び方の表示と準備完了ボタン
+import { icon, noEmoji, GAME_ICON } from '../core/icons.js';
 import { h, now } from '../core/util.js';
 import { getGame } from '../games/registry.js';
 import { playerCard, linkFor, roomSummary } from './common.js';
@@ -63,16 +64,16 @@ export function mount(el, app) {
     countdownEl = h('div.start-countdown', { hidden: true }, h('div.cd-label', null, app.room?.state?.solo ? 'まもなく始まります' : '全員そろいました。まもなく始まります'), h('div.cd-num', null, '3'));
     lastShown = null;
 
-    const tips = def?.tips || [];
+    const tips = (def?.tips || []).map(noEmoji);
     const TIPS_SHOWN = 6; // 長いルールは、最初の数行だけ見せて残りはたたむ
     el.replaceChildren(
       h(
         'div.screen.screen-ready',
         null,
         h('header.ready-head', { style: { '--g': def?.color || '#1d2747' } },
-          h('div.ready-icon', { 'aria-hidden': 'true' }, h('span.emo', null, def?.emoji || '🎮')),
+          h('div.ready-icon', { 'aria-hidden': 'true' }, h('span.emo', null, icon(GAME_ICON[def?.id] || 'dice', 36))),
           h('h2.screen-title', null, def ? def.title : 'ゲーム'),
-          def ? h('p', null, def.description) : null),
+          def ? h('p', null, noEmoji(def.description)) : null),
         h(
           'div.ready-layout',
           null,
@@ -98,7 +99,7 @@ export function mount(el, app) {
             h('h3', null, '操作'),
             def
               ? h('table.controls', null,
-                  h('tbody', null, def.controls.map(([k, v]) => h('tr', null, h('td', null, h('kbd', null, k)), h('td', null, v)))))
+                  h('tbody', null, def.controls.map(([k, v]) => h('tr', null, h('td', null, h('kbd', null, noEmoji(k))), h('td', null, noEmoji(v))))))
               : null,
             tips.length
               ? [
@@ -109,7 +110,7 @@ export function mount(el, app) {
                         h('summary', null, `ルールの続きを見る（あと${tips.length - TIPS_SHOWN}件）`),
                         h('ul.tips', null, tips.slice(TIPS_SHOWN).map((t) => h('li', null, t))))
                     : null,
-                  def.id === 'dogKart' ? h('p.small', null, '🏁 人間のうち、先に3周した人が勝ち。') : null,
+                  def.id === 'dogKart' ? h('p.small', null, '人間のうち、先に3周した人が勝ち。') : null,
                 ]
               : null,
           ),
@@ -166,14 +167,14 @@ export function mount(el, app) {
       const cur = opt.choices[idx];
       if (opt.ui === 'slider') {
         // スライダー: 左右に動かして選ぶ（離したときに決まる）
-        const val = h('span.opt-value', null, cur?.label ?? '');
+        const val = h('span.opt-value', null, noEmoji(cur?.label ?? ''));
         const range = h('input.opt-range', { type: 'range', min: '0', max: String(opt.choices.length - 1), step: '1', value: String(idx), disabled: !isHost, 'aria-label': opt.label });
         range.value = String(idx);
         const fill = () => range.style.setProperty('--fill', `${(Number(range.value) / Math.max(1, opt.choices.length - 1)) * 100}%`);
         fill();
         range.addEventListener('pointerdown', () => (holding = true));
         range.addEventListener('input', () => {
-          val.textContent = opt.choices[Number(range.value)]?.label ?? '';
+          val.textContent = noEmoji(opt.choices[Number(range.value)]?.label ?? '');
           fill();
         });
         range.addEventListener('change', () => {
@@ -182,7 +183,7 @@ export function mount(el, app) {
           pending = false;
           if (c) set(opt, c.value);
         });
-        const ends = h('div.opt-ends', null, h('span', null, opt.choices[0].label), h('span', null, opt.choices[opt.choices.length - 1].label));
+        const ends = h('div.opt-ends', null, h('span', null, noEmoji(opt.choices[0].label)), h('span', null, noEmoji(opt.choices[opt.choices.length - 1].label)));
         return h('div.opt-slider', null, h('div.opt-slider-row', null, range, val), ends);
       }
       if (opt.ui === 'gallery') {
@@ -190,17 +191,16 @@ export function mount(el, app) {
         return h('div.opt-gallery', null,
           opt.choices.map((c) => {
             const on = s.options?.[opt.key] === c.value;
-            const [icon, ...rest] = c.label.split(' ');
             return h(`button.opt-tile${on ? '.on' : ''}${c.img ? '' : '.no-img'}`, {
               type: 'button',
               disabled: !isHost && !on,
               'aria-pressed': on ? 'true' : 'false',
-              title: c.label,
+              title: noEmoji(c.label),
               onclick: isHost && !on ? () => set(opt, c.value) : null,
             },
-            c.img ? h('img', { src: c.img, alt: '', loading: 'lazy', decoding: 'async', draggable: 'false' }) : h('span.opt-tile-big', null, icon),
-            h('span.opt-tile-name', null, c.img ? c.label : rest.join(' ') || c.label),
-            on ? h('span.opt-tile-check', null, '✔') : null);
+            c.img ? h('img', { src: c.img, alt: '', loading: 'lazy', decoding: 'async', draggable: 'false' }) : h('span.opt-tile-big', null, icon('dice', 36)),
+            h('span.opt-tile-name', null, noEmoji(c.label)),
+            on ? h('span.opt-tile-check', null, icon('check', 14)) : null);
           }));
       }
       if (opt.ui === 'toggle') {
@@ -216,7 +216,7 @@ export function mount(el, app) {
             disabled: !isHost,
             onclick: isHost ? () => set(opt, other.value) : null,
           }, h('span.opt-knob')),
-          h('span.opt-value', null, cur?.label ?? ''));
+          h('span.opt-value', null, noEmoji(cur?.label ?? '')));
       }
       return h('div.chips', null,
         opt.choices.map((c) => {
@@ -225,13 +225,13 @@ export function mount(el, app) {
             disabled: !isHost && !on,
             'aria-pressed': on ? 'true' : 'false',
             onclick: isHost && !on ? () => set(opt, c.value) : null,
-          }, c.label);
+          }, noEmoji(c.label));
         }));
     };
     return h('div.card.options-card', null,
       opts.map((opt) =>
         h(`div.option-row${opt.ui === 'toggle' ? '.is-toggle' : ''}`, null,
-          h('div.option-label', null, opt.label),
+          h('div.option-label', null, noEmoji(opt.label)),
           control(opt))),
       isHost ? null : h('div.small.muted', null, '設定はホストが決めます'));
   }

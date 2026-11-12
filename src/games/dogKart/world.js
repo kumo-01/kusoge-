@@ -32,7 +32,7 @@ function canvasTexture(w, hgt, draw, { repeat = false } = {}) {
   return tex;
 }
 
-const FONT = '"Dela Gothic One", "Hiragino Sans", "Arial Black", sans-serif';
+const FONT = '"RocknRoll One", "Hiragino Maru Gothic ProN", sans-serif';
 
 // コースごとの見た目（track.theme）
 const THEMES = {

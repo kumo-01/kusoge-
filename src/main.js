@@ -187,10 +187,10 @@ class App {
   showInvite() {
     const url = this.room?.inviteUrl;
     if (!url) return;
-    this.router.dialog('🔗 招待URL', h('div', null,
+    this.router.dialog('招待URL', h('div', null,
       h('div.invite-row', null,
         h('input.invite-input', { value: url, readonly: true, onfocus: (e) => e.target.select() }),
-        h('button.btn.btn-secondary', { onclick: () => this.copyText(url) }, '📋 コピー')),
+        h('button.btn.btn-secondary', { onclick: () => this.copyText(url) }, 'URLをコピー')),
       h('p.small.muted', null, '席（ゲスト2人まで）が空いているときだけ、新しい人が参加できます。')));
   }
 

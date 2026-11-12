@@ -162,7 +162,7 @@ export class Effects {
     c.width = 512;
     c.height = 192;
     const x = c.getContext('2d');
-    x.font = '104px "Dela Gothic One", "Hiragino Sans", "Arial Black", sans-serif';
+    x.font = '104px "RocknRoll One", "Hiragino Maru Gothic ProN", sans-serif';
     x.textAlign = 'center';
     x.textBaseline = 'middle';
     x.lineJoin = 'round';

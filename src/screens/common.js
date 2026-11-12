@@ -101,7 +101,7 @@ const LINK_LABEL = {
 
 export function statusPill(state, extra) {
   const [label, tone] = LINK_LABEL[state] || [state, 'off'];
-  return h(`span.pill.pill-${tone}`, null, h('span.dot'), label, extra ? ` ${extra}` : '');
+  return h(`span.pill.pill-${tone}`, null, label, extra ? ` ${extra}` : '');
 }
 
 /** プレイヤーカード。slot: 席（0 = ホスト, 1〜3 = ゲスト）。colorWord: 色のあとにつける言葉（カートのゲームなら「のカート」） */
@@ -116,7 +116,7 @@ export function playerCard(slot, { me = false, status = 'connected', ready = nul
     h('div.player-name', null, nick && !empty ? nick : p.name),
     h('div.player-role', null, `${nick && !empty ? `${p.name}・` : ''}${p.role}・${p.colorName}${colorWord}`),
     statusPill(status),
-    ready === null || empty ? null : h(`div.ready-badge${ready ? '.on' : ''}`, null, ready ? '✔ 準備OK' : '準備中…'),
+    ready === null || empty ? null : h(`div.ready-badge${ready ? '.on' : ''}`, null, ready ? '準備OK' : '準備中'),
     extra,
   );
 }
