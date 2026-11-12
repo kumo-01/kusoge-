@@ -162,7 +162,7 @@ export class Effects {
     c.width = 512;
     c.height = 192;
     const x = c.getContext('2d');
-    x.font = '900 104px "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", "Arial Rounded MT Bold", sans-serif';
+    x.font = '104px "Dela Gothic One", "Hiragino Sans", "Arial Black", sans-serif';
     x.textAlign = 'center';
     x.textBaseline = 'middle';
     x.lineJoin = 'round';

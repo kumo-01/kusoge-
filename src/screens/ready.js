@@ -60,42 +60,58 @@ export function mount(el, app) {
     const sum = roomSummary(s);
     const cards = [];
     for (let i = 0; i < (s.solo ? 1 : MAX_PLAYERS); i++) cards.push(playerCard(i, { me: i === room.slot, status: linkFor(app, i), ready: s.players[i].ready, colorWord: def?.colorWord || '', nick: s.players[i].name || '' }));
-    countdownEl = h('div.start-countdown', { hidden: true }, h('div.cd-label', null, app.room?.state?.solo ? 'まもなく開始' : '全員準備OK！まもなく開始'), h('div.cd-num', null, '3'));
+    countdownEl = h('div.start-countdown', { hidden: true }, h('div.cd-label', null, app.room?.state?.solo ? 'まもなく始まります' : '全員そろいました。まもなく始まります'), h('div.cd-num', null, '3'));
     lastShown = null;
 
+    const tips = def?.tips || [];
+    const TIPS_SHOWN = 6; // 長いルールは、最初の数行だけ見せて残りはたたむ
     el.replaceChildren(
       h(
         'div.screen.screen-ready',
         null,
-        h('h2.screen-title', null, def ? `${def.emoji} ${def.title}` : 'ゲーム'),
-        def ? h('p.sub', null, def.description) : null,
+        h('header.ready-head', { style: { '--g': def?.color || '#1d2747' } },
+          h('div.ready-icon', { 'aria-hidden': 'true' }, h('span.emo', null, def?.emoji || '🎮')),
+          h('h2.screen-title', null, def ? def.title : 'ゲーム'),
+          def ? h('p', null, def.description) : null),
         h(
           'div.ready-layout',
           null,
-          h(
-            'div.card.howto',
-            null,
-            h('h3', null, '⌨ 操作方法'),
-            def
-              ? h('table.controls', null,
-                  h('tbody', null, def.controls.map(([k, v]) => h('tr', null, h('td', null, h('kbd', null, k)), h('td', null, v)))))
-              : null,
-            def?.tips?.length ? [h('h3', null, '💡 ルール'), h('ul.tips', null, def.tips.map((t) => h('li', null, t))), def.id === 'dogKart' ? h('p.small', null, '🏁 人間のうち、先に3周した人が勝ち！') : null] : null,
-          ),
           h(
             'div.ready-side',
             null,
             nameCard(s, room),
             optionsCard(def, s, isHost),
-            s.solo ? null : h('div.players-row.compact.three', null, cards),
-            h(
-              `button.btn.btn-xl.${myReady ? 'btn-ghost' : 'btn-primary'}`,
-              { onclick: () => { app.sound.play('ready'); room.setReady(!myReady); } },
-              s.solo ? (myReady ? 'やめる' : '▶ スタート！') : myReady ? '準備完了を取り消す' : '✋ 準備完了！',
-            ),
-            !sum.enough ? h('p.small.warn-text', null, '相手の参加を待っています…（2人以上そろうと開始できます。最大4人）') : !sum.allConnected ? h('p.small.warn-text', null, '接続が切れている人を待っています…') : null,
-            isHost ? h('button.btn.btn-ghost', { onclick: () => room.goSelect() }, '← ゲーム選択へ戻る') : null,
+            s.solo ? null : h('div.players-row.compact', null, cards),
+            h('div.ready-actions', null,
+              h(
+                `button.btn.btn-xl.${myReady ? 'btn-light' : 'btn-primary'}`,
+                { onclick: () => { app.sound.play('ready'); room.setReady(!myReady); } },
+                s.solo ? (myReady ? 'やめる' : 'スタート') : myReady ? '準備OKを取り消す' : '準備OK',
+              ),
+              !sum.enough ? h('p.small.warn-text', null, '相手の参加を待っています。2人以上で始められます（最大4人）。') : !sum.allConnected ? h('p.small.warn-text', null, '接続が切れている人を待っています。') : null,
+              isHost ? h('button.btn.btn-ghost', { onclick: () => room.goSelect() }, 'ゲームを選び直す') : null),
             countdownEl,
+          ),
+          h(
+            'section.card.howto',
+            null,
+            h('h3', null, '操作'),
+            def
+              ? h('table.controls', null,
+                  h('tbody', null, def.controls.map(([k, v]) => h('tr', null, h('td', null, h('kbd', null, k)), h('td', null, v)))))
+              : null,
+            tips.length
+              ? [
+                  h('h3', null, 'ルール'),
+                  h('ul.tips', null, tips.slice(0, TIPS_SHOWN).map((t) => h('li', null, t))),
+                  tips.length > TIPS_SHOWN
+                    ? h('details.tips-more', null,
+                        h('summary', null, `ルールの続きを見る（あと${tips.length - TIPS_SHOWN}件）`),
+                        h('ul.tips', null, tips.slice(TIPS_SHOWN).map((t) => h('li', null, t))))
+                    : null,
+                  def.id === 'dogKart' ? h('p.small', null, '🏁 人間のうち、先に3周した人が勝ち。') : null,
+                ]
+              : null,
           ),
         ),
       ),
@@ -133,7 +149,7 @@ export function mount(el, app) {
       e.stopPropagation(); // 入力中のキーでゲームの操作が動かないように
       if (e.key === 'Enter') input.blur();
     });
-    return h('div.card.name-card', null, h('label.option-label', null, '🏷 あなたの名前（ゲーム中に吹き出しで出ます）'), input);
+    return h('div.card.name-card', null, h('label.option-label', null, 'あなたの名前', h('span.muted', null, '（ゲーム中に吹き出しで出ます）')), input);
   }
 
   function optionsCard(def, s, isHost) {
@@ -215,7 +231,7 @@ export function mount(el, app) {
     return h('div.card.options-card', null,
       opts.map((opt) =>
         h(`div.option-row${opt.ui === 'toggle' ? '.is-toggle' : ''}`, null,
-          h('div.option-label', null, '⚙ ', opt.label),
+          h('div.option-label', null, opt.label),
           control(opt))),
       isHost ? null : h('div.small.muted', null, '設定はホストが決めます'));
   }

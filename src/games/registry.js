@@ -36,6 +36,7 @@ const CPU_OPTIONS = [
 export const GAMES = [
   {
     id: 'dogKart',
+    color: '#e9473a', // 選択画面・準備画面の色
     title: 'わんわん爆走カート',
     roundWord: 'レース', // 連戦の 1 回の呼び方
     colorWord: 'のカート', // 準備画面の「赤のカート」
@@ -146,6 +147,7 @@ export const GAMES = [
   },
   {
     id: 'gomuBattle',
+    color: '#f08a24', // 選択画面・準備画面の色
     title: 'いぬいぬゴム鉄砲バトル',
     emoji: '🔫',
     roundWord: '試合',
@@ -201,6 +203,7 @@ export const GAMES = [
   },
   {
     id: 'angleDuel',
+    color: '#13a69c', // 選択画面・準備画面の色
     title: '人間感覚角度対決',
     emoji: '📐',
     roundWord: 'ラウンド',
@@ -257,6 +260,7 @@ export const GAMES = [
   },
   {
     id: 'prefBattle',
+    color: '#2f6fe0', // 選択画面・準備画面の色
     title: '都道府県県境バトル',
     emoji: '🗾',
     roundWord: 'ラウンド',
@@ -313,6 +317,7 @@ export const GAMES = [
   },
   {
     id: 'reaction',
+    color: '#f2c21b', // 選択画面・準備画面の色
     title: '反応速度バトル',
     emoji: '⚡',
     roundWord: 'ラウンド',
@@ -348,6 +353,7 @@ export const GAMES = [
   },
   {
     id: 'rhythm',
+    color: '#8a63f0', // 選択画面・準備画面の色
     title: 'リズム刻みバトル',
     emoji: '🥁',
     roundWord: 'ラウンド',

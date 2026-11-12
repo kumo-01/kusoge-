@@ -65,12 +65,12 @@ export class ScreenRouter {
     if (room.solo) {
       this.header.replaceChildren(
         h('div.header-left', null,
-          h('span.header-logo', null, '🐾 わんわんパーティー'),
-          h('span.role-badge.red', null, '🐶 ひとりモード')),
+          h('span.header-logo', null, 'わんわんパーティー'),
+          h('span.role-badge.red', null, 'ひとりで遊ぶ')),
         h('div.header-right', null,
-          h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
-          h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'),
-          h('button.btn.btn-small.btn-ghost', { onclick: () => app.disband() }, 'タイトルへ')),
+          h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ', 'aria-label': '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
+          h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ', 'aria-label': 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'),
+          h('button.btn.btn-small.btn-light', { onclick: () => app.disband() }, 'タイトルに戻る')),
       );
       return;
     }
@@ -87,15 +87,15 @@ export class ScreenRouter {
 
     this.header.replaceChildren(
       h('div.header-left', null,
-        h('span.header-logo', null, '🐾 わんわんパーティー'),
+        h('span.header-logo', null, 'わんわんパーティー'),
         h(`span.role-badge.${mine.color}`, null, `${mine.icon} ${mine.role}（${mine.name}）`)),
       h('div.header-right', null,
         status,
         isHost && room.signaling !== 'online' ? h('span.pill.pill-warn', { title: 'シグナリングサーバーとの接続。ゲーム中のデータ通信には影響しません' }, '仲介サーバー再接続中') : null,
-        isHost ? h('button.btn.btn-small.btn-light', { onclick: () => app.showInvite() }, '🔗 招待URL') : null,
+        isHost ? h('button.btn.btn-small.btn-light', { onclick: () => app.showInvite() }, '招待URL') : null,
         ...waiting.map((slot) => h('button.btn.btn-small.btn-light', { onclick: () => app.confirmFreeSlot(slot) }, waiting.length > 1 ? `${PLAYERS[slot].role}の席を空ける` : '新しいゲストを招待')),
-        h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
-        h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'),
+        h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ', 'aria-label': '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
+        h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ', 'aria-label': 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'),
         isHost
           ? h('button.btn.btn-small.btn-danger', { onclick: () => app.disband() }, '解散')
           : h('button.btn.btn-small.btn-ghost', { onclick: () => app.leave() }, '退出')),
@@ -116,10 +116,10 @@ export class ScreenRouter {
       h('div.overlay-card.card', null,
         f
           ? [
-              h('h2', null, '😢 ホストに接続できません'),
+              h('h2', null, 'ホストに接続できません'),
               h('p', null, f.text),
               h('div.btn-row', null,
-                f.kind !== 'rejected' ? h('button.btn.btn-primary', { onclick: () => room.retry() }, '🔁 もう一度試す') : null,
+                f.kind !== 'rejected' ? h('button.btn.btn-primary', { onclick: () => room.retry() }, 'もう一度つなぐ') : null,
                 h('button.btn.btn-ghost', { onclick: () => this.app.goTop() }, '接続画面へ戻る')),
             ]
           : [

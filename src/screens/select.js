@@ -43,13 +43,14 @@ export function mount(el, app) {
       h(
         'div.screen.screen-select',
         null,
-        h('h2.screen-title', null, room.solo ? '🎮 ひとりで遊ぶゲームを選ぼう' : '🎮 ゲームを選ぼう'),
-        isHost ? null : h('p.sub', null, 'ホストがゲームを選んでいます…'),
-        isHost
-          ? h('div.random-row', null,
-              h('button.btn.btn-primary.btn-random', { onclick: spin, disabled: spinning }, spinning ? '🎲 選んでいます…' : picked ? '🎲 もう一度ランダムで選ぶ' : '🎲 ランダムで選ぶ'),
-              picked && lit ? h('p.small.center', null, `「${GAMES.find((g) => g.id === lit)?.title}」に決まり！光っているカードを押して始めよう`) : null)
-          : null,
+        h('div.select-head', null,
+          h('h2.screen-title', null, 'ゲームを選ぶ'),
+          isHost
+            ? h('div.random-row', null,
+                h('button.btn.btn-light.btn-random', { onclick: spin, disabled: spinning }, spinning ? '🎲 選んでいます…' : picked ? '🎲 もう一度ランダム' : '🎲 ランダムで選ぶ'))
+            : null),
+        isHost ? null : h('p.sub', null, 'ホストがゲームを選んでいます。'),
+        isHost && picked && lit ? h('p.sub', { role: 'status' }, `「${GAMES.find((g) => g.id === lit)?.title}」に決まりました。光っている札を押すと始まります。`) : null,
         h(
           'div.game-grid',
           null,
@@ -59,18 +60,18 @@ export function mount(el, app) {
               {
                 onclick: isHost && !spinning ? () => room.chooseGame(g.id) : null,
                 disabled: !isHost,
+                style: { '--g': g.color || '#1d2747' },
                 'aria-label': `${g.title}を選ぶ`,
               },
-              h('div.game-card-art', null, h('span', null, g.emoji), h('span.paw', null, '🐾')),
+              h('div.game-card-art', { 'aria-hidden': 'true' }, h('span.emo', null, g.emoji)),
               h('div.game-card-body', null,
                 h('div.game-card-title', null, g.title),
                 h('div.game-card-tag', null, g.players),
                 h('p', null, g.tagline)),
-              isHost ? h('div.game-card-cta', null, 'これで遊ぶ！') : null,
             ),
           ),
         ),
-        isHost ? h('div.btn-row.center', null, room.solo ? h('button.btn.btn-ghost', { onclick: () => app.disband() }, '← タイトルへ') : h('button.btn.btn-ghost', { onclick: () => room.goHome() }, '← ホームへ')) : null,
+        isHost && !room.solo ? h('div.select-foot', null, h('button.btn.btn-ghost', { onclick: () => room.goHome() }, 'メンバーの画面に戻る')) : null,
       ),
     );
   }

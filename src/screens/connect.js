@@ -1,6 +1,6 @@
 // ① 接続画面: 部屋の作成・招待URLの表示・ゲストの参加
 import { h } from '../core/util.js';
-import { dogAvatar } from './common.js';
+import { dogAvatar, PLAYERS } from './common.js';
 
 export function mount(el, app) {
   function render() {
@@ -12,16 +12,16 @@ export function mount(el, app) {
     el.replaceChildren(h('div.screen.screen-connect', null, body));
   }
 
+  /** タイトル: 紺の看板のふちに、4 匹が並んで顔を出す */
   function hero() {
     return h(
       'div.hero',
       null,
-      h('div.hero-dogs', null,
-        h('div.hero-dog.bounce-a', { html: dogAvatar('shiba', 110) }),
-        h('div.hero-vs', null, 'VS'),
-        h('div.hero-dog.bounce-b', { html: dogAvatar('corgi', 110) })),
-      h('h1.logo', null, h('span.logo-sub', null, '2〜4人で遊ぶミニゲーム集'), 'わんわんパーティー'),
-      h('p.lead', null, '招待URLを送るだけで、友だちとオンライン対戦！'),
+      h('div.hero-board', null,
+        h('div.hero-dogs', { 'aria-hidden': 'true' }, PLAYERS.map((p, i) => h('div.hero-dog', { style: { '--i': i }, html: dogAvatar(p.kind, 120) }))),
+        h('h1.logo', null, h('span.logo-line', null, 'わんわん'), h('span.logo-line', null, 'パーティー')),
+        h('div.hero-tag', null, '1〜4人で遊ぶ、犬のミニゲーム集')),
+      h('p.lead', null, '招待URLを送れば、友だちとすぐ対戦できます。'),
       h('p.app-version', null, typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'),
     );
   }
@@ -32,25 +32,29 @@ export function mount(el, app) {
       'div.connect-wrap',
       null,
       hero(),
+      info.notice || info.error
+        ? h('div.start-msgs', null,
+            info.notice ? h('div.notice', null, info.notice) : null,
+            info.error ? h('div.error-box', { role: 'alert' }, info.error) : null)
+        : null,
       h(
-        'div.card.connect-card',
+        'div.start-choices',
         null,
-        info.notice ? h('div.notice', null, info.notice) : null,
-        info.error ? h('div.error-box', null, '⚠ ', info.error) : null,
-        modePicker(info.busy),
         h(
-          'button.btn.btn-primary.btn-xl',
-          { onclick: () => app.createRoom(), disabled: info.busy },
-          info.busy ? '部屋を作っています…' : '🏠 部屋を作る',
+          'section.card.choice',
+          null,
+          h('h2', null, '友だちと遊ぶ'),
+          h('p', null, '部屋を作ると、あなたが柴犬（ホスト）になります。表示される招待URLを、遊ぶ相手（3人まで）に送ってください。相手はURLを開くだけで参加できます。'),
+          modePicker(info.busy),
+          h('button.btn.btn-primary.btn-xl', { onclick: () => app.createRoom(), disabled: info.busy }, info.busy ? '部屋を作っています…' : '部屋を作る'),
         ),
-        h('p.small', null, '部屋を作るとあなたが「ホスト（柴犬）」になります。表示された招待URLを、遊ぶ相手（1〜2人）に送ってください。'),
-        h('p.small.muted', null, '招待された人は、URLを開くだけで参加できます（コード入力は不要）。'),
-      ),
-      h(
-        'div.card.connect-card.solo-card',
-        null,
-        h('button.btn.btn-secondary.btn-xl', { onclick: () => app.startSolo(), disabled: info.busy }, '🐶 ひとりで遊ぶ'),
-        h('p.small', null, '部屋を作らずに、すぐ 1 人で遊べます（通信なし）。記録に挑戦したり、練習したりしよう。'),
+        h(
+          'section.card.choice',
+          null,
+          h('h2', null, 'ひとりで遊ぶ'),
+          h('p', null, '部屋を作らずに、すぐ遊べます。CPU の犬と対戦したり、記録に挑戦したりできます。通信はしません。'),
+          h('button.btn.btn-secondary.btn-xl', { onclick: () => app.startSolo(), disabled: info.busy }, 'ひとりで遊ぶ'),
+        ),
       ),
     );
   }
@@ -65,13 +69,13 @@ export function mount(el, app) {
       h(
         'div.card.connect-card',
         null,
-        h('h2', null, '🎉 部屋ができました！'),
-        h('p.small.muted', null, room.net?.transport === 'relay' ? '通信モード: ☁ サーバー' : '通信モード: ⚡ P2P（直接）'),
-        h('p', null, 'この招待URLを相手に送ってください。最大4人（ホスト + ゲスト3人）で遊べます。'),
+        h('h2.screen-title', null, '部屋ができました'),
+        h('p', null, 'この招待URLを、遊ぶ相手に送ってください。ホストのほかに3人まで参加できます。'),
         h('div.invite-row', null,
           input,
-          h('button.btn.btn-secondary', { onclick: () => app.copyText(url) }, '📋 コピー')),
-        h('div.waiting', null, h('span.paw-spinner', null, '🐾'), 'ゲストの参加を待っています…（1人でもそろえば先へ進めます）'),
+          h('button.btn.btn-primary', { onclick: () => app.copyText(url) }, 'URLをコピー')),
+        h('p.small.muted', null, room.net?.transport === 'relay' ? '通信: サーバー経由' : '通信: P2P（直接）'),
+        h('div.waiting', null, h('span.paw-spinner', null, '🐾'), 'ゲストの参加を待っています。1人参加すれば先へ進めます。'),
         signalingNote(room),
         h('details.hint', null,
           h('summary', null, '1台のPCでテストするには？'),
@@ -91,10 +95,10 @@ export function mount(el, app) {
         h(
           'div.card.connect-card',
           null,
-          h('h2', null, '😢 接続できませんでした'),
+          h('h2.screen-title', null, '部屋に参加できませんでした'),
           h('div.error-box', null, f.text),
           h('div.btn-row', null,
-            f.kind !== 'rejected' ? h('button.btn.btn-primary', { onclick: () => room.retry() }, '🔁 もう一度試す') : null,
+            f.kind !== 'rejected' ? h('button.btn.btn-primary', { onclick: () => room.retry() }, 'もう一度参加する') : null,
             h('button.btn.btn-ghost', { onclick: () => app.goTop() }, '接続画面へ戻る')),
           troubleshooting(),
         ),
@@ -109,7 +113,7 @@ export function mount(el, app) {
         'div.card.connect-card',
         null,
         h('div.waiting.big', null, h('span.paw-spinner', null, '🐾'), label),
-        h('p.small.muted', null, 'あなたは「ゲスト」として参加します（1人目はコーギー、2人目はプードル）。'),
+        h('p.small.muted', null, 'あなたはゲストとして参加します。参加した順に、コーギー・プードル・パグになります。'),
         h('button.btn.btn-ghost', { onclick: () => app.goTop() }, 'やめて戻る'),
       ),
     );
@@ -119,12 +123,12 @@ export function mount(el, app) {
   function modePicker(busy) {
     const mode = app.roomMode;
     const choices = [
-      { value: 'server', label: '☁ サーバー', desc: 'Cloudflare のサーバーが計算します。どんな回線でもつながりやすく、全員が同じ条件で遊べます。' },
-      { value: 'p2p', label: '⚡ P2P（直接）', desc: 'ホストとゲストが直接つながり、ホストの端末が計算します。近くの人どうしなら遅れが少なくなります。回線によってはつながりません（そのときは「サーバー」で作り直してください）。' },
+      { value: 'server', label: 'サーバー経由', desc: 'どんな回線でもつながりやすく、全員が同じ条件で遊べます。迷ったらこちら。' },
+      { value: 'p2p', label: 'P2P（直接）', desc: 'ホストの端末と直接つなぎます。近くの人どうしなら遅れが少なくなりますが、回線によってはつながりません。' },
     ];
     const cur = choices.find((c) => c.value === mode);
     return h('div.mode-picker', null,
-      h('div.option-label', null, '通信モード'),
+      h('div.option-label', null, '通信のしかた'),
       h('div.chips', null,
         choices.map((c) =>
           h(`button.chip${c.value === mode ? '.on' : ''}`, {

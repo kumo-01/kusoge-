@@ -56,13 +56,13 @@ export function mount(el, app) {
     lastCd = null;
 
     const muteBtn = h('span.btn-pair', null,
-      h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
-      h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'));
+      h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMute(), title: '効果音のオン/オフ', 'aria-label': '効果音のオン/オフ' }, app.sound.muted ? '🔇' : '🔊'),
+      h('button.btn.btn-small.btn-light', { onclick: () => app.toggleMusic(), title: 'BGM のオン/オフ', 'aria-label': 'BGM のオン/オフ' }, app.music.muted ? '🎵✕' : '🎵'));
     const topButtons = isHost
       ? h('div.game-topbar', null,
           muteBtn,
-          h('button.btn.btn-small.btn-light', { onclick: () => room.pauseGame(), disabled: m?.status !== 'running', title: 'Esc' }, '⏸ 一時停止'),
-          h('button.btn.btn-small.btn-danger', { onclick: () => confirmAbort() }, '✖ ゲームを中止'))
+          h('button.btn.btn-small.btn-light', { onclick: () => room.pauseGame(), disabled: m?.status !== 'running', title: '一時停止（Esc）', 'aria-label': '一時停止' }, '⏸', h('span.btn-label', null, ' 一時停止')),
+          h('button.btn.btn-small.btn-danger', { onclick: () => confirmAbort(), title: 'ゲームを中止', 'aria-label': 'ゲームを中止' }, '✕', h('span.btn-label', null, ' 中止')))
       : h('div.game-topbar', null, muteBtn);
 
     let panel = null;
@@ -80,7 +80,7 @@ export function mount(el, app) {
         isHost ? hostPanelButtons(false) : null);
     } else if (m && m.status === 'paused') {
       panel = h('div.pause-panel.card', null,
-        h('h2', null, '⏸ 一時停止中'),
+        h('h2', null, '一時停止中'),
         h('p', null, REASON_TEXT[m.reason] || '一時停止中'),
         statusLine(room),
         isHost ? hostPanelButtons(true) : h('p.small.muted', null, 'ホストが再開するまでお待ちください。'));
@@ -112,7 +112,7 @@ export function mount(el, app) {
   function hostPanelButtons(withResume) {
     const room = app.room;
     return h('div.btn-col', null,
-      withResume ? h('button.btn.btn-primary.btn-xl', { onclick: () => room.resumeGame(), disabled: !room.canResume }, '▶ ゲーム再開') : null,
+      withResume ? h('button.btn.btn-primary.btn-xl', { onclick: () => room.resumeGame(), disabled: !room.canResume }, '再開する') : null,
       h('button.btn.btn-secondary', { onclick: () => confirmAbort() }, 'ゲームを中止してゲーム選択へ'),
       h('button.btn.btn-ghost', { onclick: () => app.disband() }, '部屋を解散'));
   }

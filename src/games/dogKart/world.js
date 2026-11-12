@@ -32,7 +32,7 @@ function canvasTexture(w, hgt, draw, { repeat = false } = {}) {
   return tex;
 }
 
-const FONT = '"M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", "Arial Rounded MT Bold", sans-serif';
+const FONT = '"Dela Gothic One", "Hiragino Sans", "Arial Black", sans-serif';
 
 // コースごとの見た目（track.theme）
 const THEMES = {
@@ -591,7 +591,7 @@ export class World {
           x.arc(i + 32, h - 12, 8, 0, Math.PI * 2);
           x.fill();
         }
-        x.font = `900 92px ${FONT}`;
+        x.font = `92px ${FONT}`;
         x.textAlign = 'center';
         x.textBaseline = 'middle';
         x.lineWidth = 14;
@@ -790,7 +790,7 @@ export class World {
           x.lineWidth = 16;
           x.strokeStyle = '#ff8a3d';
           x.strokeRect(8, 8, w - 16, h - 16);
-          x.font = `900 ${txt.length > 8 ? 52 : 70}px ${FONT}`;
+          x.font = `${txt.length > 8 ? 52 : 70}px ${FONT}`;
           x.textAlign = 'center';
           x.textBaseline = 'middle';
           x.fillStyle = '#5a3e2b';
@@ -1270,7 +1270,7 @@ export class World {
       this._track(new THREE.MeshToonMaterial({ map: this._track(canvasTexture(256, 72, (x, w, h) => {
         x.fillStyle = '#fff';
         x.fillRect(0, 0, w, h);
-        x.font = `900 48px ${FONT}`;
+        x.font = `48px ${FONT}`;
         x.textAlign = 'center';
         x.textBaseline = 'middle';
         x.fillStyle = '#c81d4e';
@@ -1353,7 +1353,7 @@ export class World {
         x.strokeStyle = '#fff';
         x.lineWidth = 10;
         x.strokeRect(5, 5, w - 10, h - 10);
-        x.font = `900 90px ${FONT}`;
+        x.font = `90px ${FONT}`;
         x.textAlign = 'center';
         x.textBaseline = 'middle';
         x.lineWidth = 8;

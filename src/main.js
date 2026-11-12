@@ -1,4 +1,5 @@
 // アプリの起動とトップレベルの状態（どの部屋にいるか）を管理する。
+import './styles/ui.css';
 import './styles/main.css';
 import { h } from './core/util.js';
 import { ScreenRouter } from './core/screen.js';

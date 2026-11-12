@@ -1173,7 +1173,7 @@ class DogKartGame {
         gi: mine.gi || 0,
         food: sk.fd || 0,
         karts,
-        netText: this.paused ? '⏸ 一時停止中' : `📶 ${this.serverSim ? 'サーバー' : this.isHost ? 'ゲスト' : 'ホスト'}と接続中 ${rtt}${diag}`,
+        netText: this.paused ? '⏸ 一時停止中' : !this.serverSim && this.ctx.players.length < 2 ? '' : `📶 ${this.serverSim ? 'サーバー' : this.isHost ? 'ゲスト' : 'ホスト'}と接続中 ${rtt}${diag}`, // ひとりのときは通信の表示を出さない
         netTone: this.paused ? 'warn' : info.rtt != null && info.rtt > 250 ? 'warn' : 'ok',
       },
       dt,

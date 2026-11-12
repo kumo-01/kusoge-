@@ -80,9 +80,9 @@ export function mount(el, app) {
           isHost
             ? [
                 next
-                  ? h('button.btn.btn-primary.btn-xl', { disabled: !canNext, onclick: () => { app.sound.play('ready'); room.nextRace(); } }, `▶ 次の${word}へ（第${se.round + 1}戦）`)
-                  : h('button.btn.btn-primary.btn-xl', { onclick: () => room.goSelect() }, '🎮 ゲーム選択へ戻る'),
-                next ? h('button.btn.btn-ghost', { onclick: () => room.goSelect() }, 'ここでやめてゲーム選択へ戻る') : null,
+                  ? h('button.btn.btn-primary.btn-xl', { disabled: !canNext, onclick: () => { app.sound.play('ready'); room.nextRace(); } }, `第${se.round + 1}戦を始める`)
+                  : h('button.btn.btn-primary.btn-xl', { onclick: () => room.goSelect() }, 'ほかのゲームを選ぶ'),
+                next ? h('button.btn.btn-ghost', { onclick: () => room.goSelect() }, 'ここでやめて、ゲームを選び直す') : null,
                 next && !canNext ? h('p.small.warn-text', null, '参加者の接続を待っています…') : null,
               ]
             : h('div.waiting', null, h('span.paw-spinner', null, '🐾'), next ? `ホストが次の${word}を始めるのを待っています…` : 'ホストの操作を待っています…'))),
