@@ -3,7 +3,7 @@ import { iconSvg, iconText } from '../../core/icons.js';
 import { h } from '../../core/util.js';
 import { ITEM_INFO, GUN, PLAYER, ROUND, WEAPON, WEAPONS, MODE, TEAMS, BOSS } from './constants.js';
 
-const AMMO_ICON = { [WEAPON.NORMAL]: 'ring', [WEAPON.SNIPER]: 'target', [WEAPON.BOMB]: 'bomb' };
+const AMMO_ICON = { [WEAPON.NORMAL]: 'ring', [WEAPON.SNIPER]: 'target', [WEAPON.RIFLE]: 'crosshair' };
 
 export class GomuHud {
   constructor(root, { touch, mode = MODE.FFA }) {
@@ -20,6 +20,11 @@ export class GomuHud {
     this.hpNum = h('b.gm-hp-num');
     this.hpFill = h('i');
     this.hearts = h('div.gm-hp', null, h('span.gm-hp-ic', { html: iconSvg('heart', 22) }), this.hpNum, h('div.gm-hp-bar', null, this.hpFill));
+    // 走るゲージ（減っているときだけ目立つ）
+    this.stamFill = h('i');
+    this.stam = h('div.gm-stam', { title: '走るゲージ' }, h('span.gm-stam-ic', { html: iconSvg('zap', 14) }), h('div.gm-stam-bar', null, this.stamFill));
+    // 残りの爆弾（1 ラウンドに 5 回）
+    this.bombs = h('div.gm-bombs');
     this.ammo = h('div.gm-ammo');
     this.reloadBar = h('div.gm-reload', null, h('i'));
     this.special = h('div.gm-special');
@@ -48,15 +53,21 @@ export class GomuHud {
         h('b', null, WEAPONS[w].name),
         h('small', null, WEAPONS[w].desc),
         h('kbd', null, String(w + 1)));
-    this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.BOMB, 'bomb')];
+    this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.RIFLE, 'crosshair')];
     this.pickInfo = h('p.gm-pick-info');
     this.pick = h('div.gm-pick', { hidden: true }, h('h2', null, '武器をえらぶ'), h('div.gm-pick-row', null, ...this.pickCards), this.pickInfo);
-    this.root.append(this.scope, this.smoke, this.vignette, this.hurtDirs, this.cross, this.dmg, h('div.gm-top', null, this.round, this.timer), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.status), h('div.gm-br', null, this.special, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
+    this.root.append(this.scope, this.smoke, this.vignette, this.hurtDirs, this.cross, this.dmg, h('div.gm-top', null, this.round, this.timer), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
     this.touch = touch ? new GomuTouch(this.root) : null;
     this.root.classList.add(`mode-${mode}`);
     this.root.classList.toggle('is-touch', !!touch);
     this._feedItems = [];
     this._key = {};
+  }
+
+  /** 点数表を次の表示で作り直す（チームの色が変わったとき） */
+  resetBoard() {
+    this._key.board = null;
+    this._key.table = null;
   }
 
   /** 中身を HTML で（key が変わったときだけ作り直す） */
@@ -95,7 +106,9 @@ export class GomuHud {
     }
     this.scope.hidden = !v.zoom;
     if (this.touch) {
-      this.touch.zoomBtn.hidden = v.me.weapon !== WEAPON.SNIPER;
+      this.touch.zoomBtn.hidden = WEAPONS[v.me.weapon]?.zoomFov == null;
+      this.touch.runBtn.classList.toggle('on', !!this.touch.run);
+      this.touch.bombBtn.classList.toggle('empty', !(v.me.bombs > 0));
       this.touch.zoomBtn.classList.toggle('on', !!v.zoom);
     }
     this._set(this.timer, 'timer', v.phase === 'play' ? `${left}` : '');
@@ -108,6 +121,19 @@ export class GomuHud {
       this.hpFill.style.transform = `scaleX(${hpN / PLAYER.HP})`;
       this.hearts.classList.toggle('is-low', hpN <= 30);
     }
+    // 走るゲージ
+    const stm = Math.round(Math.max(0, Math.min(PLAYER.STAMINA, v.me.stam ?? PLAYER.STAMINA)));
+    if (this._key.stam !== stm) {
+      this._key.stam = stm;
+      this.stamFill.style.transform = `scaleX(${stm / PLAYER.STAMINA})`;
+      this.stam.classList.toggle('is-full', stm >= PLAYER.STAMINA);
+      this.stam.classList.toggle('is-low', stm < PLAYER.STAMINA_MIN);
+    }
+    // 残りの爆弾
+    const bn = Math.max(0, v.me.bombs | 0);
+    this._setHtml(this.bombs, 'bombs', `${bn}:${v.me.bombAim ? 1 : 0}`, () => `${iconSvg('bomb', 20)}<b>×${bn}</b>${this.touch ? '' : '<kbd>G</kbd>'}`);
+    this.bombs.classList.toggle('is-aim', !!v.me.bombAim);
+    this.bombs.classList.toggle('is-empty', bn <= 0);
     // 輪ゴム
     const ammoN = v.me.reload > 0 ? -1 : Math.max(0, v.me.ammo);
     this._setHtml(this.ammo, 'ammo', `${ammoN}:${v.me.weapon}`, () => (ammoN < 0 ? '' : Array.from({ length: v.me.maxAmmo || GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg(AMMO_ICON[v.me.weapon] || 'ring', (v.me.maxAmmo || GUN.AMMO) > 5 ? 18 : 24)}</span>`).join('')));
@@ -266,18 +292,23 @@ export class GomuTouch {
     const btn = (cls, text) => h(`div.gt-btn.${cls}`, { 'data-ctl': '' }, text);
     this.fireBtn = btn('gt-fire', '発射');
     this.jumpBtn = btn('gt-jump', 'ジャンプ');
-    this.dashBtn = btn('gt-dash', 'ダッシュ');
+    this.dashBtn = btn('gt-dash', '走る');
+    this.runBtn = this.dashBtn;
+    this.run = false; // 走る（押すたびに切り替え。ゲージが空になると止まる）
+    this.bomb = false; // 爆弾ボタンを押している間（離すと投げる）
+    this.bombBtn = btn('gt-bomb', '爆弾');
     this.crouchBtn = btn('gt-crouch', '伏せ');
     this.zoomBtn = btn('gt-zoom', 'のぞく');
     this.onZoom = null;
-    this.el = h('div.gomu-touch', null, this.look, this.zone, this.fireBtn, this.jumpBtn, this.dashBtn, this.crouchBtn, this.zoomBtn);
+    this.el = h('div.gomu-touch', null, this.look, this.zone, this.fireBtn, this.jumpBtn, this.dashBtn, this.bombBtn, this.crouchBtn, this.zoomBtn);
     root.append(this.el);
     this._bindStick();
     this._bindLook(this.look);
     // 発射ボタンは押している間ずっと撃つ。押したまま指を動かすと視点も動く
     this._hold(this.fireBtn, (on) => (this.fire = on), true);
     this._press(this.jumpBtn, () => (this.jump = true));
-    this._press(this.dashBtn, () => (this.dash = true));
+    this._press(this.dashBtn, () => this.setRun(!this.run));
+    this._hold(this.bombBtn, (on) => (this.bomb = on), true);
     this._press(this.zoomBtn, () => this.onZoom?.());
     this._press(this.crouchBtn, () => {
       this.crouch = !this.crouch;
@@ -401,6 +432,12 @@ export class GomuTouch {
   }
 
   /** 押した瞬間のもの（ジャンプ・ダッシュ・アイテム）を 1 回だけ取り出す */
+  /** 走る（タッチ）の切り替え */
+  setRun(on) {
+    this.run = !!on;
+    this.runBtn.classList.toggle('on', this.run);
+  }
+
   take() {
     const r = { jump: this.jump, dash: this.dash, item: this.item };
     this.jump = this.dash = this.item = false;

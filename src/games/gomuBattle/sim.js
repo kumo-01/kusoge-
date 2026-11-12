@@ -2,7 +2,7 @@
 // 人の犬の位置は、その人の端末が計算して送ってくる（setPilot）。CPU の犬はここで動かす。
 // 起きたこと（撃った・当たった・倒れた・拾った…）は events に積み、ゲストへ配る。
 
-import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOT, WEAPON, WEAPONS, MODE, BOSS, HAIRBALL } from './constants.js';
+import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL } from './constants.js';
 import { ARENAS, segmentHit, ROOM } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage } from './physics.js';
 import { botThink } from './bot.js';
@@ -39,6 +39,7 @@ export class GomuSim {
       rng: Number.isInteger(o.seed) ? o.seed >>> 0 : (Math.random() * 4294967296) >>> 0,
       nextId: 1,
       players: Array.from({ length: this.humans + this.bots }, (_, i) => this._newPlayer(i)),
+      teams: this.teams, // チーム（配信に載せる。ゲストはこれに合わせる）
       bands: [],
       boxes: [],
       gums: [],
@@ -73,6 +74,8 @@ export class GomuSim {
       bot: i >= this.humans,
       weapon: WEAPON.NORMAL, // 武器（ラウンドの前に選ぶ）
       picked: false,
+      bombs: BOMB_COUNT, // 残りの爆弾（ラウンドごとに BOMB_COUNT）
+      bombCd: 0, // 次の爆弾を投げられるまで
       ...createBody(),
       hp: PLAYER.HP,
       dead: 0, // 倒れてから復活までの残り時間
@@ -120,13 +123,13 @@ export class GomuSim {
       [spots[k], spots[j]] = [spots[j], spots[k]];
     }
     s.players.forEach((p, k) => {
-      // CPU はすぐ武器を選ぶ（3 匹に 1 匹くらいスナイパー）
+      // CPU はすぐ武器を選ぶ（ふつう 55%・スナイパー 30%・ライフル 15%）
       if (p.bot) {
-        const r = nextRandom(s); // CPU: ふつう 50%・スナイパー 25%・爆弾 25%
-        p.weapon = r < 0.5 ? WEAPON.NORMAL : r < 0.75 ? WEAPON.SNIPER : WEAPON.BOMB;
+        const r = nextRandom(s);
+        p.weapon = r < 0.55 ? WEAPON.NORMAL : r < 0.85 ? WEAPON.SNIPER : WEAPON.RIFLE;
       }
       p.picked = p.bot || !this.usePick;
-      Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, star: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bot2: null });
+      Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, star: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bombs: BOMB_COUNT, bombCd: 0, stam: PLAYER.STAMINA, sprint: false, bot2: null });
       this._place(p, this.arena.spawns[spots[k % spots.length]]);
     });
     s.boss = this.mode === MODE.BOSS ? this._newBoss(r) : null;
@@ -156,7 +159,7 @@ export class GomuSim {
   /** 武器を選ぶ（ラウンドの前の選択画面で）。選び直しもできる */
   pickWeapon(i, w) {
     const p = this.s.players[i];
-    if (!p || !(w in WEAPONS) || this.s.phase !== 'pick') return false;
+    if (!p || !WEAPON_LIST.includes(w) || this.s.phase !== 'pick') return false;
     p.weapon = w;
     p.picked = true;
     p.ammo = WEAPONS[w].ammo;
@@ -215,7 +218,7 @@ export class GomuSim {
   }
 
   _stepPlayer(p, dt) {
-    for (const f of ['inv', 'star', 'stun', 'stuck', 'shake', 'noAmmo', 'fireCd']) p[f] = Math.max(0, p[f] - dt);
+    for (const f of ['inv', 'star', 'stun', 'stuck', 'shake', 'noAmmo', 'fireCd', 'bombCd']) p[f] = Math.max(0, (p[f] || 0) - dt);
     if (p.dead > 0) {
       p.dead = Math.max(0, p.dead - dt);
       if (p.dead === 0) this._respawn(p);
@@ -259,6 +262,28 @@ export class GomuSim {
   }
 
   /**
+   * 爆弾を投げる（全員、1 ラウンドに BOMB_COUNT 回まで）。o: 目の位置、d: 投げる向き、cid: 投げた人の端末での番号。
+   * 当たりはいつもホストが決める（爆発させる）
+   */
+  throwBomb(i, o, d, cid = 0) {
+    const s = this.s;
+    const p = s.players[i];
+    if (!p || s.phase !== 'play' || p.dead > 0 || !(p.bombs > 0) || p.bombCd > 0) return false;
+    if (!Array.isArray(o) || !Array.isArray(d) || ![...o, ...d].every(Number.isFinite)) return false;
+    const dl = Math.hypot(d[0], d[1], d[2]);
+    if (dl < 0.5) return false;
+    if (Math.hypot(o[0] - p.x, o[2] - p.z) > 2.5 || Math.abs(o[1] - p.y) > 2.5) return false;
+    const spec = bandSpec(0, WEAPON.BOMB);
+    const v = [d[0] / dl, d[1] / dl, d[2] / dl];
+    p.bombs--;
+    p.bombCd = WEAPONS[WEAPON.BOMB].gap;
+    const b = { id: s.nextId++, o: i, cid: cid ? cid * 4 : 0, cj: false, kind: 0, x: o[0] + v[0] * GUN.MUZZLE, y: o[1] + v[1] * GUN.MUZZLE - 0.08, z: o[2] + v[2] * GUN.MUZZLE, vx: v[0] * spec.speed, vy: v[1] * spec.speed, vz: v[2] * spec.speed, r: spec.r, w: spec.w, mul: 1, ox: o[0], oy: o[1], oz: o[2], bounce: 0, life: spec.life, g: spec.g, age: 0 };
+    s.bands.push(b);
+    this.events.push({ t: 'shot', id: b.id, o: i, cid: b.cid, k: 0, w: WEAPON.BOMB, x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz });
+    return true;
+  }
+
+  /**
    * 撃つ。o: 目の位置、d: 向き（長さ 1）、kind: 撃つゴムの種類（ゴムが変わるアイテムを持っているときだけ有効）、cid: 撃った人の端末での番号。
    * 人の弾数は本人の端末が数える（ホストは、倒れている・ゴム切れ・ラウンド外だけを断る）
    */
@@ -282,7 +307,7 @@ export class GomuSim {
     const pitch = Math.asin(Math.max(-1, Math.min(1, d[1] / dl)));
     const spec = bandSpec(k, p.weapon);
     // 撃った人の端末で当たりを決める輪ゴムか（遅れをなくすため。人がゲストのとき）
-    const cj = !!this.clientJudge?.(i) && p.weapon !== WEAPON.BOMB; // 爆弾はホストが爆発させる
+    const cj = !!this.clientJudge?.(i);
     p.shots++;
     dirs.forEach((off, idx) => {
       const v = aimDir(yaw + off, pitch);
@@ -450,7 +475,7 @@ export class GomuSim {
       const d = Math.max(0, Math.hypot(q.x - x, cy - y, q.z - z) - PLAYER.RADIUS);
       if (d > R || segmentHit(this.cw, x, y + 0.05, z, q.x, cy, q.z) < 0.999) continue;
       const hl = Math.hypot(q.x - x, q.z - z) || 1;
-      this._hit(q, { o: b.o, dmg: weaponDamage(WEAPON.BOMB, (d * W.blast) / R, b.mul), vx: (q.x - x) / hl, vz: (q.z - z) / hl });
+      this._hit(q, { o: b.o, dmg: weaponDamage(WEAPON.BOMB, (d * W.blast) / R, b.mul), vx: (q.x - x) / hl, vz: (q.z - z) / hl, bomb: true });
     }
     const boss = s.boss;
     if (boss && boss.hp > 0 && b.o >= 0) {
@@ -492,7 +517,7 @@ export class GomuSim {
       by.landed++;
       this._dealt(by, dmg);
     }
-    this.events.push({ t: 'hit', v: q.i, by: b.o, d: dmg, hp: q.hp, kx, kz });
+    this.events.push({ t: 'hit', v: q.i, by: b.o, d: dmg, hp: q.hp, kx, kz, ...(b.bomb ? { bm: 1 } : {}) });
     if (q.hp <= 0) {
       q.dead = PLAYER.RESPAWN;
       q.deaths++;

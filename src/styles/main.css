@@ -2027,7 +2027,7 @@ body[data-screen='game'] {
   position: absolute;
   z-index: 3; /* タッチの視点の領域より上（タップが届くように） */
   right: 14px;
-  bottom: 96px;
+  bottom: 134px; /* 下の爆弾・輪ゴムの表示と重ならないように */
   width: 92px;
   padding: 6px 4px;
   border-radius: 14px;
@@ -2715,4 +2715,85 @@ body[data-screen='game'] {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+/* 走るゲージ（体力の下。満タンの間はうすく） */
+.gm-stam {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 8px;
+  background: oklch(25% 0.03 280 / 0.4);
+  color: oklch(88% 0.15 95);
+  transition: opacity 0.3s;
+}
+.gm-stam.is-full {
+  opacity: 0.45;
+}
+.gm-stam-ic {
+  display: flex;
+}
+.gm-stam-ic svg {
+  fill: currentColor;
+}
+.gm-stam-bar {
+  width: min(160px, 28vw);
+  height: 7px;
+  border-radius: 4px;
+  background: oklch(20% 0.02 280 / 0.55);
+  overflow: hidden;
+}
+.gm-stam-bar i {
+  display: block;
+  height: 100%;
+  background: oklch(85% 0.16 95);
+  transform-origin: left center;
+}
+.gm-stam.is-low .gm-stam-bar i {
+  background: var(--orange);
+}
+.gomu-hud.is-touch .gm-stam {
+  margin-top: 4px;
+}
+.gomu-hud.is-touch .gm-stam-bar {
+  width: min(100px, 20vw);
+}
+/* 残りの爆弾（右下。G で投げる） */
+.gm-bombs {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: oklch(25% 0.03 280 / 0.45);
+  color: var(--paper);
+  font-weight: 900;
+}
+.gm-bombs svg {
+  display: block;
+}
+.gm-bombs kbd {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--paper);
+  color: oklch(25% 0.03 280);
+}
+.gm-bombs.is-aim {
+  background: var(--orange);
+}
+.gm-bombs.is-empty {
+  opacity: 0.45;
+}
+.gt-bomb {
+  right: calc(max(24px, env(safe-area-inset-right)) + 182px);
+  bottom: 28px;
+  width: 58px;
+  height: 58px;
+}
+.gt-bomb.empty {
+  opacity: 0.4;
 }

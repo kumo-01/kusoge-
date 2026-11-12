@@ -74,17 +74,29 @@ test('動き: 歩く・ベンチの座面にぶつかって止まる・ジャン
   assert.equal(heightOf(t), PLAYER.CROUCH_HEIGHT);
 });
 
-test('動き: ダッシュは速く、使ったあとは待ち時間。壁は抜けない', () => {
-  const a = ARENAS[2];
-  const m = createBody(-6, 1, 0);
-  m.yaw = Math.PI / 2;
+test('動き: 走るのはゲージ式（押している間、ゲージが尽きるまで速く走れる。離すと回復）。壁は抜けない', () => {
+  const a = { boxes: [] }; // 広い所で
+  const m = createBody(-25, 0, Math.PI / 2);
+  const r0 = stepMove(m, { fz: 1, dash: true }, DT, a);
+  assert.equal(r0.dashed, true, '走り始め');
+  for (let i = 0; i < 30; i++) stepMove(m, { fz: 1, dash: true }, DT, a);
+  assert.ok(Math.abs(Math.hypot(m.vx, m.vz) - PLAYER.SPRINT_SPEED) < 1e-6, '走る速さ');
+  assert.ok(m.stam < PLAYER.STAMINA);
+  // 押し続けると、ゲージが尽きたら歩く速さに戻る
+  let k = 0;
+  while (m.stam > 0 && k++ < 60 * 4) stepMove(m, { fz: 1, dash: true }, DT, a);
+  const ran = (k + 31) / 60; // 最初の 31 tick も走っていた
+  assert.ok(ran > 3 && ran < 3.6, `約 3.3 秒走れる (${ran.toFixed(2)})`);
+  for (let i = 0; i < 20; i++) stepMove(m, { fz: 1, dash: true }, DT, a);
+  assert.equal(m.sprint, false);
+  assert.ok(Math.abs(Math.hypot(m.vx, m.vz) - PLAYER.SPEED) < 1e-6, '尽きたら歩く速さ');
+  // 少し待ってから回復。少したまるまでは走り出せない
+  for (let i = 0; i < 50; i++) stepMove(m, { fz: 1 }, DT, a);
+  assert.ok(m.stam > 0 && m.stam < PLAYER.STAMINA_MIN);
   stepMove(m, { fz: 1, dash: true }, DT, a);
-  assert.ok(Math.hypot(m.vx, m.vz) > PLAYER.SPEED * 1.8);
-  assert.ok(m.dashCd > 0);
-  const x0 = m.x;
-  const r = stepMove(m, { fz: 1, dash: true }, DT, a);
-  assert.equal(r.dashed, false, 'すぐにはもう一度ダッシュできない');
-  assert.ok(m.x > x0);
+  assert.equal(m.sprint, false, 'ゲージが少なすぎると走り出せない');
+  for (let i = 0; i < 60 * 6; i++) stepMove(m, {}, DT, a);
+  assert.equal(m.stam, PLAYER.STAMINA, '満タンまで回復');
   const w = createBody(20, 12, Math.PI / 2);
   for (let i = 0; i < 300; i++) stepMove(w, { fz: 1 }, DT, a);
   assert.ok(w.x <= ROOM.W / 2 - PLAYER.RADIUS + 1e-6 && w.x > 25, `壁を抜けない (${w.x})`);
@@ -600,15 +612,14 @@ test('体力: 生きている間は 1 秒に 1 ずつ回復する（100 まで�
   }
 });
 
-test('爆弾: 山なりに投げて、当たると爆発。まわりの相手にまとめて、中心に近いほど大きなダメージ。ホストが爆発させる', async () => {
+test('爆弾: 全員が 1 ラウンドに 5 回まで投げられる。山なりに投げて、当たると爆発。まわりの相手にまとめて、中心に近いほど大きなダメージ。ホストが爆発させる', async () => {
   const { lobPitch } = await import('../src/games/gomuBattle/bot.js');
   const sim = new GomuSim({ humans: 3, bots: 0, seed: 11 });
   run(sim, ROUND.INTRO + 0.1);
   sim.clientJudge = () => true; // ゲストの爆弾でもホストが当たりを決める
   const [a, b, c] = sim.s.players;
-  a.weapon = WEAPON.BOMB;
-  a.ammo = WEAPONS[WEAPON.BOMB].ammo;
-  assert.equal(a.ammo, 4);
+  assert.equal(a.bombs, 5);
+  assert.equal(a.weapon, WEAPON.NORMAL, '武器はそのまま（爆弾は別に持っている）');
   Object.assign(a, { x: -8, z: 2, y: 0 });
   Object.assign(b, { x: 2, z: 2, y: 0 });
   Object.assign(c, { x: 2, z: 4.2, y: 0 }); // b の近く（巻きこまれる）
@@ -617,9 +628,10 @@ test('爆弾: 山なりに投げて、当たると爆発。まわりの相手に
   const e = eye(a);
   const pitch = lobPitch(W.speed, W.gravity, b.x - a.x, 0.3 - e[1]);
   assert.ok(pitch != null && pitch > 0.05, '山なり');
-  assert.ok(sim.tryFire(a, e, aimDir(Math.PI / 2, pitch)));
-  assert.equal(sim.s.bands[0].cj, false, '爆弾は撃った人の端末では当てない');
-  assert.equal(sim.tryFire(a, e, [1, 0, 0]), false, '続けては投げられない');
+  assert.ok(sim.throwBomb(0, e, aimDir(Math.PI / 2, pitch), 3));
+  assert.equal(sim.s.bands[0].cj, false, '爆弾は投げた人の端末では当てない');
+  assert.equal(sim.s.bands[0].cid, 12, '投げた人の端末の番号（自分の画面の爆弾と結びつける）');
+  assert.equal(sim.throwBomb(0, e, [1, 0, 0]), false, '続けては投げられない');
   run(sim, 1.5);
   const ev = sim.drainEvents();
   const boom = ev.find((x) => x.t === 'boom');
@@ -627,11 +639,18 @@ test('爆弾: 山なりに投げて、当たると爆発。まわりの相手に
   assert.ok(b.hp < PLAYER.HP && c.hp < PLAYER.HP, '2 匹とも巻きこまれる');
   assert.ok(PLAYER.HP - b.hp > PLAYER.HP - c.hp, '中心に近い方が痛い');
   assert.equal(a.hp, PLAYER.HP, '自分は巻きこまれない');
-  for (let k = 1; k < 4; k++) {
-    assert.ok(sim.tryFire(a, e, [0, 0.6, 0.8]));
+  assert.ok(ev.some((x) => x.t === 'hit' && x.by === 0 && x.bm === 1), '爆弾の当たりの印（ゲストの画面で当たりを出すため）');
+  for (let k = 1; k < 5; k++) {
+    assert.ok(sim.throwBomb(0, e, [0, 0.6, 0.8]));
     run(sim, W.gap + 0.05);
   }
-  assert.ok(a.reload > 0, '4 発で補充');
+  assert.equal(a.bombs, 0);
+  assert.equal(sim.throwBomb(0, e, [0, 0.6, 0.8]), false, '5 回で終わり');
+  // 倒れて復活しても増えない。次のラウンドで 5 に戻る
+  sim.s.t = ROUND.TIME;
+  run(sim, ROUND.END + ROUND.INTRO + 0.2);
+  assert.equal(sim.s.round, 1);
+  assert.equal(a.bombs, 5);
 });
 
 test('チーム分け: 準備画面で組んだとおりに分かれる（人は席、CPU は番号）。片方が空なら交互', async () => {
@@ -680,4 +699,36 @@ test('当たり判定は見た目に合わせる: テントの三角の外・車
   // 見た目の箱は元のまま（テント・車は 1 つずつ）
   assert.equal(camp.draw.filter((b) => b.k === 'tent').length, 3);
   assert.ok(camp.boxes.filter((b) => b.k === 'tent').length >= 15, '当たり判定は細かい箱の組');
+});
+
+test('ライフル: 1 発だけ。どんな距離でも当たれば一撃で倒す。補充はスナイパーより長い。武器の選択は 3 つ（爆弾は選べない）', () => {
+  const sim = ready();
+  const [a, b] = sim.s.players;
+  assert.ok(WEAPONS[WEAPON.RIFLE].reload > WEAPONS[WEAPON.SNIPER].reload);
+  assert.equal(WEAPONS[WEAPON.RIFLE].ammo, 1);
+  a.weapon = WEAPON.RIFLE;
+  a.ammo = 1;
+  Object.assign(a, { x: -28, z: 1, y: 0 }); // 公園の z = 1 の通りは端から端まで何もない
+  Object.assign(b, { x: 28, z: 1, y: 0 });
+  assert.ok(sim.tryFire(a, eye(a), [1, 0, 0]));
+  assert.ok(a.reload > 0, '1 発で補充');
+  assert.equal(sim.tryFire(a, eye(a), [1, 0, 0]), false);
+  run(sim, 1);
+  assert.ok(b.dead > 0, `56 離れていても一撃 (${b.hp})`);
+  run(sim, WEAPONS[WEAPON.RIFLE].reload);
+  assert.equal(a.ammo, 1, '補充は 1 発だけ');
+  // 選べる武器
+  const s2 = new GomuSim({ humans: 1, bots: 0, seed: 2, pick: true });
+  assert.equal(s2.pickWeapon(0, WEAPON.BOMB), false, '爆弾は武器として選べない');
+  assert.equal(s2.pickWeapon(0, WEAPON.RIFLE), true);
+});
+
+test('配信: ホストのチームと残りの爆弾が載る（ゲストはホストのチームに合わせる）', () => {
+  const sim = new GomuSim({ humans: 2, bots: 3, seed: 4, mode: MODE.TEAM, teams: [1, 1, 0, 0, 1] });
+  run(sim, ROUND.INTRO + 0.1);
+  sim.s.players[2].bombs = 3;
+  const d = unpackBin(packBin(sim.s), 5);
+  assert.deepEqual(d.st.players.map((p) => p.team), [1, 1, 0, 0, 1]);
+  assert.equal(d.st.players[2].bombs, 3);
+  assert.equal(d.st.players[0].bombs, 5);
 });

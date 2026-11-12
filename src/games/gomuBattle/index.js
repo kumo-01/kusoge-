@@ -12,7 +12,7 @@ import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, mova
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
-import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS } from './constants.js';
+import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT } from './constants.js';
 import { canSee } from './arena.js';
 
 const SLOT_CSS = ['#ff4d5e', '#3d8bff', '#ff5fb0', '#22b573'];
@@ -191,6 +191,8 @@ class GomuGame {
     this.bands = [];
     this.buffer = [];
     this._starT = [];
+    this._bombLocal = BOMB_COUNT; // ゲスト: 自分の残りの爆弾（投げた瞬間に減らす。ホストの数とずれたら合わせる）
+    this._bombAim = false;
     this.mov = (this.arena.movables || []).map(movableBox);
     this._gcw = null;
     this.world?.setArena(ARENAS[r % ARENAS.length]);
@@ -238,10 +240,10 @@ class GomuGame {
     if (phase === 'pick') {
       if (i.consume('Digit1', 'Numpad1')) this._pickWeapon(WEAPON.NORMAL);
       if (i.consume('Digit2', 'Numpad2')) this._pickWeapon(WEAPON.SNIPER);
-      if (i.consume('Digit3', 'Numpad3')) this._pickWeapon(WEAPON.BOMB);
+      if (i.consume('Digit3', 'Numpad3')) this._pickWeapon(WEAPON.RIFLE);
     }
-    // のぞく（スナイパー）: 右クリックか Z を押している間、タッチはボタンで切り替え
-    const canZoom = p.weapon === WEAPON.SNIPER && act;
+    // のぞく（スナイパー・ライフル）: 右クリックか Z を押している間、タッチはボタンで切り替え
+    const canZoom = WEAPONS[p.weapon].zoomFov != null && act;
     const zoomKey = this._rightZoom || i.isDown('KeyZ');
     this.zoom = canZoom && (zoomKey || (!!t && this.zoom));
     // 移動
@@ -257,7 +259,8 @@ class GomuGame {
       if (kx || ky) this._turn(kx * (KEY_TURN_MIN + (KEY_TURN_MAX - KEY_TURN_MIN) * ramp) * dt * zk, ky * (KEY_PITCH_MIN + (KEY_PITCH_MAX - KEY_PITCH_MIN) * ramp) * dt * zk);
     }
     const jump = i.consume('Space') || tk.jump;
-    const dash = i.consume('ShiftLeft', 'ShiftRight', 'KeyQ') || tk.dash;
+    // 走る: Shift（または Q）を押している間（ゲージがあるだけ）。タッチは「走る」ボタンで切り替え
+    const dash = i.isDown('ShiftLeft') || i.isDown('ShiftRight') || i.isDown('KeyQ') || !!t?.run;
     const crouch = i.isDown('KeyC') || !!t?.crouch;
     const wantItem = i.consume('KeyE') || tk.item || this._wantItem;
     this._wantItem = false;
@@ -265,6 +268,12 @@ class GomuGame {
     this.prevPos = { x: p.x, y: p.y, z: p.z, crouch: p.crouch };
     const mv = stepMove(p, act ? { fx, fz, jump, dash, crouch } : { crouch: false }, dt, this.cw, slow);
     if (mv.dashed) this.ctx.sound.play('boost');
+    if (t?.run && p.stam <= 0) t.setRun(false); // ゲージが空になったら走るのをやめる
+    // 爆弾: G（タッチは爆弾ボタン）を押している間は飛ぶ道を見せ、離したら投げる
+    p.bombCd = Math.max(0, (p.bombCd || 0) - dt);
+    const bombHeld = i.isDown('KeyG') || !!t?.bomb;
+    if (this._bombAim && !bombHeld && act && p.bombCd <= 0) this._throwBomb();
+    this._bombAim = bombHeld && act && this._bombsLeft(rec) > 0;
     p.moving = Math.hypot(p.vx, p.vz) > 0.6;
     // 輪ゴム（弾数は自分の端末で数える）
     p.fireCd = Math.max(0, p.fireCd - dt);
@@ -344,6 +353,38 @@ class GomuGame {
       const v = aimDir(yaw + off, pitch);
       this.bands.push({ id: 0, cid: cid * 4 + idx, o: this.me, kind, w: spec.w, mul: spec.mul, ox: o[0], oy: o[1], oz: o[2], g: spec.g, x: o[0] + v[0] * GUN.MUZZLE, y: o[1] + v[1] * GUN.MUZZLE - 0.08, z: o[2] + v[2] * GUN.MUZZLE, vx: v[0] * spec.speed, vy: v[1] * spec.speed, vz: v[2] * spec.speed, r: spec.r, bounce: spec.bounce, life: spec.life, age: 0, mine: performance.now() });
     });
+  }
+
+  /** 自分の残りの爆弾（ホストは計算の数。ゲストは投げた瞬間に減らした数と、ホストの数の少ない方） */
+  _bombsLeft(rec) {
+    const host = rec?.bombs ?? BOMB_COUNT;
+    if (this.isHost) return host;
+    // ホストが断った（数が戻った）ときは、しばらくしてホストの数に合わせる
+    if (host > this._bombLocal) {
+      this._bombFix = (this._bombFix || 0) + 1;
+      if (this._bombFix > 90) this._bombLocal = host;
+    } else this._bombFix = 0;
+    this._bombLocal = Math.min(this._bombLocal ?? BOMB_COUNT, host);
+    return this._bombLocal;
+  }
+
+  /** 爆弾を投げる（全員、1 ラウンドに 5 回まで） */
+  _throwBomb() {
+    const p = this.pilot;
+    const { o, d } = this._aim();
+    p.bombCd = WEAPONS[WEAPON.BOMB].gap;
+    this._fired = true;
+    this.ctx.sound.play('throw');
+    if (this.isHost) {
+      this.sim.throwBomb(this.me, o, d);
+      return;
+    }
+    const cid = ++this.cid;
+    this._bombLocal = Math.max(0, (this._bombLocal ?? BOMB_COUNT) - 1);
+    this.ctx.sendGameMessage({ t: 'g', o: o.map((v) => Math.round(v * 1000) / 1000), d: d.map((v) => Math.round(v * 10000) / 10000), c: cid });
+    // 自分の画面ではすぐに飛ばす（爆発はホストの知らせで）
+    const spec = bandSpec(0, WEAPON.BOMB);
+    this.bands.push({ id: 0, cid: cid * 4, o: this.me, kind: 0, w: spec.w, mul: 1, ox: o[0], oy: o[1], oz: o[2], g: spec.g, x: o[0] + d[0] * GUN.MUZZLE, y: o[1] + d[1] * GUN.MUZZLE - 0.08, z: o[2] + d[2] * GUN.MUZZLE, vx: d[0] * spec.speed, vy: d[1] * spec.speed, vz: d[2] * spec.speed, r: spec.r, bounce: 0, life: spec.life, age: 0, mine: performance.now() });
   }
 
   _useItem() {
@@ -472,7 +513,7 @@ class GomuGame {
             this.pilot.vz += e.kz;
           }
           // 自分が当てた（ゲストの輪ゴムは自分の画面で当たりを出しているので、ホストが決める爆弾だけ）
-          if (e.by === this.me && (this.isHost || this.pilot.weapon === WEAPON.BOMB)) {
+          if (e.by === this.me && (this.isHost || e.bm)) {
             this.hud.hitMarker(false);
             this.hud.dmgPop(e.d);
             this.ctx.sound.play('pickup');
@@ -587,6 +628,24 @@ class GomuGame {
     }
   }
 
+  /**
+   * ゲスト: チームはホストが決めたものに合わせる（自分の端末で計算したものと食い違っても、ホストが正しい）。
+   * 変わったら足もとの輪・旗の色も塗り直す
+   */
+  _syncTeams(st) {
+    if (this.mode !== MODE.TEAM) return;
+    let changed = false;
+    st.players.forEach((q, i) => {
+      if ((q.team === 0 || q.team === 1) && this.teams[i] !== q.team) {
+        this.teams[i] = q.team;
+        changed = true;
+      }
+    });
+    if (!changed) return;
+    this.teams.forEach((t, i) => this.world?.setDogColor(i, TEAMS[t]?.hex ?? 0xffffff));
+    this.hud?.resetBoard?.();
+  }
+
   /** 番号 i のチーム（0 = あか、1 = あお。チーム戦でなければ -1） */
   _team(i) {
     return this.teams[i] ?? -1;
@@ -643,6 +702,7 @@ class GomuGame {
     else if (d.t === 'h') this.sim.remoteHit(msg.player, d.c | 0, d.v | 0, d.p); // 撃った人の画面で当たった
     else if (d.t === 'u') this.sim.useItem(msg.player, d.o, d.d);
     else if (d.t === 'w') this.sim.pickWeapon(msg.player, d.w | 0);
+    else if (d.t === 'g') this.sim.throwBomb(msg.player, d.o, d.d, d.c | 0); // 爆弾
     this._hostEvents(this.sim.drainEvents());
   }
 
@@ -710,6 +770,7 @@ class GomuGame {
     }
     this.last = st;
     this._lastAt = now;
+    this._syncTeams(st);
     this.buffer.push({ t: st.t, st });
     if (this.buffer.length > 30) this.buffer.shift();
     // 復活の知らせを取りこぼしたとき: 要約の位置に合わせる
@@ -792,7 +853,7 @@ class GomuGame {
   /** 爆弾を今投げたら飛ぶ道（何かに当たるまで）。点の列 */
   _lobPath() {
     const { o, d } = this._aim();
-    const spec = bandSpec(this.pilot.sp && this.pilot.spN > 0 ? this.pilot.sp : 0, WEAPON.BOMB);
+    const spec = bandSpec(0, WEAPON.BOMB);
     const b = { x: o[0] + d[0] * GUN.MUZZLE, y: o[1] + d[1] * GUN.MUZZLE - 0.08, z: o[2] + d[2] * GUN.MUZZLE, vx: d[0] * spec.speed, vy: d[1] * spec.speed, vz: d[2] * spec.speed, r: spec.r, g: spec.g, bounce: 0, life: spec.life, age: 0, kind: 0 };
     const pts = (this._lobPts ||= []);
     pts.length = 0;
@@ -910,7 +971,7 @@ class GomuGame {
       w.setCamera(cx, cy + ey + qk, cz, p.yaw + sx, Math.max(-PITCH_MAX, Math.min(PITCH_MAX, p.pitch + sy)));
       w.camera.rotation.z = dead ? 0.35 : 0;
       // のぞく（スナイパー）: 見える範囲をせまく
-      const fovT = this.zoom && !dead ? WEAPONS[WEAPON.SNIPER].zoomFov : 72;
+      const fovT = this.zoom && !dead ? WEAPONS[p.weapon].zoomFov ?? 24 : 72;
       const nf = this._fov + (fovT - this._fov) * Math.min(1, dt * 14);
       if (Math.abs(nf - this._fov) > 0.01) {
         this._fov = nf;
@@ -918,8 +979,8 @@ class GomuGame {
         w.camera.updateProjectionMatrix();
       }
       // 爆弾: 飛ぶ道と落ちる所を見せる
-      w.setLobArc(p.weapon === WEAPON.BOMB && !dead && this.phase === 'play' && !(p.reload > 0) ? this._lobPath() : null);
-      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), sniper: p.weapon === WEAPON.SNIPER, bomb: p.weapon === WEAPON.BOMB, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
+      w.setLobArc(this._bombAim && !dead && this.phase === 'play' ? this._lobPath() : null);
+      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), sniper: WEAPONS[p.weapon].zoomFov != null, bomb: this._bombAim, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
       this._fired = false;
       w.render(dt);
       this._frame++;
@@ -949,7 +1010,7 @@ class GomuGame {
       meIndex: this.me,
       players,
       inSmoke: w ? w.inSmoke(cx, cy + this._eye, cz) : false,
-      me: { hp: rec.hp, dead: rec.dead, item: rec.item, ammo: p.ammo, maxAmmo: WEAPONS[p.weapon].ammo, reloadT: WEAPONS[p.weapon].reload, weapon: p.weapon, reload: p.reload, sp: p.sp && p.spN > 0 ? p.sp : 0, spN: p.spN, shake: rec.shake, noAmmo: rec.noAmmo, stuck: rec.stuck, inv: rec.inv, star: rec.inv > 0 ? this._starT[this.me] || 0 : 0 },
+      me: { hp: rec.hp, dead: rec.dead, item: rec.item, ammo: p.ammo, maxAmmo: WEAPONS[p.weapon].ammo, reloadT: WEAPONS[p.weapon].reload, weapon: p.weapon, reload: p.reload, bombs: this._bombsLeft(rec), bombAim: this._bombAim, stam: p.stam ?? PLAYER.STAMINA, sprint: !!p.sprint, sp: p.sp && p.spN > 0 ? p.sp : 0, spN: p.spN, shake: rec.shake, noAmmo: rec.noAmmo, stuck: rec.stuck, inv: rec.inv, star: rec.inv > 0 ? this._starT[this.me] || 0 : 0 },
     });
     // 3・2・1 の音
     if (this.phase === 'intro') {
@@ -975,7 +1036,7 @@ class GomuGame {
       const t = rayCylinder(o, d, bv, BOSS.HEIGHT, BOSS.HIT_RADIUS);
       if (t >= 0 && t < ht) ht = t;
     }
-    if (ht > AIM_RANGE * (this.pilot.weapon === WEAPON.SNIPER ? 2.2 : 1)) return false;
+    if (ht > AIM_RANGE * (WEAPONS[this.pilot.weapon].zoomFov != null ? 2.2 : 1)) return false;
     return canSee(this.cw, o[0], o[1], o[2], o[0] + d[0] * ht, o[1] + d[1] * ht, o[2] + d[2] * ht);
   }
 

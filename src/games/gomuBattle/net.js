@@ -65,6 +65,8 @@ export function packState(s) {
       p.rs,
       Math.round(Math.max(p.shake, p.noAmmo, p.stuck) * 10) / 10,
       (p.weapon | 0) | (p.picked ? 4 : 0),
+      (s.teams?.[p.i] ?? -1) + 1, // チーム（ホストが決めたもの。ゲストはこれに合わせる）
+      p.bombs | 0, // 残りの爆弾
     ]),
     bw: (s.bossWon || []).map((x) => (x ? 1 : 0)),
     bo: s.boss ? [r2(s.boss.x), r2(s.boss.y), r2(s.boss.z), Math.round(s.boss.yaw * 1000) / 1000, s.boss.hp, s.boss.max, BOSS_ST.indexOf(s.boss.st), r2(s.boss.t), r2(Math.max(s.boss.dizzy, s.boss.stuck))] : null,
@@ -108,6 +110,8 @@ export function unpackState(o, n) {
       fxT: num(a[14]),
       weapon: (num(a[15]) | 0) & 3,
       picked: !!((num(a[15]) | 0) & 4),
+      team: (num(a[16]) | 0) - 1,
+      bombs: Math.max(0, num(a[17]) | 0),
     };
   });
   const bo = Array.isArray(o.bo) ? o.bo : null;
@@ -128,7 +132,7 @@ export function unpackState(o, n) {
 // ---- 配信のバイト列（毎秒 40 回。JSON の約 1/4 の大きさ） ----
 // 犬 1 匹 18 バイト（位置 1mm・向き・状態・体力・アイテム・点数）。ラウンドごとの点は 10 回に 1 回だけ載せる。
 // 起きたこと（撃った・当たった…）は、数を丸めた JSON を後ろにつける（少ないので）
-const BIN_V = 3;
+const BIN_V = 4;
 const PH = ['intro', 'play', 'end', 'done', 'pick'];
 /** 猫の動きの番号 */
 const BOSS_ST = ['walk', 'wind', 'crouch', 'pounce', 'rest', 'down'];
@@ -237,7 +241,7 @@ export function packBin(s, withRs = true, ev = null) {
     w.u8(p.kills);
     w.u8(p.deaths);
     w.u8(Math.ceil(Math.max(p.shake, p.noAmmo, p.stuck) * 20));
-    w.u8((p.weapon | 0) | (p.picked ? 4 : 0));
+    w.u8((p.weapon | 0) | (p.picked ? 4 : 0) | ((((s.teams?.[p.i] ?? -1) + 1) & 3) << 3) | ((Math.min(7, p.bombs | 0) & 7) << 5)); // チーム（ホストが決めたもの）・残りの爆弾
     if (withRs) for (let r = 0; r < 3; r++) w.u16(p.rs[r] || 0);
   }
   w.u16(s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0));
@@ -314,6 +318,8 @@ export function unpackBin(u8, n, prevRs = null) {
       const wb = r.u8();
       p.weapon = wb & 3;
       p.picked = !!(wb & 4);
+      p.team = ((wb >> 3) & 3) - 1;
+      p.bombs = (wb >> 5) & 7;
       p.rs = withRs ? [r.u16(), r.u16(), r.u16()] : prevRs?.[i] ? prevRs[i].slice() : [0, 0, 0];
       if (i < n) players.push(p);
     }

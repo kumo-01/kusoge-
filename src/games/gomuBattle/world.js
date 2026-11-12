@@ -701,6 +701,14 @@ export class GomuWorld {
     });
   }
 
+  /** 犬 i の足もとの輪と、背中の旗（あれば）の色を変える（チームがあとで決まったとき） */
+  setDogColor(i, hex) {
+    const d = this.dogs[i];
+    if (!d) return;
+    d.ring.material.color.setHex(hex);
+    d.flag?.userData.cloth.material.color.setHex(hex);
+  }
+
   /** views: 番号ごとの { x, y, z, yaw, crouch, moving, dead, inv, stuck, stun, hide } */
   updateDogs(views, dt) {
     views.forEach((v, i) => {
@@ -1089,13 +1097,14 @@ export class GomuWorld {
     v.root.visible = visible;
     v.sn.visible = sniper && !bomb;
     v.gun.visible = !bomb;
-    v.bm.visible = bomb && !reloading;
+    v.bm.visible = bomb; // 爆弾は補充中でもかまえられる
     if (fired) v.recoil = 1;
     v.recoil = Math.max(0, v.recoil - dt * 8);
     v.bob += dt * (moving ? 10 : 2);
-    const down = reloading ? 0.12 : 0;
+    const rl = reloading && !bomb; // 爆弾をかまえている間は下げない
+    const down = rl ? 0.12 : 0;
     v.root.position.set(0.2 + Math.sin(v.bob) * (moving ? 0.008 : 0.002), -0.19 - down - Math.abs(Math.cos(v.bob)) * (moving ? 0.01 : 0.003), -0.36 + v.recoil * 0.05);
-    v.root.rotation.x = v.recoil * 0.25 + (reloading ? -0.5 : 0);
+    v.root.rotation.x = v.recoil * 0.25 + (rl ? -0.5 : 0);
     const band = v.gun.userData.band;
     band.visible = !reloading;
     band.material.color.setHex(BAND_COLORS[kind] ?? BAND_COLORS[0]);

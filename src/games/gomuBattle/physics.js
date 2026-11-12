@@ -6,7 +6,7 @@ import { ROOM, overlapXZ, segmentHit } from './arena.js';
 
 /** 動く体（犬）の初期値 */
 export function createBody(x = 0, z = 0, yaw = 0) {
-  return { x, y: 0, z, vx: 0, vy: 0, vz: 0, yaw, pitch: 0, crouch: false, ground: true, dashT: 0, dashCd: 0 };
+  return { x, y: 0, z, vx: 0, vy: 0, vz: 0, yaw, pitch: 0, crouch: false, ground: true, stam: PLAYER.STAMINA, stamWait: 0, sprint: false };
 }
 
 export const heightOf = (m) => (m.crouch ? PLAYER.CROUCH_HEIGHT : PLAYER.HEIGHT);
@@ -21,15 +21,14 @@ export function fits(arena, x, y, z, h, r = PLAYER.RADIUS) {
 
 /**
  * 1 tick 動かす。
- * inp: { fx: 右へ -1..1, fz: 前へ -1..1, jump, dash, crouch }（jump・dash は押した瞬間）
+ * inp: { fx: 右へ -1..1, fz: 前へ -1..1, jump（押した瞬間）, dash（走る。押している間）, crouch }
  * slow: 速さの割合（よろけ 0.35、ネバネバ 0）
- * 戻り値: { jumped, dashed }（音を鳴らすため）
+ * 戻り値: { jumped, dashed: 走り始めた }（音を鳴らすため）
  */
 export function stepMove(m, inp, dt, arena, slow = 1) {
   const r = PLAYER.RADIUS;
   const res = { jumped: false, dashed: false };
-  m.dashCd = Math.max(0, m.dashCd - dt);
-  m.dashT = Math.max(0, m.dashT - dt);
+  if (m.stam == null) m.stam = PLAYER.STAMINA;
   // 伏せ: 立ち上がる場所が空いていないとき（テーブルの下）は伏せたまま
   if (inp.crouch) m.crouch = true;
   else if (m.crouch && fits(arena, m.x, m.y, m.z, PLAYER.HEIGHT)) m.crouch = false;
@@ -45,30 +44,24 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
   }
   const wx = sy * fz - cy * fx;
   const wz = cy * fz + sy * fx;
-  if (inp.dash && m.dashCd <= 0 && slow > 0.5) {
-    m.dashT = PLAYER.DASH_TIME;
-    m.dashCd = PLAYER.DASH_COOLDOWN;
-    m.crouch = m.crouch && !fits(arena, m.x, m.y, m.z, PLAYER.HEIGHT);
-    // 入力がなければ前へ
-    const dl = Math.hypot(wx, wz);
-    m.dashX = dl > 0.1 ? wx / dl : sy;
-    m.dashZ = dl > 0.1 ? wz / dl : cy;
-    res.dashed = true;
-  }
-  let tx;
-  let tz;
-  if (m.dashT > 0) {
-    tx = m.dashX * PLAYER.DASH_SPEED;
-    tz = m.dashZ * PLAYER.DASH_SPEED;
+  // 走る（ゲージ式）: 押している間、動いていてゲージがあれば速く走る。空になったら STAMINA_MIN までたまるまで走れない
+  const wasSprint = m.sprint;
+  m.sprint = !!inp.dash && Math.hypot(wx, wz) > 0.1 && !m.crouch && slow > 0.5 && m.stam > 0 && (wasSprint || m.stam >= PLAYER.STAMINA_MIN);
+  if (m.sprint) {
+    m.stam = Math.max(0, m.stam - PLAYER.STAMINA_DRAIN * dt);
+    m.stamWait = PLAYER.STAMINA_WAIT;
+    if (!wasSprint) res.dashed = true;
   } else {
-    const sp = (m.crouch ? PLAYER.CROUCH_SPEED : PLAYER.SPEED) * slow;
-    tx = wx * sp;
-    tz = wz * sp;
+    m.stamWait = Math.max(0, (m.stamWait || 0) - dt);
+    if (m.stamWait <= 0) m.stam = Math.min(PLAYER.STAMINA, m.stam + PLAYER.STAMINA_REGEN * dt);
   }
+  const sp = (m.crouch ? PLAYER.CROUCH_SPEED : m.sprint ? PLAYER.SPRINT_SPEED : PLAYER.SPEED) * slow;
+  const tx = wx * sp;
+  const tz = wz * sp;
   const acc = (m.ground ? PLAYER.ACCEL : PLAYER.AIR_ACCEL) * dt;
   const ease = (v, t) => (Math.abs(t - v) <= acc ? t : v + Math.sign(t - v) * acc);
-  m.vx = m.dashT > 0 ? tx : ease(m.vx, tx);
-  m.vz = m.dashT > 0 ? tz : ease(m.vz, tz);
+  m.vx = ease(m.vx, tx);
+  m.vz = ease(m.vz, tz);
   if (inp.jump && m.ground && slow > 0) {
     m.vy = PLAYER.JUMP;
     m.ground = false;
@@ -127,7 +120,6 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
       m.z += v * dt * ok;
       m.vz = 0;
     }
-    if (m.dashT > 0) m.dashT = 0;
   }
   // 縦
   const ny = m.y + m.vy * dt;

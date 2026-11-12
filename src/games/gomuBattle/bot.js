@@ -6,6 +6,8 @@ import { canSee, ROOM } from './arena.js';
 import { aimDir, eyeOf, heightOf } from './physics.js';
 
 const rnd = Math.random;
+/** のぞいて遠くを狙う武器（スナイパー・ライフル） */
+const scoped = (p) => p.weapon === WEAPON.SNIPER || p.weapon === WEAPON.RIFLE;
 const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 
 /** 線分 a → b が、煙の中を通るか */
@@ -35,7 +37,7 @@ export function botThink(sim, p, dt) {
   if ((b.look -= dt) <= 0) {
     b.look = 0.12;
     let best = -1;
-    let bd = BOT.VIEW * (p.weapon === WEAPON.SNIPER ? 1.6 : 1);
+    let bd = BOT.VIEW * (scoped(p) ? 1.6 : 1);
     const boss = sim.s.boss;
     if (boss && boss.hp > 0) {
       // ボス戦: 猫だけを狙う（見えていれば）
@@ -73,16 +75,15 @@ export function botThink(sim, p, dt) {
     b.prevT[q.i] = { x: q.x, z: q.z };
     const qy = q.y + (q.h ?? heightOf(q)) * 0.55;
     const dist = Math.hypot(q.x - ex, qy - ey, q.z - ez);
-    const lead = Math.min(p.weapon === WEAPON.BOMB ? 1.2 : 0.6, dist / W.speed) * BOT.LEAD;
+    const lead = Math.min(0.6, dist / W.speed) * BOT.LEAD;
     const tx = q.x + vx * lead;
     const tz = q.z + vz * lead;
     const hd = Math.hypot(tx - ex, tz - ez);
-    // 落ちる分だけ上を狙う（爆弾は山なり。届かなければ 45 度で投げて近づく）
-    const aimY = p.weapon === WEAPON.BOMB ? q.y + 0.3 : qy;
-    const bal = lobPitch(W.speed, W.gravity, hd, aimY - ey);
-    const wantYaw = Math.atan2(tx - ex, tz - ez) + b.err[0] * (p.weapon === WEAPON.BOMB ? 2.2 : 1);
-    const bombErr = p.weapon === WEAPON.BOMB ? 2.2 : 1; // CPU の爆弾は少しへた（まとめて当たると強すぎるので）
-    const wantPitch = (bal ?? Math.PI / 4) + b.err[1] * bombErr;
+    // 落ちる分だけ上を狙う
+    const bal = lobPitch(W.speed, W.gravity, hd, qy - ey);
+    const em = p.weapon === WEAPON.RIFLE ? 2.6 : 1; // ライフル（一撃）の CPU は狙いを少しへたに（強すぎないように）
+    const wantYaw = Math.atan2(tx - ex, tz - ez) + b.err[0] * em;
+    const wantPitch = (bal ?? Math.atan2(qy - ey, hd)) + b.err[1] * em;
     const turn = BOT.TURN * dt;
     const dy = angDiff(p.yaw, wantYaw);
     p.yaw += Math.max(-turn, Math.min(turn, dy));
@@ -91,11 +92,11 @@ export function botThink(sim, p, dt) {
     if ((b.strafeT -= dt) <= 0) {
       // 横へ動いてよける（向きは少し長めに保つ。ときどき止まって撃つ）
       b.strafeT = 0.9 + rnd() * 1.3;
-      b.strafe = rnd() < (p.weapon === WEAPON.SNIPER ? 0.55 : 0.2) ? 0 : rnd() < 0.5 ? -0.9 : 0.9; // スナイパーは高台でじっと狙う
+      b.strafe = rnd() < (scoped(p) ? 0.55 : 0.2) ? 0 : rnd() < 0.5 ? -0.9 : 0.9; // スナイパー・ライフルは高台でじっと狙う
     }
     inp.fx = b.strafe;
     // スナイパー: 近くに高台があれば、狙いながらそこへ上る（上に着いたらじっと狙う）
-    const perch = p.weapon === WEAPON.SNIPER ? nearPerch(sim.arena, p, 20) : null;
+    const perch = scoped(p) ? nearPerch(sim.arena, p, 20) : null;
     if (perch) {
       const dxw = perch.x - p.x;
       const dzw = perch.z - p.z;
@@ -106,14 +107,20 @@ export function botThink(sim, p, dt) {
         inp.fx = (-dxw * Math.cos(p.yaw) + dzw * Math.sin(p.yaw)) / l;
       } else inp.fx = 0;
     } else if (q.i === -2) inp.fz = dist > 14 ? 1 : dist < 8 ? -1 : 0; // 間合い: ボス戦は猫の手が届かない所から
-    else if (p.weapon === WEAPON.SNIPER) inp.fz = dist > 24 ? 1 : dist < 10 ? -0.8 : 0; // スナイパーは遠くから
-    else if (p.weapon === WEAPON.BOMB) inp.fz = bal == null || dist > 16 ? 1 : dist < 7 ? -0.8 : 0;
+    else if (scoped(p)) inp.fz = dist > 24 ? 1 : dist < 10 ? -0.8 : 0; // スナイパー・ライフルは遠くから
     else inp.fz = dist > 12 ? 1 : dist < 4 ? -0.7 : 0;
-    if (p.stun > 0 && rnd() < 0.05) inp.dash = true;
+    // 走る: よろけたときと、遠くの相手へ近づくとき（ゲージに余裕があれば）
+    if ((p.stun > 0 || (inp.fz > 0.5 && dist > 20)) && (p.stam ?? 0) > 40) inp.dash = true;
     // 撃つ（見つけてから少し待ってから、だいたい狙えているとき）
-    if (b.see > BOT.REACT && Math.abs(dy) < (p.weapon === WEAPON.SNIPER ? 0.06 : 0.1) && dist < BOT.VIEW * (p.weapon === WEAPON.SNIPER ? 1.6 : 1) && (p.weapon !== WEAPON.BOMB || (bal != null && Math.abs(wantPitch - p.pitch) < 0.12))) {
+    if (b.see > BOT.REACT * (p.weapon === WEAPON.RIFLE ? 2 : 1) && Math.abs(dy) < (scoped(p) ? 0.06 : 0.1) && dist < BOT.VIEW * (scoped(p) ? 1.6 : 1)) {
       const d = aimDir(p.yaw, p.pitch);
       sim.tryFire(p, [ex, ey, ez], d);
+    }
+    // 爆弾（1 ラウンドに 5 回まで）: 届く距離で、ときどき山なりに投げる（狙いはへため。まとめて当たると強いので）
+    if (p.bombs > 0 && p.bombCd <= 0 && b.see > BOT.REACT && dist > 6 && dist < 17 && rnd() < dt * 0.25) {
+      const BW = WEAPONS[WEAPON.BOMB];
+      const lp = lobPitch(BW.speed, BW.gravity, hd, q.y + 0.3 - ey);
+      if (lp != null) sim.throwBomb(p.i, [ex, ey, ez], aimDir(Math.atan2(tx - ex, tz - ez) + b.err[0] * 2.2, lp + b.err[1] * 2.2));
     }
     // アイテム
     if (p.item) {
@@ -133,6 +140,8 @@ export function botThink(sim, p, dt) {
     if (!(b.wait > 0)) p.yaw += Math.max(-turn, Math.min(turn, angDiff(p.yaw, wantYaw)));
     p.pitch *= 0.9;
     inp.fz = b.wait > 0 ? 0 : Math.abs(angDiff(p.yaw, wantYaw)) < 1.2 ? 1 : 0.2;
+    // 遠くの行き先へは、ゲージに余裕があれば走る
+    if (inp.fz > 0.5 && b.goal && Math.hypot(b.goal.x - p.x, b.goal.z - p.z) > 12 && (p.stam ?? 0) > 60) inp.dash = true;
     if (p.item === ITEM.GUM && rnd() < 0.01) sim.useItem(p.i, [ex, ey, ez], aimDir(p.yaw, p.pitch));
     if (p.item && (BAND_ITEMS.includes(p.item) || (p.item === ITEM.HEAL && p.hp < PLAYER.HP))) sim.useItem(p.i, [ex, ey, ez], aimDir(p.yaw, p.pitch));
   }
@@ -217,7 +226,7 @@ function pickGoal(sim, p, b) {
   b.goalT = 5 + Math.random() * 3;
   const arena = sim.arena;
   // スナイパーは高台へ（近い方）
-  if (p.weapon === WEAPON.SNIPER && Math.random() < 0.6) {
+  if (scoped(p) && Math.random() < 0.6) {
     const ps = perches(arena);
     if (ps.length) {
       const g = ps.reduce((m, x) => (Math.hypot(x.x - p.x, x.z - p.z) < Math.hypot(m.x - p.x, m.z - p.z) ? x : m));
