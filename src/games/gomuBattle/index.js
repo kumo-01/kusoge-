@@ -183,7 +183,7 @@ class GomuGame {
   /** ぶつかる物すべて（家具 + 押せるもの）。ホストは計算の正本、ゲストは自分の手元の写し */
   get cw() {
     if (this.isHost) return this.sim.cw;
-    return (this._gcw ||= { boxes: [...this.arena.boxes, ...this.mov], water: this.arena.water });
+    return (this._gcw ||= { boxes: [...this.arena.boxes, ...this.mov], water: this.arena.water, terrain: this.arena.terrain, terrainTop: this.arena.terrainTop, floorY: this.arena.floorY, pads: this.arena.pads, pipes: this.arena.pipes, geysers: this.arena.geysers });
   }
 
   /** 押せるもの（ホストは計算の正本、ゲストは手元の写し） */

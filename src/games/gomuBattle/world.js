@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { buildDog } from '../dogKart/dog.js';
 import { device } from '../../core/device.js';
-import { ROOM } from './arena.js';
+import { ROOM, groundY } from './arena.js';
 import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS, WEAPON } from './constants.js';
 import { mat as stdMat, kindMat, weaponRack, realisticDog } from './look.js';
 
@@ -209,7 +209,7 @@ export class GomuWorld {
     sun.position.set(-34, 46, -26);
     sun.castShadow = true;
     const sr = Math.max(ROOM.W, ROOM.D) / 2 + 8; // 影を描く範囲（会場全体）
-    Object.assign(sun.shadow.camera, { left: -sr, right: sr, top: sr, bottom: -sr, near: 1, far: 140 });
+    Object.assign(sun.shadow.camera, { left: -sr, right: sr, top: sr, bottom: -sr, near: 1, far: 190 });
     const ms = device.low ? 2048 : 4096;
     sun.shadow.mapSize.set(ms, ms);
     sun.shadow.bias = -0.0004;
@@ -252,6 +252,7 @@ export class GomuWorld {
     }
     const G = new THREE.Group();
     this.arenaGroup = G;
+    this.arena = arena;
     const W = ROOM.W;
     const D = ROOM.D;
     const H = ROOM.WALL;
@@ -379,13 +380,22 @@ export class GomuWorld {
     const W = ROOM.W;
     const D = ROOM.D;
     this.scene.background = new THREE.Color(arena.sky);
-    this.scene.fog = new THREE.Fog(arena.sky, 90, 200);
+    this._fogBase = [Math.max(W, D) * 0.95, Math.max(W, D) * 2.1];
+    this.scene.fog = new THREE.Fog(arena.sky, ...this._fogBase);
     const tex = floorTexture(arena.ground, arena.floor);
-    tex.repeat.set((W + 120) / 4, (D + 120) / 4);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(W + 120, D + 120), toon(0xffffff, { map: tex }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.userData.noCast = true;
-    G.add(ground);
+    tex.repeat.set(1, 1); // くり返しは地面の UV（4 m で 1 枚）で決める
+    const gmat = toon(0xffffff, { map: tex, vertexColors: true });
+    // 会場の中は 1 m ごとの網目で、丘・くぼみの形に。色も少し変える（丘の上は明るく、くぼみの底は暗く湿った色）
+    G.add(this._groundMesh(arena, -W / 2, W / 2, -D / 2, D / 2, Math.ceil(W), Math.ceil(D), gmat));
+    // 柵の外（平ら。4 枚）
+    const E = 60;
+    for (const [x0, x1, z0, z1] of [
+      [-W / 2 - E, W / 2 + E, -D / 2 - E, -D / 2],
+      [-W / 2 - E, W / 2 + E, D / 2, D / 2 + E],
+      [-W / 2 - E, -W / 2, -D / 2, D / 2],
+      [W / 2, W / 2 + E, -D / 2, D / 2],
+    ])
+      G.add(this._groundMesh(null, x0, x1, z0, z1, 1, 1, gmat));
     // 柵（ここから外へは出られない）。木の柵か、ロープと杭
     const wood = toon(arena.fence === 'rope' ? 0xa47148 : 0xc8a165);
     const rope = toon(0xf1faee);
@@ -444,6 +454,33 @@ export class GomuWorld {
       c.position.set(-50 + k * 17, 24 + (k % 3) * 4, -40 + ((k * 23) % 80));
       G.add(c);
     }
+  }
+
+  /** 地面の網目（x0〜x1・z0〜z1 を nx × nz に分ける）。arena があれば丘・くぼみの高さに */
+  _groundMesh(arena, x0, x1, z0, z1, nx, nz, material) {
+    const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0, nx, nz);
+    g.rotateX(-Math.PI / 2);
+    g.translate((x0 + x1) / 2, 0, (z0 + z1) / 2);
+    const pos = g.attributes.position;
+    const uv = g.attributes.uv;
+    const col = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const z = pos.getZ(i);
+      const y = arena ? groundY(arena, x, z) : 0;
+      pos.setY(i, y);
+      uv.setXY(i, x / 4, -z / 4);
+      // 高い所は少し明るく、低い所は少し暗く
+      const k = y >= 0 ? 1 + Math.min(0.12, y * 0.05) : 1 + Math.max(-0.22, y * 0.16);
+      col[i * 3] = k;
+      col[i * 3 + 1] = k;
+      col[i * 3 + 2] = y < 0 ? k * 0.96 : k;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, material);
+    m.userData.noCast = true;
+    return m;
   }
 
   _furniture(b) {
@@ -860,8 +897,8 @@ export class GomuWorld {
     this.scene.background = sky;
     if (this.scene.fog) {
       this.scene.fog.color.copy(sky);
-      this.scene.fog.near = on ? 25 : 90;
-      this.scene.fog.far = on ? 85 : 200;
+      this.scene.fog.near = on ? 25 : this._fogBase?.[0] ?? 90;
+      this.scene.fog.far = on ? 85 : this._fogBase?.[1] ?? 200;
     }
     this.sun.intensity = (this._sunBase ?? 2.7) * (on ? 0.45 : 1);
   }
@@ -876,7 +913,7 @@ export class GomuWorld {
       let x = pos.getX(i * 2);
       let y = pos.getY(i * 2);
       let z = pos.getZ(i * 2);
-      if (!R.seeded || y < 0 || Math.abs(x - c.x) > S || Math.abs(z - c.z) > S) {
+      if (!R.seeded || y < c.y - 6 || Math.abs(x - c.x) > S || Math.abs(z - c.z) > S) {
         x = c.x + (Math.random() - 0.5) * 2 * S;
         z = c.z + (Math.random() - 0.5) * 2 * S;
         y = R.seeded ? c.y + 10 + Math.random() * 4 : c.y + Math.random() * 14;
@@ -1009,8 +1046,9 @@ export class GomuWorld {
     if (!dp) return;
     D.t += dt;
     D.g.position.set(dp.x, dp.y, dp.z);
-    D.g.rotation.z = dp.y > 0.2 ? Math.sin(D.t * 1.3) * 0.08 : 0; // ゆらゆら
-    D.chute.visible = D.strings.visible = dp.y > 0.2;
+    const gy = this.arena ? groundY(this.arena, dp.x, dp.z) : 0;
+    D.g.rotation.z = dp.y > gy + 0.2 ? Math.sin(D.t * 1.3) * 0.08 : 0; // ゆらゆら
+    D.chute.visible = D.strings.visible = dp.y > gy + 0.2;
     D.beam.position.set(dp.x, 30, dp.z);
     D.beam.material.opacity = 0.16 + Math.sin(D.t * 4) * 0.06;
   }

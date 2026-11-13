@@ -15,8 +15,11 @@ const run = (sim, sec) => {
 };
 /** 撃つ準備ができた試合（始まりの 3・2・1 を飛ばす） */
 function ready(o = {}) {
-  const sim = new GomuSim({ humans: 2, bots: 0, seed: 11, ...o });
+  const { treats, ...rest } = o;
+  const sim = new GomuSim({ humans: 2, bots: 0, seed: 11, ...rest });
   run(sim, ROUND.INTRO + 0.1);
+  // 当たった数を数えやすいように、ふだんは回復のおやつを出さない（おやつのテストだけ出す）
+  if (!treats) sim.s.heals = sim.s.heals.map(() => 1e9);
   sim.drainEvents();
   return sim;
 }
@@ -45,8 +48,8 @@ test('会場: 3 つとも、出発地点・アイテムの箱・押せるもの�
     }
     assert.ok(a.spawns.length >= 8 && a.items.length >= 8, '広い会場なので出発地点・箱も多い');
   }
-  assert.ok(Math.abs((ROOM.W * ROOM.D) / (52 * 40) - 2.25) < 0.01, '52 × 40 の部屋の 2.25 倍の広さ（1.5 倍を 2 回）');
-  assert.equal(ROUND.TIME, 405, '6 分 45 秒');
+  assert.ok(Math.abs((ROOM.W * ROOM.D) / (52 * 40) - 4.5) < 0.01, '52 × 40 の部屋の 4.5 倍の広さ（1.5 倍を 2 回、さらに広さ 2 倍）');
+  assert.equal(ROUND.TIME, 486, '8 分 6 秒（6 分 45 秒の 1.2 倍）');
   assert.equal(PLAYER.HP, 100);
 });
 
@@ -141,8 +144,8 @@ test('撃つ: 家具の陰には当たらない・自分には当たらない・
   const sim = ready();
   const [a, b] = sim.s.players;
   // 生け垣の向こう
-  Object.assign(a, { x: 0, z: 9, y: 0 });
-  Object.assign(b, { x: 0, z: 15.5, y: 0 });
+  Object.assign(a, { x: 0, z: 10 * SCALE - 6, y: 0 });
+  Object.assign(b, { x: 0, z: 10 * SCALE + 0.5, y: 0 });
   sim.fire(0, eye(a), chestDir(a, b));
   run(sim, 1);
   assert.equal(b.hp, PLAYER.HP, '生け垣にさえぎられる');
@@ -238,11 +241,11 @@ test('アイテム: 照準ぶれ・ゴム切れは自分以外、ガムを踏む
   assert.equal(sim.s.smokes.length, 0);
 });
 
-test('ラウンド: 6 分 45 秒で 1 ラウンド、会場が変わって 3 ラウンドで終わる。点はラウンドごとにも数える', () => {
+test('ラウンド: 8 分 6 秒で 1 ラウンド、会場が変わって 3 ラウンドで終わる。点はラウンドごとにも数える', () => {
   const sim = new GomuSim({ humans: 1, bots: 3, seed: 5 });
   const rounds = [];
   let ticks = 0;
-  while (sim.s.phase !== 'done' && ticks < 60 * 1300) {
+  while (sim.s.phase !== 'done' && ticks < 60 * 1600) {
     sim.step(DT);
     ticks++;
     for (const e of sim.drainEvents()) if (e.t === 'round') rounds.push(e.r);
@@ -301,7 +304,7 @@ test('押せるもの: 体当たりでズルズル押して動かせる。壁に
   stepMove(m, { fz: 1 }, DT, w);
   assert.ok((m.x - v0) / DT <= PLAYER.PUSH_SPEED + 1e-6);
   // 押し続けると、柵（会場のはし）にぶつかって止まる
-  for (let i = 0; i < 1000; i++) stepMove(m, { fz: 1 }, DT, w);
+  for (let i = 0; i < 3000; i++) stepMove(m, { fz: 1 }, DT, w);
   const stop = (box.x0 + box.x1) / 2;
   for (let i = 0; i < 60; i++) stepMove(m, { fz: 1 }, DT, w);
   assert.equal((box.x0 + box.x1) / 2, stop, '止まったまま');
@@ -770,11 +773,11 @@ test('回復のおやつ: 会場に落ちていて、体力が減った犬が拾
   const { TREAT, BOX_ITEMS } = await import('../src/games/gomuBattle/constants.js');
   assert.ok(!BOX_ITEMS.includes(ITEM.HEAL));
   for (const ar of ARENAS) assert.equal(ar.heals.length, TREAT.COUNT, `${ar.id} におやつ 8 つ`);
-  const sim = ready();
+  const sim = ready({ treats: true });
   const [a] = sim.s.players;
-  const [hx, hz] = sim.arena.heals[0];
+  const [hx, hz, hy] = sim.arena.heals[0];
   // 満タンなら拾わない
-  Object.assign(a, { x: hx, z: hz, y: 0 });
+  Object.assign(a, { x: hx, z: hz, y: hy });
   run(sim, 0.1);
   assert.equal(sim.s.heals[0], 0, '満タンのときは拾わない');
   a.hp = 30;
@@ -985,4 +988,45 @@ test('配信のバイト列は、前の配信との差分（共通の差分の�
     prev = cur;
   }
   assert.ok(small < raw * 0.6, `差分 ${small} / そのまま ${raw}`);
+});
+
+import { groundY, segmentHit as segHit, segmentHitJs } from '../src/games/gomuBattle/arena.js';
+
+test('丘とくぼみ: 3 つの会場にあり、歩いて上り下りでき、輪ゴム・見通しをさえぎる。出発地点は 30 か所', () => {
+  for (const a of ARENAS) {
+    assert.equal(a.spawns.length, 30, `${a.id} の出発地点`);
+    assert.ok(a.terrain.filter((f) => f.h > 0).length >= 3 && a.terrain.filter((f) => f.h < 0).length >= 2, `${a.id} の丘とくぼみ`);
+    // 家具・押せるものは平らな所にある（地形にめりこまない）
+    for (const b of a.boxes) for (const [x, z] of [[b.x0, b.z0], [b.x1, b.z1], [(b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2]]) assert.ok(Math.abs(groundY(a, x, z)) < 1e-9, `${a.id} の箱の下は平ら`);
+  }
+  const a = ARENAS[0];
+  const hill = a.terrain.find((f) => f.h > 2);
+  const hollow = a.terrain.find((f) => f.h < 0);
+  // 丘のふもとから頂上へ歩くと、体が地面について上がっていく
+  const m = createBody(hill.x - hill.r - 1, hill.z, Math.PI / 2);
+  for (let i = 0; i < 240 && m.x < hill.x; i++) stepMove(m, { fz: 1 }, DT, a);
+  assert.ok(m.x >= hill.x - 0.2, '頂上まで歩ける');
+  assert.ok(Math.abs(m.y - groundY(a, m.x, m.z)) < 0.02 && m.ground, '地面の上');
+  assert.ok(m.y > hill.h - 0.1);
+  // そのまま下りても、地面についたまま（ジャンプできる）
+  let air = 0;
+  for (let i = 0; i < 120; i++) {
+    stepMove(m, { fz: 1 }, DT, a);
+    if (!m.ground) air++;
+  }
+  assert.equal(air, 0, '下り坂で浮かない');
+  // くぼみの底まで下りられて、地面の下に落ちない
+  const n = createBody(hollow.x + hollow.r + 1, hollow.z, -Math.PI / 2);
+  for (let i = 0; i < 240 && n.x > hollow.x; i++) stepMove(n, { fz: 1 }, DT, a);
+  assert.ok(n.y < hollow.h + 0.1 && Math.abs(n.y - groundY(a, n.x, n.z)) < 0.02, `くぼみの底 ${n.y}`);
+  // 丘の向こうは見えない・輪ゴムは丘に当たる（Rust 版と JavaScript 版の箱の計算に、地形を足したもの）
+  const out = {};
+  const t = segHit(a, hill.x - hill.r - 2, 1, hill.z, hill.x + hill.r + 2, 1, hill.z, 0.05, out);
+  assert.ok(t < 0.5 && out.ny > 0.3 && out.nx < 0, `丘に当たる t=${t}`);
+  // くぼみの中を低く飛ぶ輪ゴムは、くぼみの底まで落ちる（平らな床で止まらない）
+  const t2 = segHit(a, hollow.x, 0.3, hollow.z, hollow.x, -3, hollow.z, 0.05, out);
+  const yHit = 0.3 + (-3 - 0.3) * t2;
+  assert.ok(Math.abs(yHit - (hollow.h + 0.05)) < 0.01, `くぼみの底で当たる ${yHit}`);
+  // 地形のない所では、箱の計算と同じ
+  assert.equal(segHit(a, -50, 5, -40, -49, 5, -39, 0.05), segmentHitJs(a, -50, 5, -40, -49, 5, -39, 0.05));
 });

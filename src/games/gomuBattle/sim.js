@@ -3,7 +3,7 @@
 // 起きたこと（撃った・当たった・倒れた・拾った…）は events に積み、ゲストへ配る。
 
 import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, TREAT, FUN, EXTRA, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL } from './constants.js';
-import { ARENAS, segmentHit, ROOM } from './arena.js';
+import { ARENAS, segmentHit, ROOM, groundY } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage, hitDamage, isHead } from './physics.js';
 import { botThink } from './bot.js';
 
@@ -56,7 +56,7 @@ export class GomuSim {
 
   /** ぶつかる物すべて（家具 + 押せるもの）。押せるものは試合の状態 s.mov の箱そのもの */
   get cw() {
-    if (!this._cw || this._cw.mov !== this.s.mov) this._cw = { boxes: [...this.arena.boxes, ...(this.s.mov || [])], mov: this.s.mov, water: this.arena.water };
+    if (!this._cw || this._cw.mov !== this.s.mov) this._cw = { boxes: [...this.arena.boxes, ...(this.s.mov || [])], mov: this.s.mov, water: this.arena.water, terrain: this.arena.terrain, terrainTop: this.arena.terrainTop, floorY: this.arena.floorY, pads: this.arena.pads, pipes: this.arena.pipes, geysers: this.arena.geysers };
     return this._cw;
   }
 
@@ -153,6 +153,7 @@ export class GomuSim {
 
   _place(p, sp) {
     Object.assign(p, createBody(sp[0], sp[1], sp[2] ?? 0));
+    p.y = groundY(this.arena, p.x, p.z); // 丘・くぼみの上
     p.g = (p.g + 1) & 255;
     this.events.push({ t: 'spawn', i: p.i, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g });
   }
@@ -228,7 +229,10 @@ export class GomuSim {
       return;
     }
     for (const p of s.players) this._stepPlayer(p, dt);
-    if (s.boss) this._stepBoss(dt);
+    if (s.boss) {
+      this._stepBoss(dt);
+      if (s.boss.st !== 'pounce') s.boss.y = groundY(this.arena, s.boss.x, s.boss.z); // 丘・くぼみに沿って歩く
+    }
     this._stepBands(dt);
     this._stepItems(dt);
     this._stepFun(dt);
@@ -643,14 +647,15 @@ export class GomuSim {
     if (!s.drop && s.t >= s.nextDrop) {
       const spots = this.arena.drops || this.arena.heals || [[0, 0]];
       const [x, z] = spots[Math.floor(nextRandom(s) * spots.length)];
-      s.drop = { x, z, y: FUN.DROP_HEIGHT };
+      s.drop = { x, z, y: FUN.DROP_HEIGHT + groundY(this.arena, x, z) };
       s.nextDrop = Infinity;
       this.events.push({ t: 'drop', x, z });
     }
     const dp = s.drop;
     if (dp) {
-      dp.y = Math.max(0, dp.y - FUN.DROP_FALL * dt);
-      if (dp.y < 1.4) {
+      const gy = groundY(this.arena, dp.x, dp.z);
+      dp.y = Math.max(gy, dp.y - FUN.DROP_FALL * dt);
+      if (dp.y < gy + 1.4) {
         for (const p of s.players) {
           if (p.dead > 0 || Math.hypot(p.x - dp.x, p.z - dp.z) > FUN.DROP_RADIUS || Math.abs(p.y - dp.y) > 1.6) continue;
           p.sp = ITEM.GOLD;
@@ -887,7 +892,7 @@ export class GomuSim {
     if (b.hp <= 0) {
       b.st = 'down';
       b.t = 0;
-      b.y = 0;
+      b.y = groundY(this.arena, b.x, b.z);
       if (p) {
         p.kills++;
         this._addScore(p, BOSS.KILL_BONUS);
@@ -1011,9 +1016,9 @@ export class GomuSim {
       const f = Math.min(1, b.t / BOSS.POUNCE_TIME);
       b.x = b.sx + (b.tx - b.sx) * f;
       b.z = b.sz + (b.tz - b.sz) * f;
-      b.y = 4 * 3 * f * (1 - f);
+      b.y = 4 * 3 * f * (1 - f) + groundY(this.arena, b.x, b.z);
       if (f >= 1) {
-        b.y = 0;
+        b.y = groundY(this.arena, b.x, b.z);
         for (const p of s.players) {
           if (p.dead > 0) continue;
           const dx = p.x - b.x;

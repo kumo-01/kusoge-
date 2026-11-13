@@ -6,8 +6,10 @@
 
 import { wasmSegmentHit } from './collide.js';
 
-/** 配置を広げる倍率（1.5 倍 × 1.5 倍 = 52 × 40 の部屋の 2.25 倍の広さ。2026-11-13 にさらに 1.5 倍） */
-export const SCALE = 1.5;
+/**
+ * 配置を広げる倍率。2026-11-13 に 1.5 倍、さらに広さ（面積）を 2 倍に（縦横それぞれ √2 倍。52 × 40 の部屋の 4.5 倍の広さ。約 110 × 85 m）
+ */
+export const SCALE = 1.5 * Math.SQRT2;
 
 /** 部屋の広さ（x: -W/2〜W/2、z: -D/2〜D/2） */
 export const ROOM = { W: 52 * SCALE, D: 40 * SCALE, WALL: 9 };
@@ -153,14 +155,24 @@ function spread(a) {
   // トランポリン（真ん中寄りの空いた所に 3 つ）
   a.tramps = freeSpots(a, 3, { R: 2.2, inner: 0.62 }).map(([x, z]) => ({ x0: x - 1.2, x1: x + 1.2, z0: z - 1.2, z1: z + 1.2, y0: 0, y1: 0.45, c: 0x2f80ed, k: 'tramp' }));
   a.boxes = [...a.boxes, ...a.tramps];
+  // 丘とくぼみ（家具・押せるもの・道・水のない所に、なだらかな地形）
+  a.terrain = terrainSpots(a);
+  a.terrainTop = Math.max(0, ...a.terrain.map((f) => f.h));
+  a.floorY = Math.min(0, ...a.terrain.map((f) => f.h)); // いちばん低い地面（くぼみの底）
+  // 出発地点を 20 か所足す（家具を避け、会場の真ん中を向く）
+  const more = freeSpots(a, 20, { R: 1.6, avoid: a.items, gap: 6 }).map(([x, z]) => [x, z, Math.atan2(-x, -z)]);
+  a.spawns = [...a.spawns, ...more];
   // 見た目は元の箱のまま（draw）、当たり判定は形に合わせた箱の組（boxes）
   a.draw = a.boxes;
   a.boxes = a.boxes.flatMap(hitParts);
-  a.heals = freeSpots(a, 8);
+  // 地面に置くものの高さは、地形に合わせる
+  const onGround = ([x, z, y]) => [x, z, y + groundY(a, x, z)];
+  a.items = a.items.map(([x, z, y]) => (y === 0 ? onGround([x, z, 0]) : [x, z, y]));
+  a.heals = freeSpots(a, 8).map(onGround);
   // 補給箱が落ちてくる所（おやつ・トランポリンを避けた空いた所）
-  a.drops = freeSpots(a, 10, { R: 1.6, avoid: a.heals });
-  // 風船の的（空中。高さは 2.2〜3.6 で決まった順）
-  a.balloons = freeSpots(a, 6, { R: 1.4, inner: 0.85, avoid: [...a.heals, ...a.drops] }).map(([x, z], k) => [x, z, 2.2 + ((k * 0.53) % 1.4)]);
+  a.drops = freeSpots(a, 10, { R: 1.6, avoid: a.heals }).map(onGround);
+  // 風船の的（空中。地面からの高さは 2.2〜3.6 で決まった順）
+  a.balloons = freeSpots(a, 6, { R: 1.4, inner: 0.85, avoid: [...a.heals, ...a.drops] }).map(([x, z], k) => [x, z, 2.2 + ((k * 0.53) % 1.4) + groundY(a, x, z)]);
   // 水（入ると遅くなる）
   a.water = (a.decor || []).filter((d) => d.type === 'water').map((d) => ({ x0: d.x - d.w / 2, x1: d.x + d.w / 2, z0: d.z - d.d / 2, z1: d.z + d.d / 2 }));
   return a;
@@ -171,7 +183,7 @@ function spread(a) {
  * できるだけ離して選ぶ（1 つ目は真ん中にいちばん近い所、そのあとは選んだ所からいちばん遠い所）。
  * R: 空けておく半径、inner: 会場の真ん中寄りだけ（幅・奥行きのこの割合の中）
  */
-function freeSpots(a, n, { R = 1.1, inner = 1, avoid = [] } = {}) {
+function freeSpots(a, n, { R = 1.1, inner = 1, avoid = [], gap = 3 } = {}) {
   const blocked = (x, z) =>
     a.boxes.some((b) => b.y0 < 1.6 && x + R > b.x0 && x - R < b.x1 && z + R > b.z0 && z - R < b.z1) ||
     (a.movables || []).some((m) => Math.abs(x - m.x) < m.w / 2 + R + 0.5 && Math.abs(z - m.z) < m.d / 2 + R + 0.5) ||
@@ -181,7 +193,7 @@ function freeSpots(a, n, { R = 1.1, inner = 1, avoid = [] } = {}) {
   for (let x = -ROOM.W / 2 + 3; x <= ROOM.W / 2 - 3; x += 2) {
     for (let z = -ROOM.D / 2 + 3; z <= ROOM.D / 2 - 3; z += 2) {
       if (Math.abs(x) > (ROOM.W / 2) * inner || Math.abs(z) > (ROOM.D / 2) * inner) continue;
-      if (!blocked(x, z) && !near(x, z, a.spawns, 3) && !near(x, z, a.items, 3) && !near(x, z, avoid, 3)) cand.push([x, z]);
+      if (!blocked(x, z) && !near(x, z, a.spawns, gap) && !near(x, z, a.items, 3) && !near(x, z, avoid, 3)) cand.push([x, z]);
     }
   }
   const out = [];
@@ -201,6 +213,117 @@ function freeSpots(a, n, { R = 1.1, inner = 1, avoid = [] } = {}) {
     out.push(best);
   }
   return out.map(([x, z]) => [x, z, 0]);
+}
+
+/**
+ * 丘とくぼみの場所（毎回同じ）。{ x, z, r: 半径, h: 高さ（くぼみは -） }。
+ * 形は (1 + cos(π d / r)) / 2 のなだらかな山（いちばん急な所で 20° くらい。歩いて上り下りできる）。
+ * 家具・押せるもの・道（rug）・水・柵から離れた所を、できるだけ離して選ぶ（丘 → くぼみ → 丘 … の順）
+ */
+function terrainSpots(a) {
+  const KINDS = [
+    [8.5, 2.4],
+    [6.5, -1.7],
+    [9, 2.0],
+    [7, -1.6],
+    [7.5, 2.6],
+    [6, -1.5],
+    [8, 1.8],
+  ];
+  const boxDist = (b, x, z) => Math.hypot(Math.max(b.x0 - x, 0, x - b.x1), Math.max(b.z0 - z, 0, z - b.z1));
+  const out = [];
+  for (const [r, h] of KINDS) {
+    let best = null;
+    let bd = -1;
+    for (let x = -ROOM.W / 2 + r + 2; x <= ROOM.W / 2 - r - 2; x += 1.5) {
+      for (let z = -ROOM.D / 2 + r + 2; z <= ROOM.D / 2 - r - 2; z += 1.5) {
+        if (a.boxes.some((b) => boxDist(b, x, z) < r + 0.8)) continue;
+        if ((a.movables || []).some((m) => Math.hypot(m.x - x, m.z - z) < r + Math.max(m.w, m.d) / 2 + 1)) continue;
+        if ((a.decor || []).some((d) => (d.type === 'rug' || d.type === 'water') && Math.hypot(Math.max(Math.abs(x - d.x) - d.w / 2, 0), Math.max(Math.abs(z - d.z) - d.d / 2, 0)) < r + 0.5)) continue;
+        if (out.some((f) => Math.hypot(f.x - x, f.z - z) < f.r + r + 3)) continue;
+        // 選んだ所から遠く（はじめは真ん中寄り）
+        const d = out.length ? Math.min(...out.map((f) => Math.hypot(f.x - x, f.z - z))) : 1000 - Math.hypot(x, z);
+        if (d > bd) {
+          bd = d;
+          best = [x, z];
+        }
+      }
+    }
+    if (best) out.push({ x: best[0], z: best[1], r, h });
+  }
+  return out;
+}
+
+/** 地面の高さ（丘・くぼみ。何もない所は 0） */
+export function groundY(a, x, z) {
+  const T = a.terrain;
+  if (!T || !T.length) return 0;
+  let y = 0;
+  for (const f of T) {
+    const dx = x - f.x;
+    const dz = z - f.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= f.r * f.r) continue;
+    y += (f.h * (1 + Math.cos((Math.PI * Math.sqrt(d2)) / f.r))) / 2;
+  }
+  return y;
+}
+
+/** 地面の傾き (dy/dx, dy/dz) */
+export function groundSlope(a, x, z) {
+  let gx = 0;
+  let gz = 0;
+  for (const f of a.terrain || []) {
+    const dx = x - f.x;
+    const dz = z - f.z;
+    const d = Math.hypot(dx, dz);
+    if (d >= f.r || d < 1e-6) continue;
+    const k = (-f.h * Math.PI * Math.sin((Math.PI * d) / f.r)) / (2 * f.r) / d;
+    gx += k * dx;
+    gz += k * dz;
+  }
+  return [gx, gz];
+}
+
+/**
+ * 線分 a → b（太さ r）が、地形（丘・くぼみ・平らな地面）に最初に当たる割合（tmax まで。当たらなければ 1）。
+ * 細かく区切って地面の下に入る所を探し、そこから半分ずつ詰める。out に当たった面の向き
+ */
+export function terrainHit(a, ax, ay, az, bx, by, bz, r, tmax = 1, out = null) {
+  if (!a.terrain || !a.terrain.length) return 1;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const dz = bz - az;
+  // 地形のいちばん高い所より上を通るだけなら当たらない
+  if (Math.min(ay, ay + dy * tmax) - r > a.terrainTop + 1e-6) return 1;
+  const f = (t) => ay + dy * t - r - groundY(a, ax + dx * t, az + dz * t);
+  if (f(0) < 0) return 1; // 地面の中から出発（ありえないが、出られなくならないように）
+  const len = Math.hypot(dx, dy, dz) * tmax;
+  const n = Math.max(1, Math.ceil(len / 0.35));
+  let lo = 0;
+  for (let i = 1; i <= n; i++) {
+    const t = (tmax * i) / n;
+    if (f(t) >= 0) {
+      lo = t;
+      continue;
+    }
+    let hi = t;
+    for (let k = 0; k < 10; k++) {
+      const m = (lo + hi) / 2;
+      if (f(m) >= 0) lo = m;
+      else hi = m;
+    }
+    if (out) {
+      const [gx, gz] = groundSlope(a, ax + dx * lo, az + dz * lo);
+      const l = Math.hypot(gx, 1, gz);
+      out.t = lo;
+      out.nx = -gx / l;
+      out.ny = 1 / l;
+      out.nz = -gz / l;
+    }
+    return lo;
+  }
+  return 1;
 }
 
 /**
@@ -475,10 +598,19 @@ export const overlapXZ = (b, x, z, r) => x + r > b.x0 && x - r < b.x1 && z + r >
  */
 export function segmentHit(arena, ax, ay, az, bx, by, bz, r = 0, out = null) {
   // Rust（WebAssembly）が使えればそちらで（collide.js）。結果は下の JavaScript と同じ
-  const w = wasmSegmentHit(arena.boxes, ROOM.W, ROOM.D, ax, ay, az, bx, by, bz, r, out);
-  if (w !== null) return w;
-  return segmentHitJs(arena, ax, ay, az, bx, by, bz, r, out);
+  let t = wasmSegmentHit(arena.boxes, ROOM.W, ROOM.D, ax, ay, az, bx, by, bz, r, out, arena.floorY || 0);
+  if (t === null) t = segmentHitJs(arena, ax, ay, az, bx, by, bz, r, out);
+  // 丘・くぼみ（箱・柵より手前で当たれば、そちら）
+  if (arena.terrain?.length) {
+    const tt = terrainHit(arena, ax, ay, az, bx, by, bz, r, t, out ? terOut : null);
+    if (tt < t) {
+      t = tt;
+      if (out) Object.assign(out, terOut);
+    }
+  }
+  return t;
 }
+const terOut = { t: 1, nx: 0, ny: 1, nz: 0 };
 
 /** segmentHit の JavaScript 版（Rust 版と同じ計算） */
 export function segmentHitJs(arena, ax, ay, az, bx, by, bz, r = 0, out = null) {
@@ -489,7 +621,7 @@ export function segmentHitJs(arena, ax, ay, az, bx, by, bz, r = 0, out = null) {
   const dz = bz - az;
   // 床・壁
   const planes = [
-    [dy, r - ay, 0, 1, 0, -1], // 床 y = r（下向きに越える）
+    [dy, (arena.floorY || 0) + r - ay, 0, 1, 0, -1], // 床 y = r（下向きに越える。くぼみがあれば、いちばん深い所）
     [dx, -ROOM.W / 2 + r - ax, 1, 0, 0, -1],
     [dx, ROOM.W / 2 - r - ax, -1, 0, 0, 1],
     [dz, -ROOM.D / 2 + r - az, 0, 0, 1, -1],

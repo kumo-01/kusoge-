@@ -274,7 +274,7 @@ export function packBin(s, withRs = true, ev = null) {
   w.u8(s.drop ? 1 : 0);
   w.i16(s.drop ? s.drop.x * POS : 0);
   w.i16(s.drop ? s.drop.z * POS : 0);
-  w.u16(s.drop ? s.drop.y * 100 : 0);
+  w.i16(s.drop ? s.drop.y * 100 : 0);
   const wd = s.wind || { x: 0, z: 0, t: 0 };
   w.i8(wd.x * 10);
   w.i8(wd.z * 10);
@@ -379,7 +379,7 @@ export function unpackBin(u8, n, prevRs = null) {
     const hasDrop = r.u8();
     const dx = r.i16() / POS;
     const dz = r.i16() / POS;
-    const dy = r.u16() / 100;
+    const dy = r.i16() / 100;
     const drop = hasDrop ? { x: dx, z: dz, y: dy } : null;
     const wind = { x: r.i8() / 10, z: r.i8() / 10, t: r.u8() / 10 };
     const balloons = r.u8();

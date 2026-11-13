@@ -2,7 +2,7 @@
 // 自分の犬は自分の端末で、CPU の犬はホストが、同じ stepMove で動かす。輪ゴムはホストが正本（ゲストは見た目だけ同じ計算）
 
 import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL, THICK_MUL, HEADSHOT, FUN, EXTRA } from './constants.js';
-import { ROOM, overlapXZ, segmentHit } from './arena.js';
+import { ROOM, overlapXZ, segmentHit, groundY } from './arena.js';
 
 /** 動く体（犬）の初期値 */
 export function createBody(x = 0, z = 0, yaw = 0) {
@@ -149,9 +149,10 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
   }
   // 縦
   const ny = m.y + m.vy * dt;
+  const wasGround = m.ground;
   if (m.vy <= 0) {
-    // 下: 床か、箱の上に着く
-    let floor = 0;
+    // 下: 地面（丘・くぼみ）か、箱の上に着く
+    let floor = groundY(arena, m.x, m.z);
     let floorBox = null;
     for (const b of arena.boxes) {
       if (overlapXZ(b, m.x, m.z, r) && b.y1 <= m.y + 1e-3 && b.y1 > floor) {
@@ -159,7 +160,8 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
         floorBox = b;
       }
     }
-    if (ny <= floor) {
+    // 下り坂: 地面についていたら、少し下がっただけなら地面に沿う（ジャンプできなくならないように）
+    if (ny <= floor || (wasGround && !res.jumped && m.y - floor < 0.3)) {
       m.y = floor;
       m.vy = 0;
       m.ground = true;
