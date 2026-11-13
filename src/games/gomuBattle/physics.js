@@ -1,7 +1,7 @@
 // 犬の動き（歩く・ジャンプ・ダッシュ・伏せ）と、輪ゴムの飛び方。
 // 自分の犬は自分の端末で、CPU の犬はホストが、同じ stepMove で動かす。輪ゴムはホストが正本（ゲストは見た目だけ同じ計算）
 
-import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL, THICK_MUL } from './constants.js';
+import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL, THICK_MUL, HEADSHOT } from './constants.js';
 import { ROOM, overlapXZ, segmentHit } from './arena.js';
 
 /** 動く体（犬）の初期値 */
@@ -237,6 +237,19 @@ export function bandSpec(kind, weapon = WEAPON.NORMAL) {
   if (kind === ITEM.THICK) return { ...base, speed: w === WEAPON.NORMAL ? ITEMS.THICK_SPEED : W.speed * (bomb ? 1 : 0.8), r: bomb ? W.r * 1.3 : ITEMS.THICK_RADIUS, mul: THICK_MUL };
   if (kind === ITEM.BOUNCE) return { ...base, bounce: ITEMS.BOUNCES, life: Math.max(W.life, ITEMS.BOUNCE_LIFE) };
   return base;
+}
+
+/** (x, y, z) で当たったのが q の頭か（体の高さの上の方 PLAYER.HEAD より上） */
+export function isHead(q, y) {
+  return y - q.y >= heightOf(q) * PLAYER.HEAD;
+}
+
+/** 当たったときのダメージ（距離・極太ゴム・ヘッドショットこみ） */
+export function hitDamage(weapon, dist, mul = 1, head = false) {
+  const base = weaponDamage(weapon, dist, mul);
+  if (!head || weapon === WEAPON.BOMB || weapon === WEAPON.RIFLE) return base;
+  if (weapon === WEAPON.SNIPER) return Math.max(base, Math.round(PLAYER.HP * HEADSHOT.SNIPER_RATE));
+  return Math.round(base * HEADSHOT.MUL);
 }
 
 /**

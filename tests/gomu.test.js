@@ -45,8 +45,8 @@ test('会場: 3 つとも、出発地点・アイテムの箱・押せるもの�
     }
     assert.ok(a.spawns.length >= 8 && a.items.length >= 8, '広い会場なので出発地点・箱も多い');
   }
-  assert.ok(Math.abs((ROOM.W * ROOM.D) / (52 * 40) - 1.5) < 0.01, '前の 1.5 倍の広さ');
-  assert.equal(ROUND.TIME, 270, '4 分 30 秒（6 分の 3/4）');
+  assert.ok(Math.abs((ROOM.W * ROOM.D) / (52 * 40) - 2.25) < 0.01, '52 × 40 の部屋の 2.25 倍の広さ（1.5 倍を 2 回）');
+  assert.equal(ROUND.TIME, 405, '6 分 45 秒');
   assert.equal(PLAYER.HP, 100);
 });
 
@@ -238,7 +238,7 @@ test('アイテム: 照準ぶれ・ゴム切れは自分以外、ガムを踏む
   assert.equal(sim.s.smokes.length, 0);
 });
 
-test('ラウンド: 4 分 30 秒で 1 ラウンド、会場が変わって 3 ラウンドで終わる。点はラウンドごとにも数える', () => {
+test('ラウンド: 6 分 45 秒で 1 ラウンド、会場が変わって 3 ラウンドで終わる。点はラウンドごとにも数える', () => {
   const sim = new GomuSim({ humans: 1, bots: 3, seed: 5 });
   const rounds = [];
   let ticks = 0;
@@ -263,8 +263,13 @@ test('CPU: 動き回って撃ち、アイテムを拾って使う（家具に引
   const ev = {};
   const start = sim.s.players.map((p) => [p.x, p.z]);
   let far = 0;
+  // 会場が広いので、出会う・箱にたどり着くまで少しかかる（アイテムを拾って使うまで、最大 4 分）
   run(sim, ROUND.INTRO + 60);
   for (const e of sim.drainEvents()) ev[e.t] = (ev[e.t] || 0) + 1;
+  for (let k = 0; k < 18 && !(ev.pick > 0 && ev.use > 0); k++) {
+    run(sim, 10);
+    for (const e of sim.drainEvents()) ev[e.t] = (ev[e.t] || 0) + 1;
+  }
   for (const p of sim.s.players.slice(1)) if (Math.hypot(p.x - start[p.i][0], p.z - start[p.i][1]) > 2 || p.deaths) far++;
   assert.ok(far >= 4, `動いた CPU ${far}`);
   assert.ok(ev.shot > 20 && ev.hit > 3, JSON.stringify(ev));
@@ -384,7 +389,7 @@ test('配信のバイト列: 位置・向き・体力・アイテム・点・押
   // ラウンドごとの点を載せない回は、前の値を使う
   const d2 = unpackBin(packBin(sim.s, false, null), 7, d.st.players.map((p) => p.rs));
   assert.deepEqual(d2.st.players.map((p) => p.rs), d.st.players.map((p) => p.rs));
-  assert.ok(packBin(sim.s, false, null).length < 240, '7 匹で 240 バイト未満（煙・ガムの数で少し変わる）');
+  assert.ok(packBin(sim.s, false, null).length < 250, '7 匹で 250 バイト未満（煙・ガムの数で少し変わる）');
 });
 
 test('アイテム: 回復おやつは体力が 40 回復（100 まで）、無敵スターは 10 秒間 輪ゴムもガムも効かない', () => {
@@ -458,11 +463,12 @@ test('スナイパー: 速くまっすぐ飛んで、遠いほど痛い。5 発�
   const [a, b] = sim.s.players;
   a.weapon = WEAPON.SNIPER;
   a.ammo = WEAPONS[WEAPON.SNIPER].ammo;
-  Object.assign(a, { x: -25, z: -1, y: 0 });
-  Object.assign(b, { x: 10, z: -1, y: 0 });
-  const d = [b.x - a.x, 0, 0];
+  Object.assign(a, { x: -25, z: 1, y: 0 }); // 公園の z = 1 の通りは何もない
+  Object.assign(b, { x: 10, z: 1, y: 0 });
+  // 胸（頭より下）を狙う
+  const d = [b.x - a.x, b.y + 0.5 - eye(a)[1], 0];
   const l = Math.hypot(...d);
-  assert.ok(sim.tryFire(a, eye(a), [d[0] / l, 0, 0]));
+  assert.ok(sim.tryFire(a, eye(a), d.map((v) => v / l)));
   assert.equal(sim.tryFire(a, eye(a), [1, 0, 0]), false, 'すぐには次を撃てない');
   run(sim, 0.8); // 40 先まで 0.6 秒くらい
   const sd = PLAYER.HP - b.hp;
@@ -731,4 +737,54 @@ test('配信: ホストのチームと残りの爆弾が載る（ゲストはホ
   assert.deepEqual(d.st.players.map((p) => p.team), [1, 1, 0, 0, 1]);
   assert.equal(d.st.players[2].bombs, 3);
   assert.equal(d.st.players[0].bombs, 5);
+});
+
+test('ヘッドショット: 頭（体の上の方）に当たると、スナイパーは 80（体力の 8 割）、輪ゴム鉄砲は 15% 多い。印つきで配る', () => {
+  const sim = ready();
+  const [a, b] = sim.s.players;
+  Object.assign(a, { x: -4, z: 1, y: 0 });
+  Object.assign(b, { x: 4, z: 1, y: 0 });
+  const head = (q) => [q.x - a.x, q.y + heightOf(q) * 0.9 - eye(a)[1], q.z - a.z];
+  const norm = (v) => v.map((x) => x / Math.hypot(...v));
+  // 輪ゴム鉄砲で頭: 14 × 1.15 = 16
+  assert.ok(sim.fire(0, eye(a), norm(head(b))));
+  run(sim, 0.4);
+  assert.equal(b.hp, PLAYER.HP - Math.round(14 * 1.15));
+  const ev = sim.drainEvents().find((e) => e.t === 'hit');
+  assert.equal(ev.hs, 1, 'ヘッドショットの印');
+  // 胸なら 14（印なし）
+  b.hp = PLAYER.HP;
+  sim.fire(0, eye(a), norm([b.x - a.x, b.y + 0.4 - eye(a)[1], 0]));
+  run(sim, 0.4);
+  assert.equal(b.hp, PLAYER.HP - 14);
+  assert.equal(sim.drainEvents().find((e) => e.t === 'hit').hs, undefined);
+  // スナイパーで頭: 80
+  b.hp = PLAYER.HP;
+  a.weapon = WEAPON.SNIPER;
+  sim.fire(0, eye(a), norm(head(b)));
+  run(sim, 0.4);
+  assert.equal(b.hp, PLAYER.HP - 80);
+});
+
+test('回復のおやつ: 会場に落ちていて、体力が減った犬が拾うと 40 回復。しばらくしてまた出る。箱からは回復が出ない', async () => {
+  const { TREAT, BOX_ITEMS } = await import('../src/games/gomuBattle/constants.js');
+  assert.ok(!BOX_ITEMS.includes(ITEM.HEAL));
+  for (const ar of ARENAS) assert.equal(ar.heals.length, TREAT.COUNT, `${ar.id} におやつ 8 つ`);
+  const sim = ready();
+  const [a] = sim.s.players;
+  const [hx, hz] = sim.arena.heals[0];
+  // 満タンなら拾わない
+  Object.assign(a, { x: hx, z: hz, y: 0 });
+  run(sim, 0.1);
+  assert.equal(sim.s.heals[0], 0, '満タンのときは拾わない');
+  a.hp = 30;
+  run(sim, 0.1);
+  assert.equal(a.hp, 30 + TREAT.HEAL);
+  assert.ok(sim.s.heals[0] > 0, '拾ったら消える');
+  assert.ok(sim.drainEvents().some((e) => e.t === 'heal' && e.i === 0 && e.k === 0));
+  Object.assign(a, { x: hx + 6, z: hz }); // 離れる（立ったままだと、また出た瞬間に拾う）
+  run(sim, TREAT.RESPAWN + 0.2);
+  assert.equal(sim.s.heals[0], 0, 'また出る');
+  const d = unpackBin(packBin(sim.s), 2);
+  assert.equal(d.st.heals & 1, 1, '配信に載る');
 });

@@ -5,6 +5,7 @@ import { buildDog } from '../dogKart/dog.js';
 import { device } from '../../core/device.js';
 import { ROOM } from './arena.js';
 import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS, WEAPON } from './constants.js';
+import { mat as stdMat, kindMat, weaponRack, realisticDog } from './look.js';
 
 /** 輪ゴムの色（種類ごと） */
 export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]: 0x2a9d8f, [ITEM.BOUNCE]: 0x3a86ff, [ITEM.HOMING]: 0x9b5de5 };
@@ -14,14 +15,14 @@ export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]:
  */
 function makeFlag(color) {
   const g = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.0, 6), new THREE.MeshToonMaterial({ color: 0xf1faee }));
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.0, 6), toon(0xf1faee));
   pole.position.y = 0.5;
-  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), new THREE.MeshToonMaterial({ color: 0xffd23f }));
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), toon(0xffd23f));
   tip.position.y = 1.02;
   // 布: 横 0.46・縦 0.3 を細かく分けて、頂点を波のように動かす
   const geo = new THREE.PlaneGeometry(0.46, 0.3, 8, 2);
   geo.translate(0.23, 0, 0); // 棒の側をはしにする
-  const cloth = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ color, side: THREE.DoubleSide }));
+  const cloth = new THREE.Mesh(geo, toon(color, { side: THREE.DoubleSide }));
   cloth.position.y = 0.84;
   cloth.rotation.y = Math.PI / 2; // 後ろへなびく
   // 白い丸（目印）
@@ -29,7 +30,7 @@ function makeFlag(color) {
   dot.position.set(0.2, 0, 0.003);
   cloth.add(dot);
   g.add(pole, tip, cloth);
-  g.position.set(0, 0.45, -0.32);
+  g.position.set(0, 0.56, -0.4);
   g.userData = { cloth, base: Float32Array.from(geo.attributes.position.array) };
   return g;
 }
@@ -50,10 +51,10 @@ function waveFlag(flag, t, k) {
 /** 爆弾の見た目（半径 0.2 の黒い玉・導火線・火花）。spark は点滅させる */
 function makeBomb() {
   const g = new THREE.Group();
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), new THREE.MeshToonMaterial({ color: 0x2b2d42 }));
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.07, 10), new THREE.MeshToonMaterial({ color: 0x6c757d }));
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), toon(0x2b2d42, { roughness: 0.5 }));
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.07, 10), toon(0x6c757d, { roughness: 0.4, metalness: 0.6 }));
   cap.position.y = 0.2;
-  const fuse = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.12, 6), new THREE.MeshToonMaterial({ color: 0xc9a27e }));
+  const fuse = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.12, 6), toon(0xc9a27e));
   fuse.position.set(0.03, 0.27, 0);
   fuse.rotation.z = -0.4;
   const spark = new THREE.Mesh(new THREE.IcosahedronGeometry(0.04, 0), new THREE.MeshBasicMaterial({ color: 0xffd23f }));
@@ -62,9 +63,10 @@ function makeBomb() {
   g.userData.spark = spark;
   return g;
 }
-const DOG_SCALE = 0.6;
+const DOG_SCALE = 0.75; // 犬の見た目の大きさ（当たり判定の高さ PLAYER.HEIGHT = 1.25 に合わせる）
 
-const toon = (c, o = {}) => new THREE.MeshToonMaterial({ color: c, ...o });
+// 材質: 光の当たり方が自然なもの（look.js）。名前は前のまま
+const toon = (c, o = {}) => stdMat(c, o);
 
 /** 床の模様（キャンバスで描く） */
 function floorTexture(kind, color) {
@@ -121,28 +123,12 @@ function floorTexture(kind, color) {
   return t;
 }
 
-/** 輪ゴム鉄砲（木の銃身・持ち手・先にかけた輪ゴム）。長さ約 0.6 */
-export function makeGun(bandColor = BAND_COLORS[0]) {
-  const g = new THREE.Group();
-  const wood = toon(0xb07a45);
-  const dark = toon(0x7a5230);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.62), wood);
-  barrel.position.z = 0.2;
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.1), dark);
-  grip.position.set(0, -0.1, -0.06);
-  grip.rotation.x = -0.35;
-  const trig = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.07, 0.02), dark);
-  trig.position.set(0, -0.06, 0.03);
-  const hook = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05), dark);
-  hook.position.set(0, 0.05, -0.06);
-  const band = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 6, 14), toon(bandColor));
-  band.scale.set(1, 1, 7);
-  band.position.set(0, 0.045, 0.2);
-  band.rotation.y = Math.PI / 2;
-  g.add(barrel, grip, trig, hook, band);
-  g.userData.band = band;
-  return g;
-}
+/** 自分の武器の見せ方（大きさ s と位置）。長いライフル・スナイパーは小さく、前に出す */
+const VM_FIT = {
+  [WEAPON.NORMAL]: { s: 0.4, x: 0, y: 0, z: 0 },
+  [WEAPON.SNIPER]: { s: 0.3, x: 0.01, y: 0.01, z: -0.05 },
+  [WEAPON.RIFLE]: { s: 0.26, x: 0.01, y: 0.01, z: -0.07 },
+};
 
 export class GomuWorld {
   constructor(container) {
@@ -150,27 +136,36 @@ export class GomuWorld {
     const r = new THREE.WebGLRenderer({ antialias: !device.low, powerPreference: 'high-performance' });
     r.setPixelRatio(Math.min(window.devicePixelRatio || 1, device.maxPixelRatio));
     r.outputColorSpace = THREE.SRGBColorSpace;
-    r.shadowMap.enabled = !device.low;
-    r.shadowMap.autoUpdate = false; // 家具の影は動かないので、会場を作ったときに 1 回だけ描く
+    // 写真のような明るさの出し方と、ふちのやわらかい影
+    r.toneMapping = THREE.ACESFilmicToneMapping;
+    r.toneMappingExposure = 1.05;
+    r.shadowMap.enabled = true;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    // パソコン: 犬や押せるものの影も動かす（2 フレームに 1 回描き直す）。スマホ・タブレット: 会場を作ったときに 1 回だけ描く（軽く）
+    this.dynShadow = !device.low;
+    r.shadowMap.autoUpdate = false;
     r.domElement.className = 'game-canvas gomu-canvas';
     container.append(r.domElement);
     this.renderer = r;
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf6efe2);
     this.scene = scene;
-    this.camera = new THREE.PerspectiveCamera(72, 1, 0.05, 150);
+    this.camera = new THREE.PerspectiveCamera(72, 1, 0.05, 220);
     this.camera.rotation.order = 'YXZ';
     scene.add(this.camera);
-    scene.add(new THREE.HemisphereLight(0xfff8ee, 0xb59d86, 1.5));
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const sun = new THREE.DirectionalLight(0xfff1d8, 1.25);
-    sun.position.set(-12, 30, -20);
-    sun.castShadow = !device.low;
-    sun.shadow.mapSize.set(1024, 1024);
-    const sr = Math.max(ROOM.W, ROOM.D) / 2 + 6; // 影を描く範囲（部屋全体）
-    Object.assign(sun.shadow.camera, { left: -sr, right: sr, top: sr, bottom: -sr, near: 1, far: 100 });
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.bias = -0.0015;
+    // 空の光（上は青白く、下は地面の照り返し）と、少し傾いた太陽（影が長めに出る）
+    scene.add(new THREE.HemisphereLight(0xdcecff, 0x8d7b5e, 1.15));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+    const sun = new THREE.DirectionalLight(0xfff0d6, 2.7);
+    sun.position.set(-34, 46, -26);
+    sun.castShadow = true;
+    const sr = Math.max(ROOM.W, ROOM.D) / 2 + 8; // 影を描く範囲（会場全体）
+    Object.assign(sun.shadow.camera, { left: -sr, right: sr, top: sr, bottom: -sr, near: 1, far: 140 });
+    const ms = device.low ? 2048 : 4096;
+    sun.shadow.mapSize.set(ms, ms);
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.03;
+    sun.shadow.radius = 3;
     scene.add(sun, sun.target);
     this.sun = sun;
     this.arenaGroup = null;
@@ -271,6 +266,30 @@ export class GomuWorld {
       G.add(g);
       return g;
     });
+    // 回復のおやつ（骨の形のクッキー。足もとに緑の輪）
+    this.treats = (arena.heals || []).map(([x, z, y]) => {
+      const g = new THREE.Group();
+      const cookie = toon(0xf2d3a0);
+      const bone = new THREE.Group();
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.5, 10), cookie);
+      bar.rotation.z = Math.PI / 2;
+      bone.add(bar);
+      for (const sx of [-0.25, 0.25]) for (const sz of [-0.07, 0.07]) {
+        const knob = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8), cookie);
+        knob.position.set(sx, sz, 0);
+        bone.add(knob);
+      }
+      bone.rotation.x = -0.4;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.55, 28), new THREE.MeshBasicMaterial({ color: 0x5bd16a, transparent: true, opacity: 0.75, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = -0.38;
+      ring.userData.noCast = true;
+      g.add(bone, ring);
+      g.position.set(x, y + 0.4, z);
+      g.userData = { y: y + 0.4, bone };
+      G.add(g);
+      return g;
+    });
     this.scene.add(G);
     G.traverse((o) => {
       if (o.isMesh && !o.userData.noCast) o.castShadow = true;
@@ -281,7 +300,7 @@ export class GomuWorld {
     G.traverse((o) => {
       if (!this.itemBoxes.includes(o)) o.matrixAutoUpdate = false;
     });
-    for (const g of this.itemBoxes) g.traverse((o) => (o.matrixAutoUpdate = true));
+    for (const g of [...this.itemBoxes, ...this.treats]) g.traverse((o) => (o.matrixAutoUpdate = true));
     this.renderer.shadowMap.needsUpdate = true;
     this.movMeshes = null; // 押せるものは新しい会場で作り直す
     // 前の会場の煙・ガム・輪ゴムは消す
@@ -294,7 +313,7 @@ export class GomuWorld {
     const W = ROOM.W;
     const D = ROOM.D;
     this.scene.background = new THREE.Color(arena.sky);
-    this.scene.fog = new THREE.Fog(arena.sky, 70, 150);
+    this.scene.fog = new THREE.Fog(arena.sky, 90, 200);
     const tex = floorTexture(arena.ground, arena.floor);
     tex.repeat.set((W + 120) / 4, (D + 120) / 4);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(W + 120, D + 120), toon(0xffffff, { map: tex }));
@@ -368,7 +387,7 @@ export class GomuWorld {
     const cx = (b.x0 + b.x1) / 2;
     const cz = (b.z0 + b.z1) / 2;
     const cy = (b.y0 + b.y1) / 2;
-    const mat = toon(b.c);
+    const mat = kindMat(b.k, b.c, Math.max(w, d), h); // 木目・木の皮・岩・布などの模様と質感
     let o;
     if (b.k === 'ball') {
       o = new THREE.Mesh(new THREE.SphereGeometry(Math.min(w, d, h) / 2, 24, 16), mat);
@@ -665,6 +684,16 @@ export class GomuWorld {
     });
   }
 
+  /** 回復のおやつ: 出ているものだけ見せて、ゆっくり回す */
+  updateTreats(on, dt) {
+    (this.treats || []).forEach((g, k) => {
+      g.visible = !!on[k];
+      if (!g.visible) return;
+      g.userData.bone.rotation.y += dt * 2;
+      g.position.y = g.userData.y + Math.sin(this.t * 2.6 + k) * 0.06;
+    });
+  }
+
   // ---- 犬 ----
   /** kinds: 番号ごとの犬の種類、colors: 番号ごとの足もとの輪の色 */
   /** kinds: 犬の種類、colors: 足もとの輪の色、flags: 背中の旗の色（null なら旗なし。見た目だけ） */
@@ -675,8 +704,10 @@ export class GomuWorld {
       const root = new THREE.Group();
       const dog = buildDog(kind);
       dog.group.scale.setScalar(DOG_SCALE);
-      const gun = makeGun();
-      gun.position.set(0.05, 0.5, 0.4);
+      realisticDog(dog.group);
+      // 持っている武器（輪ゴム鉄砲・スナイパー・ライフル。相手からも見える）
+      const gun = weaponRack();
+      gun.position.set(0.06, 0.62, 0.42);
       gun.scale.setScalar(0.9);
       const ring = new THREE.Mesh(new THREE.RingGeometry(0.36, 0.48, 24), new THREE.MeshBasicMaterial({ color: colors[i] ?? 0xffffff, transparent: true, opacity: 0.85 }));
       ring.rotation.x = -Math.PI / 2;
@@ -696,6 +727,7 @@ export class GomuWorld {
       const flag = flags[i] != null ? makeFlag(flags[i]) : null;
       if (flag) body.add(flag);
       root.add(body, ring, blob, gum, star);
+      if (this.dynShadow) body.traverse((o) => o.isMesh && (o.castShadow = true));
       this.scene.add(root);
       return { kind, root, body, dog, gun, ring, blob, gum, star, flag, t: i };
     });
@@ -727,7 +759,9 @@ export class GomuWorld {
       d.body.position.y = v.moving && !v.dead ? Math.abs(Math.sin(d.t * 12)) * 0.08 : 0;
       d.body.position.x = v.stun ? Math.sin(d.t * 50) * 0.05 : 0;
       d.gun.visible = !v.dead;
+      d.gun.userData.set(v.weapon ?? WEAPON.NORMAL);
       d.ring.visible = !v.dead;
+      d.blob.visible = !this.dynShadow; // 影が動くときは、丸い影はいらない
       if (d.flag) waveFlag(d.flag, d.t, v.moving ? 1 : 0.4);
       d.gum.visible = !!v.stuck;
       // 無敵の間は点滅（無敵スターは点滅しないで金色に光る）
@@ -1059,26 +1093,18 @@ export class GomuWorld {
   // ---- 自分の鉄砲（画面の右下） ----
   _buildViewModel() {
     const vm = new THREE.Group();
-    const gun = makeGun();
+    // 自分の武器（ほかの犬が持っているのと同じ形）
+    const gun = weaponRack();
     gun.scale.setScalar(0.4);
     gun.rotation.y = Math.PI; // カメラの前（-z）を向く
     const paw = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8), toon(0xf2a04b));
     paw.position.set(0, -0.05, 0.03);
-    // スナイパー: 長い銃身とスコープ
-    const sn = new THREE.Group();
-    const longB = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.22), toon(0x5c4033));
-    longB.position.set(0, 0, -0.3);
-    const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.16, 12), toon(0x2b2d42));
-    scope.rotation.x = Math.PI / 2;
-    scope.position.set(0, 0.06, -0.1);
-    sn.add(longB, scope);
-    sn.visible = false;
     // 爆弾を持っているとき（鉄砲の代わり）
     const bm = makeBomb();
     bm.scale.setScalar(0.15);
     bm.position.set(-0.02, 0.0, -0.1);
     bm.visible = false;
-    vm.add(gun, paw, sn, bm);
+    vm.add(gun, paw, bm);
     vm.position.set(0.2, -0.19, -0.36);
     vm.traverse((o) => {
       if (o.material) {
@@ -1088,15 +1114,19 @@ export class GomuWorld {
       o.renderOrder = 1000;
     });
     this.camera.add(vm);
-    this.vm = { root: vm, gun, paw, sn, bm, recoil: 0, bob: 0 };
+    this.vm = { root: vm, gun, paw, bm, recoil: 0, bob: 0 };
   }
 
   /** 自分の鉄砲の見た目: 撃った反動・補充中は下げる・輪ゴムの色・歩きの揺れ */
-  setViewModel({ fired = false, reloading = false, kind = 0, moving = false, visible = true, sniper = false, bomb = false, furColor = null }, dt) {
+  setViewModel({ fired = false, reloading = false, kind = 0, moving = false, visible = true, weapon = WEAPON.NORMAL, bomb = false, furColor = null }, dt) {
     const v = this.vm;
     v.root.visible = visible;
-    v.sn.visible = sniper && !bomb;
+    v.gun.userData.set(weapon);
     v.gun.visible = !bomb;
+    // 長い武器は小さめに、少し前へ（画面をふさがないように）
+    const fit = VM_FIT[weapon] || VM_FIT[WEAPON.NORMAL];
+    v.gun.scale.setScalar(fit.s);
+    v.gun.position.set(fit.x, fit.y, fit.z);
     v.bm.visible = bomb; // 爆弾は補充中でもかまえられる
     if (fired) v.recoil = 1;
     v.recoil = Math.max(0, v.recoil - dt * 8);
@@ -1105,7 +1135,7 @@ export class GomuWorld {
     const down = rl ? 0.12 : 0;
     v.root.position.set(0.2 + Math.sin(v.bob) * (moving ? 0.008 : 0.002), -0.19 - down - Math.abs(Math.cos(v.bob)) * (moving ? 0.01 : 0.003), -0.36 + v.recoil * 0.05);
     v.root.rotation.x = v.recoil * 0.25 + (rl ? -0.5 : 0);
-    const band = v.gun.userData.band;
+    const band = v.gun.userData.band();
     band.visible = !reloading;
     band.material.color.setHex(BAND_COLORS[kind] ?? BAND_COLORS[0]);
     if (furColor != null) v.paw.material.color.setHex(furColor);
@@ -1129,6 +1159,8 @@ export class GomuWorld {
   render(dt) {
     this._stepSmokes(dt);
     this._stepFx(dt);
+    // 動く影（パソコン）: 2 フレームに 1 回だけ描き直す
+    if (this.dynShadow && (this._sf = ((this._sf || 0) + 1) % 2) === 0) this.renderer.shadowMap.needsUpdate = true;
     this.renderer.render(this.scene, this.camera);
   }
 

@@ -6,8 +6,8 @@
 
 import { wasmSegmentHit } from './collide.js';
 
-/** 配置を広げる倍率（1.225 倍 × 1.225 倍 = 広さ 1.5 倍） */
-export const SCALE = 1.225;
+/** 配置を広げる倍率（1.5 倍 × 1.5 倍 = 52 × 40 の部屋の 2.25 倍の広さ。2026-11-13 にさらに 1.5 倍） */
+export const SCALE = 1.5;
 
 /** 部屋の広さ（x: -W/2〜W/2、z: -D/2〜D/2） */
 export const ROOM = { W: 52 * SCALE, D: 40 * SCALE, WALL: 9 };
@@ -64,8 +64,8 @@ function chair(cx, cz, s, seat, c, back = 's') {
 function tunnel(cx, cz, len, c1, c2, ns = false) {
   return grp(cx, cz, () =>
     ns
-      ? [box(-1.1, 0, 0.25, len, 0, 0.8, c1, 'toy'), box(1.1, 0, 0.25, len, 0, 0.8, c1, 'toy'), box(0, 0, 2.45, len, 0.65, 0.2, c2, 'toy')]
-      : [box(0, -1.1, len, 0.25, 0, 0.8, c1, 'toy'), box(0, 1.1, len, 0.25, 0, 0.8, c1, 'toy'), box(0, 0, len, 2.45, 0.65, 0.2, c2, 'toy')],
+      ? [box(-1.1, 0, 0.25, len, 0, 0.95, c1, 'toy'), box(1.1, 0, 0.25, len, 0, 0.95, c1, 'toy'), box(0, 0, 2.45, len, 0.78, 0.2, c2, 'toy')]
+      : [box(0, -1.1, len, 0.25, 0, 0.95, c1, 'toy'), box(0, 1.1, len, 0.25, 0, 0.95, c1, 'toy'), box(0, 0, len, 2.45, 0.78, 0.2, c2, 'toy')],
   );
 }
 
@@ -116,7 +116,7 @@ function lookout(cx, cz, top, c, dir = 'e') {
 
 /**
  * スナイパー向けの高台: 歩いて上れる段々の丘（1 段 0.45）と、上のふちの土のうの壁。
- * 壁は高さ 0.55: 伏せると隠れて、立つと上から撃てる。face: 壁を置く向き（会場の真ん中の方）
+ * 壁は高さ 0.72: 伏せると隠れて、立つと上から撃てる。face: 壁を置く向き（会場の真ん中の方）
  * 上の広さは w - 2(L-1) × d - 1.6(L-1)、高さは 0.45 × L
  */
 function hill(cx, cz, w, d, face, L = 4, c = 0x7fb069) {
@@ -128,8 +128,8 @@ function hill(cx, cz, w, d, face, L = 4, c = 0x7fb069) {
     const top = 0.45 * L;
     const bag = 0xc2a878;
     // 壁はふちの真ん中だけ（両はしは空けて、上り下りできるように）
-    if (face === 'e' || face === 'w') out.push(box((face === 'e' ? 1 : -1) * (tw / 2 - 0.3), 0, 0.6, Math.max(1.2, td - 1.8), top, 0.55, bag, 'sandbag'));
-    else out.push(box(0, (face === 's' ? 1 : -1) * (td / 2 - 0.3), Math.max(1.2, tw - 1.8), 0.6, top, 0.55, bag, 'sandbag'));
+    if (face === 'e' || face === 'w') out.push(box((face === 'e' ? 1 : -1) * (tw / 2 - 0.3), 0, 0.6, Math.max(1.2, td - 1.8), top, 0.72, bag, 'sandbag'));
+    else out.push(box(0, (face === 's' ? 1 : -1) * (td / 2 - 0.3), Math.max(1.2, tw - 1.8), 0.6, top, 0.72, bag, 'sandbag'));
     return out;
   });
 }
@@ -153,7 +153,45 @@ function spread(a) {
   // 見た目は元の箱のまま（draw）、当たり判定は形に合わせた箱の組（boxes）
   a.draw = a.boxes;
   a.boxes = a.boxes.flatMap(hitParts);
+  a.heals = treatSpots(a);
   return a;
+}
+
+/**
+ * 回復のおやつを置く場所（会場ごとに 8 か所。毎回同じ）。家具・押せるものに重ならない地面で、
+ * 出発地点・アイテムの箱から 3 以上、おやつどうしはできるだけ離す（いちばん遠い所から順に選ぶ）
+ */
+function treatSpots(a, n = 8) {
+  const R = 1.1;
+  const blocked = (x, z) =>
+    a.boxes.some((b) => b.y0 < 1.6 && x + R > b.x0 && x - R < b.x1 && z + R > b.z0 && z - R < b.z1) ||
+    (a.movables || []).some((m) => Math.abs(x - m.x) < m.w / 2 + R + 0.5 && Math.abs(z - m.z) < m.d / 2 + R + 0.5) ||
+    (a.decor || []).some((d) => d.type === 'water' && Math.abs(x - d.x) < d.w / 2 + R && Math.abs(z - d.z) < d.d / 2 + R); // 水の上には置かない
+  const near = (x, z, list, d) => list.some(([px, pz]) => Math.hypot(px - x, pz - z) < d);
+  const cand = [];
+  for (let x = -ROOM.W / 2 + 3; x <= ROOM.W / 2 - 3; x += 2) {
+    for (let z = -ROOM.D / 2 + 3; z <= ROOM.D / 2 - 3; z += 2) {
+      if (!blocked(x, z) && !near(x, z, a.spawns, 3) && !near(x, z, a.items, 3)) cand.push([x, z]);
+    }
+  }
+  const out = [];
+  // 1 つ目は真ん中にいちばん近い所。そのあとは、選んだ所からいちばん遠い所
+  let first = cand[0];
+  for (const c of cand) if (Math.hypot(c[0], c[1]) < Math.hypot(first[0], first[1])) first = c;
+  if (first) out.push(first);
+  while (out.length < n && out.length < cand.length) {
+    let best = null;
+    let bd = -1;
+    for (const c of cand) {
+      const d = Math.min(...out.map(([x, z]) => Math.hypot(x - c[0], z - c[1])));
+      if (d > bd) {
+        bd = d;
+        best = c;
+      }
+    }
+    out.push(best);
+  }
+  return out.map(([x, z]) => [x, z, 0]);
 }
 
 /**

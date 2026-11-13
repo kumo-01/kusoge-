@@ -3,7 +3,7 @@
 
 export const ROUND = {
   COUNT: 3, // ラウンド数
-  TIME: 270, // 1 ラウンドの長さ（秒）。4 分 30 秒
+  TIME: 405, // 1 ラウンドの長さ（秒）。6 分 45 秒
   PICK: 12, // ラウンドの前に武器を選ぶ時間（全員が選んだら早く進む）
   INTRO: 3, // 始まる前の 3・2・1
   END: 4, // ラウンドの終わりの結果表示
@@ -11,10 +11,11 @@ export const ROUND = {
 
 export const PLAYER = {
   RADIUS: 0.35, // ぶつかる太さ（半径）
-  HEIGHT: 1.0, // 立っている高さ
-  CROUCH_HEIGHT: 0.55, // 伏せの高さ（テーブルの下をくぐれる）
-  EYE: 0.85, // 目の高さ
-  CROUCH_EYE: 0.42,
+  HEIGHT: 1.25, // 立っている高さ（2026-11-13 に 1.0 → 1.25）
+  CROUCH_HEIGHT: 0.66, // 伏せの高さ（テーブルの下・トンネルをくぐれる）
+  EYE: 1.06, // 目の高さ
+  CROUCH_EYE: 0.52,
+  HEAD: 0.74, // 体の高さのこの割合より上に当たったら頭（ヘッドショット）
   SPEED: 5.2, // 歩く速さ
   CROUCH_SPEED: 2.3,
   ACCEL: 40, // 速さが変わる速さ（地上）
@@ -70,6 +71,8 @@ export const ITEM = {
 
 /** ゴムが変わるアイテム → 撃つ輪ゴムの種類 */
 export const BAND_ITEMS = [ITEM.THICK, ITEM.TRIPLE, ITEM.BOUNCE, ITEM.HOMING];
+/** プレゼント箱から出るアイテム（回復は箱からは出ない。会場に落ちているおやつを拾う） */
+export const BOX_ITEMS = Array.from({ length: ITEM.COUNT - 1 }, (_, k) => k + 1).filter((it) => it !== ITEM.HEAL);
 
 export const ITEMS = {
   BOX_RESPAWN: 10, // 箱を取ってから次が出るまで
@@ -96,6 +99,9 @@ export const ITEMS = {
   STAR_TIME: 10, // 無敵の時間
 };
 
+/** 回復のおやつ（会場に落ちている。拾うと体力が戻る。拾ったあとしばらくするとまた出る） */
+export const TREAT = { HEAL: 40, RESPAWN: 20, RADIUS: 0.9, COUNT: 8 };
+
 export const SCORE = {
   DMG_PER_POINT: 10, // 相手に与えたダメージ 10 ごとに 1 点
   KILL: 3,
@@ -103,7 +109,7 @@ export const SCORE = {
 
 export const BOT = {
   MAX: 5,
-  VIEW: 40, // 見える距離
+  VIEW: 48, // 見える距離
   AIM_ERROR: 0.2, // 狙いのぶれ（ラジアン）
   REACT: 1.0, // 相手を見つけてから撃ち始めるまで
   FIRE_GAP: 0.7, // CPU の連射の間隔（人より遅い）
@@ -142,6 +148,8 @@ export const WEAPONS = {
 export const WEAPON_LIST = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.RIFLE];
 /** 爆弾: 1 ラウンドに投げられる数（全員） */
 export const BOMB_COUNT = 5;
+/** ヘッドショット（頭に当たった）: スナイパーは体力の 8 割（80）、ほかの鉄砲はいつもより 15% 多い。ライフルは頭でなくても一撃 */
+export const HEADSHOT = { SNIPER_RATE: 0.8, MUL: 1.15 };
 /** 極太ゴムのダメージの倍率 */
 export const THICK_MUL = 1.6;
 

@@ -201,9 +201,10 @@ export class GomuHud {
 
   /** 当てた（照準に印） */
   /** 与えたダメージの数（照準の右上にぽんと出る） */
-  dmgPop(n) {
+  dmgPop(n, head = false) {
     if (!(n > 0)) return;
-    this.dmg.textContent = String(n);
+    this.dmg.textContent = head ? `ヘッドショット ${n}` : String(n);
+    this.dmg.classList.toggle('is-head', !!head);
     this.dmg.classList.remove('on');
     void this.dmg.offsetWidth;
     this.dmg.classList.add('on');

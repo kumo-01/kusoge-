@@ -225,6 +225,20 @@ function perches(arena) {
 function pickGoal(sim, p, b) {
   b.goalT = 5 + Math.random() * 3;
   const arena = sim.arena;
+  // 体力が減っていたら、いちばん近い回復のおやつへ
+  if (p.hp < 55 && arena.heals?.length) {
+    let best = null;
+    let bd = Infinity;
+    arena.heals.forEach(([x, z], k) => {
+      if (sim.s.heals?.[k] > 0) return;
+      const d = Math.hypot(x - p.x, z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = { x, z };
+      }
+    });
+    if (best) return best;
+  }
   // スナイパーは高台へ（近い方）
   if (scoped(p) && Math.random() < 0.6) {
     const ps = perches(arena);

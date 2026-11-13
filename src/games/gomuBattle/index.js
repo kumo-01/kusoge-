@@ -8,11 +8,11 @@ import { PLAYERS } from '../../screens/common.js';
 import { device } from '../../core/device.js';
 import { GomuSim } from './sim.js';
 import { ARENAS } from './arena.js';
-import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder, rayCylinder, weaponDamage } from './physics.js';
+import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder, rayCylinder, hitDamage, isHead } from './physics.js';
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
-import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT } from './constants.js';
+import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT, TREAT } from './constants.js';
 import { canSee } from './arena.js';
 
 const SLOT_CSS = ['#ff4d5e', '#3d8bff', '#ff5fb0', '#22b573'];
@@ -25,6 +25,8 @@ const KEY_PITCH_MAX = 1.6;
 const KEY_RAMP = 0.4; // 速くなりきるまでの秒数
 const LOOK = 0.0024; // マウスの感度（ラジアン / ピクセル）
 const TOUCH_LOOK = 0.006; // タッチの感度（ゆっくりなぞると細かく、速くなぞると大きく回る）
+// タッチで指を 100 動かしたときに視点が動く割合（武器ごと。重い武器ほどゆっくり）
+const TOUCH_LOOK_MUL = { [WEAPON.NORMAL]: 0.8, [WEAPON.SNIPER]: 0.7, [WEAPON.RIFLE]: 0.6 };
 const AIM_RANGE = 45; // 照準が相手に重なっているかを調べる距離
 const PITCH_MAX = 1.35;
 
@@ -467,7 +469,8 @@ class GomuGame {
     const hz = az + (b.z - az) * ht;
     this.ctx.sendGameMessage({ t: 'h', c: b.cid, v: hit, p: [hx, hy, hz].map((x) => Math.round(x * 1000) / 1000) });
     this.hud.hitMarker(false);
-    this.hud.dmgPop(weaponDamage(b.w, Math.hypot(hx - b.ox, hy - b.oy, hz - b.oz), b.mul));
+    const head = isHead(views[hit], hy);
+    this.hud.dmgPop(hitDamage(b.w, Math.hypot(hx - b.ox, hy - b.oy, hz - b.oz), b.mul, head), head);
     this.ctx.sound.play('pickup');
     this.world?.burst(hx, hy, hz, 0xffd23f, 12, 3, 0.07);
     this._judged.add(b.cid); // ホストからの「当たった」の知らせで、印と音を 2 回出さない
@@ -522,7 +525,7 @@ class GomuGame {
           // 自分が当てた（ゲストの輪ゴムは自分の画面で当たりを出しているので、ホストが決める爆弾だけ）
           if (e.by === this.me && (this.isHost || e.bm)) {
             this.hud.hitMarker(false);
-            this.hud.dmgPop(e.d);
+            this.hud.dmgPop(e.d, !!e.hs);
             this.ctx.sound.play('pickup');
           }
           break;
@@ -573,7 +576,7 @@ class GomuGame {
         case 'heal':
           if (e.i === this.me) {
             this.ctx.sound.play('respawn');
-            this.hud.pushFeed(`🍖 体力が回復した！`, 'mine');
+            this.hud.pushFeed(e.k != null ? `🍖 おやつを拾った！体力 +${TREAT.HEAL}` : '🍖 体力が回復した！', 'mine');
           }
           break;
         case 'star':
@@ -917,7 +920,7 @@ class GomuGame {
     const t = this.hud.touch;
     if (t && !this.paused) {
       const [dx, dy] = t.takeLook();
-      const k = TOUCH_LOOK * (0.75 + Math.min(1, Math.hypot(dx, dy) / 30)); // ゆっくりなぞると細かく、速くなぞると大きく
+      const k = TOUCH_LOOK * (0.75 + Math.min(1, Math.hypot(dx, dy) / 30)) * (TOUCH_LOOK_MUL[this.pilot.weapon] ?? 0.8); // ゆっくりなぞると細かく、速くなぞると大きく
       this._turn(dx * k, dy * k);
     }
     if (!this.isHost && !this.last) {
@@ -957,11 +960,13 @@ class GomuGame {
     if (w) {
       w.updateBoss(bv, dt);
       for (let k = 0; k < this._starT.length; k++) if (this._starT[k] > 0) this._starT[k] = Math.max(0, this._starT[k] - dt);
-      w.updateDogs(views.map((q, i) => (i === this.me ? { hide: true } : { x: q.x, y: q.y, z: q.z, yaw: q.yaw, crouch: q.crouch, moving: q.moving, dead: q.dead > 0, inv: q.inv > 0, star: this._starT[i] > 0 && q.inv > 0, stuck: q.stuck > 0, stun: q.stun > 0 })), dt);
+      w.updateDogs(views.map((q, i) => (i === this.me ? { hide: true } : { x: q.x, y: q.y, z: q.z, yaw: q.yaw, crouch: q.crouch, moving: q.moving, dead: q.dead > 0, inv: q.inv > 0, star: this._starT[i] > 0 && q.inv > 0, stuck: q.stuck > 0, stun: q.stun > 0, weapon: q.weapon })), dt);
       const bands = this.isHost ? this.sim.s.bands : this.bands;
       w.updateBands(bands, dt);
       const boxes = this.isHost ? this.sim.s.boxes.map((x) => x <= 0) : this.arena.items.map((_, k) => !!((this.last?.boxes ?? 0) & (1 << k)));
       w.updateItemBoxes(boxes, dt);
+      const treats = this.isHost ? (this.sim.s.heals || []).map((x) => x <= 0) : (this.arena.heals || []).map((_, k) => !!((this.last?.heals ?? 0) & (1 << k)));
+      w.updateTreats(treats, dt);
       w.updateMovables(this.movList);
       // 煙・ガム（知らせを取りこぼしても、要約に合わせる）
       const smokes = this.isHost ? this.sim.s.smokes : this.last?.smokes || [];
@@ -987,7 +992,7 @@ class GomuGame {
       }
       // 爆弾: 飛ぶ道と落ちる所を見せる
       w.setLobArc(this._bombAim && !dead && this.phase === 'play' ? this._lobPath() : null);
-      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), sniper: WEAPONS[p.weapon].zoomFov != null, bomb: this._bombAim, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
+      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), weapon: p.weapon, bomb: this._bombAim, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
       this._fired = false;
       w.render(dt);
       this._frame++;

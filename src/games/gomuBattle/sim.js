@@ -2,9 +2,9 @@
 // 人の犬の位置は、その人の端末が計算して送ってくる（setPilot）。CPU の犬はここで動かす。
 // 起きたこと（撃った・当たった・倒れた・拾った…）は events に積み、ゲストへ配る。
 
-import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL } from './constants.js';
+import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, TREAT, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL } from './constants.js';
 import { ARENAS, segmentHit, ROOM } from './arena.js';
-import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage } from './physics.js';
+import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage, hitDamage, isHead } from './physics.js';
 import { botThink } from './bot.js';
 
 /** 決定的な乱数（状態に種を持つ） */
@@ -114,6 +114,7 @@ export class GomuSim {
     s.gums = [];
     s.smokes = [];
     s.boxes = this.arena.items.map(() => 0);
+    s.heals = (this.arena.heals || []).map(() => 0); // 回復のおやつ（0 = 出ている。正 = また出るまでの秒）
     s.mov = (this.arena.movables || []).map(movableBox); // 押せるものはラウンドの始めの場所へ
     this.events.push({ t: 'round', r });
     // 出発地点はばらばらに
@@ -361,7 +362,8 @@ export class GomuSim {
     const n = s.bands.findIndex((b) => b.id === rec.id);
     if (n >= 0) s.bands.splice(n, 1);
     this.events.push({ t: 'end', id: rec.id, x: pos[0], y: pos[1], z: pos[2], h: v });
-    this._hit(q, { o: i, dmg: weaponDamage(rec.w, Math.hypot(pos[0] - rec.ox, pos[1] - rec.oy, pos[2] - rec.oz), rec.mul), vx: rec.vx, vz: rec.vz });
+    const head = isHead(q, pos[1]);
+    this._hit(q, { o: i, dmg: hitDamage(rec.w, Math.hypot(pos[0] - rec.ox, pos[1] - rec.oy, pos[2] - rec.oz), rec.mul, head), vx: rec.vx, vz: rec.vz, head });
     return true;
   }
 
@@ -441,7 +443,8 @@ export class GomuSim {
           this._bossHit(this._dmgOf(b, hx, hy, hz), b.o);
         } else {
           this.events.push({ t: 'end', id: b.id, x: hx, y: hy, z: hz, h: hit.i });
-          this._hit(hit, { o: b.o, dmg: this._dmgOf(b, hx, hy, hz), vx: b.vx, vz: b.vz });
+          const head = b.kind !== HAIRBALL && isHead(hit, hy);
+          this._hit(hit, { o: b.o, dmg: this._dmgOf(b, hx, hy, hz, head), vx: b.vx, vz: b.vz, head });
         }
         if (s.phase !== 'play') return; // 猫を倒した（ラウンドおわり）
         continue;
@@ -458,9 +461,9 @@ export class GomuSim {
   }
 
   /** 輪ゴム b が (x, y, z) で当たったときのダメージ（撃った場所からの距離で決まる。毛玉は決まった値） */
-  _dmgOf(b, x, y, z) {
+  _dmgOf(b, x, y, z, head = false) {
     if (b.kind === HAIRBALL) return BOSS.SPIT_DMG;
-    return weaponDamage(b.w, Math.hypot(x - b.ox, y - b.oy, z - b.oz), b.mul);
+    return hitDamage(b.w, Math.hypot(x - b.ox, y - b.oy, z - b.oz), b.mul, head);
   }
 
   /** 爆弾が (x, y, z) で爆発: 半径の中の相手（と猫）に、中心に近いほど大きなダメージ。物の陰にいれば当たらない */
@@ -517,7 +520,7 @@ export class GomuSim {
       by.landed++;
       this._dealt(by, dmg);
     }
-    this.events.push({ t: 'hit', v: q.i, by: b.o, d: dmg, hp: q.hp, kx, kz, ...(b.bomb ? { bm: 1 } : {}) });
+    this.events.push({ t: 'hit', v: q.i, by: b.o, d: dmg, hp: q.hp, kx, kz, ...(b.bomb ? { bm: 1 } : {}), ...(b.head ? { hs: 1 } : {}) });
     if (q.hp <= 0) {
       q.dead = PLAYER.RESPAWN;
       q.deaths++;
@@ -552,9 +555,26 @@ export class GomuSim {
       for (const p of s.players) {
         if (p.dead > 0 || p.item) continue;
         if (Math.hypot(p.x - bx, p.z - bz) < ITEMS.BOX_RADIUS && Math.abs(p.y - by) < 0.9) {
-          p.item = 1 + Math.floor(nextRandom(s) * (ITEM.COUNT - 1));
+          p.item = BOX_ITEMS[Math.floor(nextRandom(s) * BOX_ITEMS.length)];
           s.boxes[k] = ITEMS.BOX_RESPAWN;
           this.events.push({ t: 'pick', i: p.i, b: k, item: p.item });
+          break;
+        }
+      }
+    });
+    // 回復のおやつ（体力が減っている犬が近づくと拾う）
+    (s.heals || []).forEach((tm, k) => {
+      if (tm > 0) {
+        s.heals[k] = Math.max(0, tm - dt);
+        return;
+      }
+      const [hx, hz, hy] = arena.heals[k];
+      for (const p of s.players) {
+        if (p.dead > 0 || p.hp >= PLAYER.HP) continue;
+        if (Math.hypot(p.x - hx, p.z - hz) < TREAT.RADIUS && Math.abs(p.y - hy) < 1) {
+          p.hp = Math.min(PLAYER.HP, p.hp + TREAT.HEAL);
+          s.heals[k] = TREAT.RESPAWN;
+          this.events.push({ t: 'heal', i: p.i, hp: p.hp, k });
           break;
         }
       }

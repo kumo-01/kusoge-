@@ -71,6 +71,7 @@ export function packState(s) {
     bw: (s.bossWon || []).map((x) => (x ? 1 : 0)),
     bo: s.boss ? [r2(s.boss.x), r2(s.boss.y), r2(s.boss.z), Math.round(s.boss.yaw * 1000) / 1000, s.boss.hp, s.boss.max, BOSS_ST.indexOf(s.boss.st), r2(s.boss.t), r2(Math.max(s.boss.dizzy, s.boss.stuck))] : null,
     bx: s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0),
+    hl: (s.heals || []).reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0),
     sm: s.smokes.map((x) => [x.id, r2(x.x), r2(x.y), r2(x.z), r2(x.age)]),
     gm: s.gums.map((x) => [x.id, r2(x.x), r2(x.y), r2(x.z)]),
     mv: (s.mov || []).map((b) => [r2((b.x0 + b.x1) / 2), r2((b.z0 + b.z1) / 2)]), // 押せるものの位置
@@ -123,6 +124,7 @@ export function unpackState(o, n) {
     t: num(o.t),
     players,
     boxes: num(o.bx) | 0,
+    heals: num(o.hl) | 0,
     smokes: Array.isArray(o.sm) ? o.sm.filter(Array.isArray).map((x) => ({ id: num(x[0]), x: num(x[1]), y: num(x[2]), z: num(x[3]), age: num(x[4]) })) : [],
     gums: Array.isArray(o.gm) ? o.gm.filter(Array.isArray).map((x) => ({ id: num(x[0]), x: num(x[1]), y: num(x[2]), z: num(x[3]) })) : [],
     mov: Array.isArray(o.mv) ? o.mv.slice(0, 16).map((x) => (Array.isArray(x) ? [num(x[0]), num(x[1])] : [0, 0])) : [],
@@ -132,7 +134,9 @@ export function unpackState(o, n) {
 // ---- 配信のバイト列（毎秒 40 回。JSON の約 1/4 の大きさ） ----
 // 犬 1 匹 18 バイト（位置 1mm・向き・状態・体力・アイテム・点数）。ラウンドごとの点は 10 回に 1 回だけ載せる。
 // 起きたこと（撃った・当たった…）は、数を丸めた JSON を後ろにつける（少ないので）
-const BIN_V = 4;
+const BIN_V = 5;
+/** 位置のバイト列の単位（1 m を 500。i16 で ±65 m まで。会場は ±39 m） */
+const POS = 500;
 const PH = ['intro', 'play', 'end', 'done', 'pick'];
 /** 猫の動きの番号 */
 const BOSS_ST = ['walk', 'wind', 'crouch', 'pounce', 'rest', 'down'];
@@ -227,9 +231,9 @@ export function packBin(s, withRs = true, ev = null) {
   w.i32(s.t * 1000);
   w.u8(s.players.length);
   for (const p of s.players) {
-    w.i16(p.x * 1000);
-    w.i16(p.y * 1000);
-    w.i16(p.z * 1000);
+    w.i16(p.x * POS);
+    w.i16(p.y * POS);
+    w.i16(p.z * POS);
     w.u16((((p.yaw % TAU) + TAU) % TAU) * (65536 / TAU));
     w.i8((p.pitch / 1.5) * 127);
     w.u8((p.crouch ? FL.CROUCH : 0) | (p.moving ? FL.MOVING : 0) | (p.inv > 0 ? FL.INV : 0) | (p.stun > 0 ? FL.STUN : 0) | (p.stuck > 0 ? FL.STUCK : 0) | (p.shake > 0 ? FL.SHAKE : 0) | (p.noAmmo > 0 ? FL.NOAMMO : 0) | (p.reload > 0 ? FL.RELOAD : 0));
@@ -245,34 +249,35 @@ export function packBin(s, withRs = true, ev = null) {
     if (withRs) for (let r = 0; r < 3; r++) w.u16(p.rs[r] || 0);
   }
   w.u16(s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0));
+  w.u16((s.heals || []).reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0)); // 回復のおやつ（出ているもの）
   const mov = s.mov || [];
   w.u8(mov.length);
   for (const b of mov) {
-    w.i16(((b.x0 + b.x1) / 2) * 1000);
-    w.i16(((b.z0 + b.z1) / 2) * 1000);
+    w.i16(((b.x0 + b.x1) / 2) * POS);
+    w.i16(((b.z0 + b.z1) / 2) * POS);
   }
   w.u8(s.smokes.length);
   for (const x of s.smokes) {
     w.i32(x.id); // 番号はほかの知らせ（消えた など）と同じものを使う
-    w.i16(x.x * 1000);
-    w.i16(x.y * 1000);
-    w.i16(x.z * 1000);
+    w.i16(x.x * POS);
+    w.i16(x.y * POS);
+    w.i16(x.z * POS);
     w.u8(x.age * 20);
   }
   w.u8(s.gums.length);
   for (const x of s.gums) {
     w.i32(x.id);
-    w.i16(x.x * 1000);
-    w.i16(x.y * 1000);
-    w.i16(x.z * 1000);
+    w.i16(x.x * POS);
+    w.i16(x.y * POS);
+    w.i16(x.z * POS);
   }
   // ボス戦の猫（いなければ 0）と、ラウンドごとに猫を倒せたか
   const b = s.boss;
   w.u8((b ? 1 : 0) | ((s.bossWon || []).reduce((m, x, k) => (x ? m | (2 << k) : m), 0)));
   if (b) {
-    w.i16(b.x * 1000);
-    w.i16(b.y * 1000);
-    w.i16(b.z * 1000);
+    w.i16(b.x * POS);
+    w.i16(b.y * POS);
+    w.i16(b.z * POS);
     w.u16((((b.yaw % TAU) + TAU) % TAU) * (65536 / TAU));
     w.u16(b.hp);
     w.u16(b.max);
@@ -300,7 +305,7 @@ export function unpackBin(u8, n, prevRs = null) {
     const np = Math.min(r.u8(), 16);
     const players = [];
     for (let i = 0; i < np; i++) {
-      const p = { i, x: r.i16() / 1000, y: r.i16() / 1000, z: r.i16() / 1000 };
+      const p = { i, x: r.i16() / POS, y: r.i16() / POS, z: r.i16() / POS };
       let yaw = (r.u16() * TAU) / 65536;
       if (yaw > Math.PI) yaw -= TAU;
       p.yaw = yaw;
@@ -324,14 +329,15 @@ export function unpackBin(u8, n, prevRs = null) {
       if (i < n) players.push(p);
     }
     const boxes = r.u16();
-    const mov = Array.from({ length: Math.min(r.u8(), 16) }, () => [r.i16() / 1000, r.i16() / 1000]);
-    const smokes = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / 1000, y: r.i16() / 1000, z: r.i16() / 1000, age: r.u8() / 20 }));
-    const gums = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / 1000, y: r.i16() / 1000, z: r.i16() / 1000 }));
+    const heals = r.u16();
+    const mov = Array.from({ length: Math.min(r.u8(), 16) }, () => [r.i16() / POS, r.i16() / POS]);
+    const smokes = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / POS, y: r.i16() / POS, z: r.i16() / POS, age: r.u8() / 20 }));
+    const gums = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / POS, y: r.i16() / POS, z: r.i16() / POS }));
     const bf = r.u8();
     const bossWon = [0, 1, 2].map((k) => !!(bf & (2 << k)));
     let boss = null;
     if (bf & 1) {
-      boss = { x: r.i16() / 1000, y: r.i16() / 1000, z: r.i16() / 1000 };
+      boss = { x: r.i16() / POS, y: r.i16() / POS, z: r.i16() / POS };
       let yaw = (r.u16() * TAU) / 65536;
       if (yaw > Math.PI) yaw -= TAU;
       boss.yaw = yaw;
@@ -347,7 +353,7 @@ export function unpackBin(u8, n, prevRs = null) {
       ev = JSON.parse(dec8.decode(r.u.subarray(r.n, r.n + len)));
       if (!Array.isArray(ev)) ev = [];
     }
-    return { st: { round, phase, t, players, boxes, smokes, gums, mov, boss, bossWon }, ev };
+    return { st: { round, phase, t, players, boxes, heals, smokes, gums, mov, boss, bossWon }, ev };
   } catch {
     return null;
   }

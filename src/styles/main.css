@@ -2797,3 +2797,9 @@ body[data-screen='game'] {
 .gt-bomb.empty {
   opacity: 0.4;
 }
+/* ヘッドショット: 数を大きく、黄色く */
+.gm-dmgpop.is-head {
+  font-size: 1.4rem;
+  color: oklch(90% 0.17 95);
+  white-space: nowrap;
+}
