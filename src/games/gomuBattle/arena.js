@@ -159,6 +159,10 @@ function spread(a) {
   a.heals = freeSpots(a, 8);
   // 補給箱が落ちてくる所（おやつ・トランポリンを避けた空いた所）
   a.drops = freeSpots(a, 10, { R: 1.6, avoid: a.heals });
+  // 風船の的（空中。高さは 2.2〜3.6 で決まった順）
+  a.balloons = freeSpots(a, 6, { R: 1.4, inner: 0.85, avoid: [...a.heals, ...a.drops] }).map(([x, z], k) => [x, z, 2.2 + ((k * 0.53) % 1.4)]);
+  // 水（入ると遅くなる）
+  a.water = (a.decor || []).filter((d) => d.type === 'water').map((d) => ({ x0: d.x - d.w / 2, x1: d.x + d.w / 2, z0: d.z - d.d / 2, z1: d.z + d.d / 2 }));
   return a;
 }
 

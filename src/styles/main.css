@@ -2872,3 +2872,110 @@ body[data-screen='game'] {
     transform: none;
   }
 }
+/* チーム戦: 味方の名札（名前と細い体力のバー） */
+.gm-names {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.gm-name {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 900;
+  color: var(--paper);
+}
+.gm-name[hidden] {
+  display: none;
+}
+.gm-name span {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--c);
+  box-shadow: 0 1px 3px oklch(0% 0 0 / 0.35);
+}
+.gm-name-hp {
+  display: block;
+  width: 46px;
+  height: 4px;
+  border-radius: 2px;
+  background: oklch(20% 0.02 280 / 0.6);
+  overflow: hidden;
+}
+.gm-name-hp b {
+  display: block;
+  height: 100%;
+  background: oklch(72% 0.17 145);
+  transform-origin: left center;
+}
+/* ミニマップ（左下、体力の上。上が自分の向き） */
+.gm-minimap {
+  position: absolute;
+  left: 14px;
+  bottom: 100px;
+  width: 156px;
+  height: 120px;
+  border-radius: 12px;
+  pointer-events: none;
+}
+.gomu-hud.is-touch .gm-minimap {
+  left: 10px;
+  bottom: auto;
+  top: 36%;
+  width: 117px;
+  height: 90px;
+}
+/* 詳しい成績表（Tab を押している間） */
+.gm-scoreboard {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: min(560px, 92vw);
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: oklch(22% 0.03 280 / 0.85);
+  color: var(--paper);
+  pointer-events: none;
+}
+.gm-scoreboard[hidden] {
+  display: none;
+}
+.gm-scoreboard h3 {
+  margin: 0 0 8px;
+  font-family: var(--display);
+}
+.gm-scoreboard table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.gm-scoreboard th,
+.gm-scoreboard td {
+  padding: 4px 8px;
+  text-align: right;
+}
+.gm-scoreboard th:first-child,
+.gm-scoreboard td:first-child {
+  text-align: left;
+  font-weight: 900;
+}
+.gm-scoreboard tr.me {
+  background: oklch(100% 0 0 / 0.1);
+}
+/* ラウンドの MVP */
+.gm-mvp {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: oklch(88% 0.15 95);
+}
+.gm-mvp svg {
+  stroke: currentColor;
+}

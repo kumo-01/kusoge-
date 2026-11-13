@@ -2,7 +2,7 @@
 // 人の犬の位置は、その人の端末が計算して送ってくる（setPilot）。CPU の犬はここで動かす。
 // 起きたこと（撃った・当たった・倒れた・拾った…）は events に積み、ゲストへ配る。
 
-import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, TREAT, FUN, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL } from './constants.js';
+import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, TREAT, FUN, EXTRA, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL } from './constants.js';
 import { ARENAS, segmentHit, ROOM } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage, hitDamage, isHead } from './physics.js';
 import { botThink } from './bot.js';
@@ -56,7 +56,7 @@ export class GomuSim {
 
   /** ぶつかる物すべて（家具 + 押せるもの）。押せるものは試合の状態 s.mov の箱そのもの */
   get cw() {
-    if (!this._cw || this._cw.mov !== this.s.mov) this._cw = { boxes: [...this.arena.boxes, ...(this.s.mov || [])], mov: this.s.mov };
+    if (!this._cw || this._cw.mov !== this.s.mov) this._cw = { boxes: [...this.arena.boxes, ...(this.s.mov || [])], mov: this.s.mov, water: this.arena.water };
     return this._cw;
   }
 
@@ -75,6 +75,11 @@ export class GomuSim {
       weapon: WEAPON.NORMAL, // 武器（ラウンドの前に選ぶ）
       picked: false,
       bombs: BOMB_COUNT, // 残りの爆弾（ラウンドごとに BOMB_COUNT）
+      hs: 0, // ヘッドショットの数（称号のため）
+      longest: 0, // いちばん遠くから当てた距離
+      treats: 0, // 拾ったおやつ
+      pops: 0, // 割った風船
+      bestStreak: 0, // いちばん長い連続撃破
       bombCd: 0, // 次の爆弾を投げられるまで
       ...createBody(),
       hp: PLAYER.HP,
@@ -120,6 +125,11 @@ export class GomuSim {
     s.wind = { x: 0, z: 0, t: 0 }; // 突風（t: 残りの秒）
     s.nextWind = FUN.WIND_FIRST;
     s.spurt = false; // ラストスパートに入ったか
+    s.firstBlood = false; // このラウンドでもう誰かが倒したか
+    s.balloons = (this.arena.balloons || []).map(() => 0); // 風船の的（0 = 浮かんでいる）
+    s.rain = 0; // 雨の残りの秒
+    s.nextRain = EXTRA.RAIN_FIRST;
+    s.decoys = []; // おとり人形 { id, o, x, y, z, yaw, hp, t }
     s.mov = (this.arena.movables || []).map(movableBox); // 押せるものはラウンドの始めの場所へ
     this.events.push({ t: 'round', r });
     // 出発地点はばらばらに
@@ -258,7 +268,12 @@ export class GomuSim {
     let bd = -1;
     for (const sp of this.arena.spawns) {
       if (!fits(this.cw, sp[0], 0, sp[1], PLAYER.HEIGHT)) continue; // 押せるものが置かれている
-      const d = others.length ? Math.min(...others.map((q) => Math.hypot(q.x - sp[0], q.z - sp[1]))) : 0;
+      // 敵からはできるだけ遠く。チーム戦では味方の近くを少し優先する
+      const foes = others.filter((q) => this.foes(p.i, q.i));
+      const allies = this.mode === MODE.TEAM ? others.filter((q) => !this.foes(p.i, q.i)) : [];
+      const fd = foes.length ? Math.min(...foes.map((q) => Math.hypot(q.x - sp[0], q.z - sp[1]))) : 0;
+      const ad = allies.length ? Math.min(...allies.map((q) => Math.hypot(q.x - sp[0], q.z - sp[1]))) : 0;
+      const d = Math.min(fd, 40) - ad * 0.6;
       if (d > bd) {
         bd = d;
         best = sp;
@@ -369,7 +384,8 @@ export class GomuSim {
     if (n >= 0) s.bands.splice(n, 1);
     this.events.push({ t: 'end', id: rec.id, x: pos[0], y: pos[1], z: pos[2], h: v });
     const head = isHead(q, pos[1]);
-    this._hit(q, { o: i, dmg: hitDamage(rec.w, Math.hypot(pos[0] - rec.ox, pos[1] - rec.oy, pos[2] - rec.oz), rec.mul, head), vx: rec.vx, vz: rec.vz, head });
+    const dist = Math.hypot(pos[0] - rec.ox, pos[1] - rec.oy, pos[2] - rec.oz);
+    this._hit(q, { o: i, dmg: hitDamage(rec.w, dist, rec.mul, head), vx: rec.vx, vz: rec.vz, head, dist });
     return true;
   }
 
@@ -436,6 +452,45 @@ export class GomuSim {
           hit = boss;
         }
       }
+      // おとり人形（持ち主の敵の輪ゴムを受け止める）と、風船の的
+      let hitDecoy = null;
+      for (const dc of s.decoys) {
+        if (b.o >= 0 && !this.foes(b.o, dc.o)) continue;
+        const t = segCylinder(ax, ay, az, b.x, b.y, b.z, dc, PLAYER.HEIGHT, PLAYER.HIT_RADIUS + b.r);
+        if (t >= 0 && t < ht) {
+          ht = t;
+          hit = null;
+          hitDecoy = dc;
+        }
+      }
+      let pop = -1;
+      if (b.o >= 0) {
+        (this.arena.balloons || []).forEach(([x, z, y], k) => {
+          if (s.balloons[k] > 0) return;
+          const t = segSphere(ax, ay, az, b.x, b.y, b.z, x, y, z, EXTRA.BALLOON_R + b.r);
+          if (t >= 0 && t < ht) {
+            ht = t;
+            hit = null;
+            hitDecoy = null;
+            pop = k;
+          }
+        });
+      }
+      if (hitDecoy || pop >= 0) {
+        const hx = ax + (b.x - ax) * ht;
+        const hy = ay + (b.y - ay) * ht;
+        const hz = az + (b.z - az) * ht;
+        s.bands.splice(n, 1);
+        this.events.push({ t: 'end', id: b.id, x: hx, y: hy, z: hz, h: -1 });
+        if (b.w === WEAPON.BOMB) {
+          this._explode(b, hx, hy, hz);
+          if (s.phase !== 'play') return;
+        } else if (hitDecoy) {
+          hitDecoy.hp -= this._dmgOf(b, hx, hy, hz);
+          this.events.push({ t: 'dhit', id: hitDecoy.id, x: hx, y: hy, z: hz });
+        } else this._pop(pop, b.o);
+        continue;
+      }
       if (hit) {
         const hx = ax + (b.x - ax) * ht;
         const hy = ay + (b.y - ay) * ht;
@@ -450,7 +505,7 @@ export class GomuSim {
         } else {
           this.events.push({ t: 'end', id: b.id, x: hx, y: hy, z: hz, h: hit.i });
           const head = b.kind !== HAIRBALL && isHead(hit, hy);
-          this._hit(hit, { o: b.o, dmg: this._dmgOf(b, hx, hy, hz, head), vx: b.vx, vz: b.vz, head });
+          this._hit(hit, { o: b.o, dmg: this._dmgOf(b, hx, hy, hz, head), vx: b.vx, vz: b.vz, head, dist: b.kind === HAIRBALL ? 0 : Math.hypot(hx - b.ox, hy - b.oy, hz - b.oz) });
         }
         if (s.phase !== 'play') return; // 猫を倒した（ラウンドおわり）
         continue;
@@ -525,6 +580,8 @@ export class GomuSim {
       by.hits++;
       by.landed++;
       this._dealt(by, dmg);
+      if (b.head) by.hs = (by.hs || 0) + 1;
+      if (b.dist) by.longest = Math.max(by.longest || 0, b.dist);
     }
     this.events.push({ t: 'hit', v: q.i, by: b.o, d: dmg, hp: q.hp, kx, kz, ...(b.bomb ? { bm: 1 } : {}), ...(b.head ? { hs: 1 } : {}) });
     if (q.hp <= 0) {
@@ -541,6 +598,13 @@ export class GomuSim {
         this._addScore(by, SCORE.KILL);
         // 連続撃破
         by.streak = (by.streak || 0) + 1;
+        by.bestStreak = Math.max(by.bestStreak || 0, by.streak);
+        // ファーストブラッド（このラウンドでいちばん最初に倒した）
+        if (!this.s.firstBlood) {
+          this.s.firstBlood = true;
+          this._addScore(by, EXTRA.FIRST_BLOOD);
+          this.events.push({ t: 'first', i: by.i, b: EXTRA.FIRST_BLOOD });
+        }
         const bonus = FUN.STREAK_BONUS[by.streak];
         if (bonus) {
           this._addScore(by, bonus);
@@ -599,6 +663,29 @@ export class GomuSim {
         }
       }
     }
+    // 雨
+    if (s.rain > 0) {
+      s.rain = Math.max(0, s.rain - dt);
+      if (s.rain === 0) this.events.push({ t: 'rainEnd' });
+    } else if (s.t >= s.nextRain) {
+      s.rain = EXTRA.RAIN_TIME;
+      const [lo, hi] = EXTRA.RAIN_EVERY;
+      s.nextRain = s.t + EXTRA.RAIN_TIME + lo + nextRandom(s) * (hi - lo);
+      this.events.push({ t: 'rain' });
+    }
+    // 風船（割れたものは時間がたつとまた出る）
+    s.balloons.forEach((tm, k) => {
+      if (tm > 0) s.balloons[k] = Math.max(0, tm - dt);
+    });
+    // おとり人形（時間か体力がなくなったら消える）
+    for (let k = s.decoys.length - 1; k >= 0; k--) {
+      const dc = s.decoys[k];
+      dc.t -= dt;
+      if (dc.t <= 0 || dc.hp <= 0) {
+        s.decoys.splice(k, 1);
+        this.events.push({ t: 'decoyEnd', id: dc.id, x: dc.x, y: dc.y, z: dc.z });
+      }
+    }
     // 突風
     const w = s.wind;
     if (w.t > 0) {
@@ -616,6 +703,24 @@ export class GomuSim {
       s.nextWind = s.t + FUN.WIND_TIME + lo + nextRandom(s) * (hi - lo);
       this.events.push({ t: 'wind', x: w.x, z: w.z });
     }
+  }
+
+  /** 風船 k を犬 by が割った: +1 点、ときどきアイテム */
+  _pop(k, by) {
+    const s = this.s;
+    const [x, z, y] = this.arena.balloons[k];
+    s.balloons[k] = EXTRA.BALLOON_RESPAWN;
+    const p = s.players[by];
+    let item = 0;
+    if (p) {
+      p.pops = (p.pops || 0) + 1;
+      this._addScore(p, 1);
+      if (!p.item && nextRandom(s) < EXTRA.BALLOON_ITEM) {
+        item = BOX_ITEMS[Math.floor(nextRandom(s) * BOX_ITEMS.length)];
+        p.item = item;
+      }
+    }
+    this.events.push({ t: 'pop', k, i: by, x, y, z, item });
   }
 
   /** 遠吠え（「ワン！」）。BARK_CD 秒に 1 回 */
@@ -659,6 +764,7 @@ export class GomuSim {
         if (p.dead > 0 || p.hp >= PLAYER.HP) continue;
         if (Math.hypot(p.x - hx, p.z - hz) < TREAT.RADIUS && Math.abs(p.y - hy) < 1) {
           p.hp = Math.min(PLAYER.HP, p.hp + TREAT.HEAL);
+          p.treats = (p.treats || 0) + 1;
           s.heals[k] = TREAT.RESPAWN;
           this.events.push({ t: 'heal', i: p.i, hp: p.hp, k });
           break;
@@ -737,6 +843,12 @@ export class GomuSim {
     } else if (it === ITEM.HEAL) {
       p.hp = Math.min(PLAYER.HP, p.hp + ITEMS.HEAL);
       this.events.push({ t: 'heal', i, hp: p.hp });
+    } else if (it === ITEM.DECOY) {
+      // おとり人形: 足もとに自分そっくりの人形（自分の向きのまま）
+      const dc = { id: s.nextId++, o: i, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: EXTRA.DECOY_HP, t: EXTRA.DECOY_TIME };
+      s.decoys.push(dc);
+      if (s.decoys.length > 6) s.decoys.shift();
+      this.events.push({ t: 'decoy', id: dc.id, o: i });
     } else if (it === ITEM.STAR) {
       p.inv = Math.max(p.inv, ITEMS.STAR_TIME);
       p.star = ITEMS.STAR_TIME;
@@ -950,6 +1062,25 @@ export class GomuSim {
   standings() {
     return [...this.s.players].sort((a, b) => b.score - a.score || b.kills - a.kills || a.deaths - b.deaths || a.i - b.i);
   }
+}
+
+/** 線分 a → b が、中心 (cx, cy, cz)・半径 R の玉に最初に入る割合（入らなければ -1） */
+function segSphere(ax, ay, az, bx, by, bz, cx, cy, cz, R) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const dz = bz - az;
+  const fx = ax - cx;
+  const fy = ay - cy;
+  const fz = az - cz;
+  const a = dx * dx + dy * dy + dz * dz;
+  const b = 2 * (fx * dx + fy * dy + fz * dz);
+  const c = fx * fx + fy * fy + fz * fz - R * R;
+  if (c <= 0) return 0;
+  if (a < 1e-12) return -1;
+  const disc = b * b - 4 * a * c;
+  if (disc < 0) return -1;
+  const t = (-b - Math.sqrt(disc)) / (2 * a);
+  return t >= 0 && t <= 1 ? t : -1;
 }
 
 function segmentHitSafe(arena, ax, ay, az, bx, by, bz) {

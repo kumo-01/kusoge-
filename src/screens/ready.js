@@ -4,6 +4,7 @@ import { h, now } from '../core/util.js';
 import { getGame } from '../games/registry.js';
 import { playerCard, linkFor, roomSummary, PLAYERS } from './common.js';
 import { TEAMS, TEAM_CPU_BIT, BOT_DOGS, autoTeamBits } from '../games/gomuBattle/constants.js';
+import { getSens, setSens, SENS_MIN, SENS_MAX } from '../games/gomuBattle/prefs.js';
 import { MAX_PLAYERS, NAME_MAX, cleanName } from '../core/protocol.js';
 
 export function mount(el, app) {
@@ -83,6 +84,7 @@ export function mount(el, app) {
             null,
             nameCard(s, room),
             optionsCard(def, s, isHost),
+            def?.id === 'gomuBattle' ? sensCard() : null,
             s.solo ? null : h('div.players-row.compact', null, cards),
             h('div.ready-actions', null,
               h(
@@ -152,6 +154,28 @@ export function mount(el, app) {
       if (e.key === 'Enter') input.blur();
     });
     return h('div.card.name-card', null, h('label.option-label', null, 'あなたの名前', h('span.muted', null, '（ゲーム中に吹き出しで出ます）')), input);
+  }
+
+  /** ゴム鉄砲: この端末だけの視点の感度（50%〜200%） */
+  function sensCard() {
+    const val = h('span.opt-value', null, `${Math.round(getSens() * 100)}%`);
+    const range = h('input.opt-range', { type: 'range', min: String(SENS_MIN * 100), max: String(SENS_MAX * 100), step: '10', value: String(Math.round(getSens() * 100)), 'aria-label': '視点の感度' });
+    const fill = () => range.style.setProperty('--fill', `${((Number(range.value) - SENS_MIN * 100) / ((SENS_MAX - SENS_MIN) * 100)) * 100}%`);
+    fill();
+    range.addEventListener('pointerdown', () => (holding = true));
+    range.addEventListener('input', () => {
+      val.textContent = `${range.value}%`;
+      fill();
+    });
+    range.addEventListener('change', () => {
+      setSens(Number(range.value) / 100);
+      holding = false;
+      app.sound.play('click');
+    });
+    return h('div.card.options-card', null,
+      h('div.option-row', null,
+        h('div.option-label', null, '視点の感度', h('span.muted', null, '（この端末だけ）')),
+        h('div.opt-slider', null, h('div.opt-slider-row', null, range, val), h('div.opt-ends', null, h('span', null, 'ゆっくり'), h('span', null, 'はやい')))));
   }
 
   function optionsCard(def, s, isHost) {

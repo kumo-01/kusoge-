@@ -1,7 +1,7 @@
 // CPU の犬の考え方。見える相手がいれば狙って撃ち、横に動いてよける。いなければアイテムの箱や相手のいた所へ向かう。
 // ぶつかって進めないときはジャンプ・伏せ・行き先の変更で抜け出す。
 
-import { BOT, PLAYER, ITEM, ITEMS, BAND_ITEMS, GUN, WEAPON, WEAPONS, BOSS } from './constants.js';
+import { BOT, PLAYER, ITEM, ITEMS, BAND_ITEMS, GUN, WEAPON, WEAPONS, BOSS, EXTRA } from './constants.js';
 import { canSee, ROOM } from './arena.js';
 import { aimDir, eyeOf, heightOf } from './physics.js';
 
@@ -37,7 +37,8 @@ export function botThink(sim, p, dt) {
   if ((b.look -= dt) <= 0) {
     b.look = 0.12;
     let best = -1;
-    let bd = BOT.VIEW * (scoped(p) ? 1.6 : 1);
+    let bd = BOT.VIEW * (scoped(p) ? 1.6 : 1) * (sim.s.rain > 0 ? EXTRA.RAIN_VIEW : 1); // 雨の間は遠くが見えにくい
+    b.decoy = null;
     const boss = sim.s.boss;
     if (boss && boss.hp > 0) {
       // ボス戦: 猫だけを狙う（見えていれば）
@@ -52,11 +53,24 @@ export function botThink(sim, p, dt) {
       bd = d;
       best = q.i;
     }
+    // おとり人形（敵のもの）がもっと近くに見えたら、そっちを狙ってしまう
+    if (best !== -2) {
+      for (const dc of sim.s.decoys || []) {
+        if (!sim.foes(p.i, dc.o)) continue;
+        const d = Math.hypot(dc.x - p.x, dc.z - p.z);
+        if (d >= bd) continue;
+        if (!canSee(arena, ex, ey, ez, dc.x, dc.y + 0.7, dc.z)) continue;
+        bd = d;
+        best = -3;
+        b.decoy = dc.id;
+      }
+    }
     if (best !== b.tgt) b.see = 0;
     b.tgt = best;
   }
   const bs = sim.s.boss;
-  const q = b.tgt === -2 && bs && bs.hp > 0 ? { i: -2, x: bs.x, y: bs.y, z: bs.z, dead: 0, h: BOSS.HEIGHT } : b.tgt >= 0 ? sim.s.players[b.tgt] : null;
+  const dcT = b.tgt === -3 ? (sim.s.decoys || []).find((d) => d.id === b.decoy) : null;
+  const q = b.tgt === -2 && bs && bs.hp > 0 ? { i: -2, x: bs.x, y: bs.y, z: bs.z, dead: 0, h: BOSS.HEIGHT } : dcT ? { i: -3, x: dcT.x, y: dcT.y, z: dcT.z, dead: 0, h: PLAYER.HEIGHT } : b.tgt >= 0 ? sim.s.players[b.tgt] : null;
   const W = WEAPONS[p.weapon] || WEAPONS[WEAPON.NORMAL];
   // 狙いのぶれ（ゆっくり変わる。照準ぶれのときは大きい）
   if ((b.errT -= dt) <= 0) {
@@ -125,7 +139,7 @@ export function botThink(sim, p, dt) {
     // アイテム
     if (p.item) {
       const it = p.item;
-      const use = BAND_ITEMS.includes(it) || (it === ITEM.SMOKE && dist < 11) || it === ITEM.SHAKE || it === ITEM.NOAMMO || (it === ITEM.GUM && dist < 6) || (it === ITEM.STAR && dist < 15) || (it === ITEM.HEAL && p.hp <= PLAYER.HP - ITEMS.HEAL);
+      const use = (it === ITEM.DECOY && dist < 18) || BAND_ITEMS.includes(it) || (it === ITEM.SMOKE && dist < 11) || it === ITEM.SHAKE || it === ITEM.NOAMMO || (it === ITEM.GUM && dist < 6) || (it === ITEM.STAR && dist < 15) || (it === ITEM.HEAL && p.hp <= PLAYER.HP - ITEMS.HEAL);
       if (use) sim.useItem(p.i, [ex, ey, ez], aimDir(p.yaw, p.pitch));
     }
   } else {

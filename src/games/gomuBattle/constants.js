@@ -68,12 +68,36 @@ export const ITEM = {
   STAR: 10, // 無敵スター
   COUNT: 11, // プレゼント箱から出る種類の数（ここまで）
   GOLD: 11, // 金の輪ゴム（空からの補給箱の中身。箱からは出ない）
+  DECOY: 12, // おとり人形（自分そっくりの人形を置く）
 };
 
 /** ゴムが変わるアイテム → 撃つ輪ゴムの種類 */
 export const BAND_ITEMS = [ITEM.THICK, ITEM.TRIPLE, ITEM.BOUNCE, ITEM.HOMING];
 /** プレゼント箱から出るアイテム（回復は箱からは出ない。会場に落ちているおやつを拾う） */
-export const BOX_ITEMS = Array.from({ length: ITEM.COUNT - 1 }, (_, k) => k + 1).filter((it) => it !== ITEM.HEAL);
+export const BOX_ITEMS = [...Array.from({ length: ITEM.COUNT - 1 }, (_, k) => k + 1).filter((it) => it !== ITEM.HEAL), ITEM.DECOY];
+
+/**
+ * さらに足した仕組み（2026-11-13 その 3）
+ * - ファーストブラッド: ラウンドでいちばん最初に倒した犬に +FIRST_BLOOD
+ * - 風船の的: 会場の空中に BALLOONS 個。割ると +1 点、BALLOON_ITEM の確率でアイテム（持っていなければ）。BALLOON_RESPAWN 秒でまた出る
+ * - 雨: ときどき RAIN_TIME 秒、雨で遠くが見えにくい（CPU の見える距離も短く）
+ * - 水: 水に入ると歩く速さが WATER_SLOW 倍
+ * - おとり人形: 自分そっくりの人形を DECOY_TIME 秒置く。輪ゴムを受け止め（体力 DECOY_HP）、CPU はそれを狙う
+ */
+export const EXTRA = {
+  FIRST_BLOOD: 2,
+  BALLOONS: 6,
+  BALLOON_R: 0.5,
+  BALLOON_RESPAWN: 25,
+  BALLOON_ITEM: 0.35,
+  RAIN_FIRST: 110,
+  RAIN_EVERY: [80, 120],
+  RAIN_TIME: 25,
+  RAIN_VIEW: 0.6,
+  WATER_SLOW: 0.55,
+  DECOY_TIME: 15,
+  DECOY_HP: 40,
+};
 
 /**
  * お楽しみの仕組み（2026-11-13）
@@ -164,6 +188,7 @@ export const ITEM_INFO = {
   [ITEM.HEAL]: { name: '回復おやつ', icon: 'heal', desc: '体力が40回復する' },
   [ITEM.STAR]: { name: '無敵スター', icon: 'star', desc: '10秒間、輪ゴムもガムも効かない' },
   [ITEM.GOLD]: { name: '金の輪ゴム', icon: 'crown', desc: '空からの補給箱の中身。次の3発がダメージ2倍' },
+  [ITEM.DECOY]: { name: 'おとり人形', icon: 'person', desc: '足もとに自分そっくりの人形を置く。CPUはそれを狙う。輪ゴムを受け止める（15秒）' },
 };
 
 /**

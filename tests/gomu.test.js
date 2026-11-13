@@ -118,7 +118,7 @@ test('撃つ: 近くから 14 ずつ減って 8 発で倒れる。与えたダ�
   const ev = sim.drainEvents();
   assert.equal(ev.filter((e) => e.t === 'hit').length, 8);
   assert.equal(ev.filter((e) => e.t === 'kill').length, 1);
-  assert.equal(a.score, PLAYER.HP / SCORE.DMG_PER_POINT + SCORE.KILL);
+  assert.equal(a.score, PLAYER.HP / SCORE.DMG_PER_POINT + SCORE.KILL + 2, 'ラウンドで最初に倒したのでファーストブラッド +2');
   assert.equal(a.rs[0], a.score);
   assert.equal(a.kills, 1);
   assert.equal(b.deaths, 1);
@@ -893,4 +893,76 @@ test('お楽しみ: 補給箱が空から落ちてきて、取ると金の輪ゴ
   assert.equal(sim.bark(0), true);
   assert.equal(sim.bark(0), false);
   assert.ok(sim.drainEvents().some((e) => e.t === 'bark' && e.i === 0));
+});
+
+test('追加: 風船の的（割ると +1、ときどきアイテム）・おとり人形（輪ゴムを受け止める・CPU が狙う）・雨・水で遅くなる', async () => {
+  const { EXTRA } = await import('../src/games/gomuBattle/constants.js');
+  const { botThink } = await import('../src/games/gomuBattle/bot.js');
+  const sim = ready();
+  const [a, b] = sim.s.players;
+  // 風船: 真下から撃ち上げる
+  const [bx, bz, by] = sim.arena.balloons[0];
+  Object.assign(a, { x: bx + 3, z: bz, y: 0 });
+  const o = eye(a);
+  const d = [bx - o[0], by - o[1], bz - o[2]];
+  const l = Math.hypot(...d);
+  sim.drainEvents();
+  sim.fire(0, o, d.map((v) => v / l));
+  run(sim, 0.3);
+  assert.ok(sim.s.balloons[0] > 0, '割れた');
+  assert.equal(a.pops, 1);
+  assert.ok(sim.drainEvents().some((e) => e.t === 'pop' && e.i === 0 && e.k === 0));
+  let u = unpackBin(packBin(sim.s), 2);
+  assert.equal(u.st.balloons & 1, 0, '割れた風船は配信で消える');
+  // おとり人形: b が置き、a の輪ゴムを受け止める
+  Object.assign(a, { x: -4, z: 1, y: 0 });
+  Object.assign(b, { x: 4, z: 1, y: 0, hp: PLAYER.HP, item: ITEM.DECOY });
+  assert.ok(sim.useItem(1, eye(b), [1, 0, 0]));
+  assert.equal(sim.s.decoys.length, 1);
+  Object.assign(b, { x: 4, z: 6 }); // 本物は横へ
+  sim.fire(0, eye(a), chestDir(a, sim.s.decoys[0]));
+  run(sim, 0.4);
+  assert.equal(b.hp, PLAYER.HP, '本物には当たらない');
+  assert.ok(sim.s.decoys[0].hp < EXTRA.DECOY_HP, '人形が受け止めた');
+  u = unpackBin(packBin(sim.s), 2);
+  assert.equal(u.st.decoys.length, 1, '配信に載る');
+  // CPU は人形を狙う
+  const c = new GomuSim({ humans: 1, bots: 1, seed: 2 });
+  run(c, ROUND.INTRO + 0.1);
+  const [h, bot] = c.s.players;
+  Object.assign(h, { x: 30, z: 20, y: 0 });
+  Object.assign(bot, { x: 0, z: 1, y: 0, yaw: Math.PI / 2 });
+  c.s.decoys.push({ id: 99, o: 0, x: 6, y: 0, z: 1, yaw: 0, hp: 40, t: 10 });
+  bot.bot2 = null; // 考え直させる（相手を探すのは 0.12 秒ごと）
+  botThink(c, bot, 1 / 60);
+  assert.equal(bot.bot2.tgt, -3, 'おとりに引っかかる');
+  // 雨
+  sim.s.nextRain = sim.s.t;
+  run(sim, 0.05);
+  assert.ok(sim.s.rain > 0);
+  assert.ok(sim.drainEvents().some((e) => e.t === 'rain'));
+  assert.ok(unpackBin(packBin(sim.s), 2).st.rain > 0);
+  // 水の中は遅い（砂浜の海）
+  const beach = ARENAS[1];
+  const w = beach.water[0];
+  const cw = { boxes: [], water: beach.water };
+  const m = createBody(0, (w.z0 + w.z1) / 2, Math.PI / 2);
+  for (let i = 0; i < 60; i++) stepMove(m, { fz: 1 }, DT, cw);
+  assert.ok(m.inWater);
+  assert.ok(Math.abs(Math.hypot(m.vx, m.vz) - PLAYER.SPEED * EXTRA.WATER_SLOW) < 1e-6);
+});
+
+test('追加: チーム戦は味方の近くで復活する', () => {
+  const sim = new GomuSim({ humans: 2, bots: 2, seed: 8, mode: MODE.TEAM, teams: [0, 0, 1, 1] });
+  run(sim, ROUND.INTRO + 0.1);
+  const [a, ally, e1, e2] = sim.s.players;
+  for (const p of [e1, e2]) p.bot = false;
+  const sp = sim.arena.spawns;
+  Object.assign(ally, { x: sp[0][0], z: sp[0][1] });
+  Object.assign(e1, { x: -sp[0][0], z: -sp[0][1] });
+  Object.assign(e2, { x: -sp[0][0] + 2, z: -sp[0][1] });
+  sim._respawn(a);
+  const dAlly = Math.hypot(a.x - ally.x, a.z - ally.z);
+  const dFoe = Math.min(Math.hypot(a.x - e1.x, a.z - e1.z), Math.hypot(a.x - e2.x, a.z - e2.z));
+  assert.ok(dAlly < dFoe, `味方の方が近い (味方 ${dAlly.toFixed(1)} / 敵 ${dFoe.toFixed(1)})`);
 });

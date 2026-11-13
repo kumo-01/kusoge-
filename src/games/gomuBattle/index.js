@@ -12,7 +12,9 @@ import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, mova
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
-import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT, TREAT, FUN } from './constants.js';
+import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT, TREAT, FUN, EXTRA } from './constants.js';
+import { getSens } from './prefs.js';
+import { ROOM } from './arena.js';
 import { canSee } from './arena.js';
 
 const SLOT_CSS = ['#ff4d5e', '#3d8bff', '#ff5fb0', '#22b573'];
@@ -56,6 +58,7 @@ class GomuGame {
       return { slot: null, kind: b.kind, name: `${b.name}（CPU）`, css: b.css, bot: true };
     });
     this.paused = false;
+    this.sens = getSens(); // 視点の感度（この端末の設定。準備画面で変える）
     this.seenEv = new Set();
     this.netEvents = [];
     this.evSeq = 0;
@@ -137,7 +140,7 @@ class GomuGame {
     cv.addEventListener('contextmenu', this._onCtx);
     this._onMove = (e) => {
       if (document.pointerLockElement !== cv || this.paused) return;
-      const k = LOOK * (this._fov / 72); // のぞいているときはゆっくり回る
+      const k = LOOK * (this._fov / 72) * this.sens; // のぞいているときはゆっくり回る。感度はこの端末の設定
       this._turn(e.movementX * k, e.movementY * k);
     };
     this._onLock = () => {
@@ -180,7 +183,7 @@ class GomuGame {
   /** ぶつかる物すべて（家具 + 押せるもの）。ホストは計算の正本、ゲストは自分の手元の写し */
   get cw() {
     if (this.isHost) return this.sim.cw;
-    return (this._gcw ||= { boxes: [...this.arena.boxes, ...this.mov] });
+    return (this._gcw ||= { boxes: [...this.arena.boxes, ...this.mov], water: this.arena.water });
   }
 
   /** 押せるもの（ホストは計算の正本、ゲストは手元の写し） */
@@ -196,10 +199,11 @@ class GomuGame {
     this._starT = [];
     this._bombLocal = BOMB_COUNT; // ゲスト: 自分の残りの爆弾（投げた瞬間に減らす。ホストの数とずれたら合わせる）
     this._nemesis = -1; // 自分を倒した相手（リベンジの印。ラウンドごとにやり直し）
+    this._pings = []; // 遠吠えした犬の場所（ミニマップに少しの間）
     this._bombAim = false;
     this.mov = (this.arena.movables || []).map(movableBox);
     this._gcw = null;
-    this.world?.setArena(ARENAS[r % ARENAS.length]);
+    this.world?.setArena(ARENAS[r % ARENAS.length], r % 3); // 1 ラウンド目は朝、2 は昼、3 は夕方
   }
 
   /** 武器を選ぶ（ラウンドの前の選択画面） */
@@ -487,7 +491,7 @@ class GomuGame {
     this.hud.hitMarker(false);
     const head = isHead(views[hit], hy);
     this.hud.dmgPop(hitDamage(b.w, Math.hypot(hx - b.ox, hy - b.oy, hz - b.oz), b.mul, head), head);
-    this.ctx.sound.play('pickup');
+    this.ctx.sound.play(head ? 'headshot' : 'pickup');
     this.world?.burst(hx, hy, hz, 0xffd23f, 12, 3, 0.07);
     this._judged.add(b.cid); // ホストからの「当たった」の知らせで、印と音を 2 回出さない
     return true;
@@ -542,7 +546,7 @@ class GomuGame {
           if (e.by === this.me && (this.isHost || e.bm)) {
             this.hud.hitMarker(false);
             this.hud.dmgPop(e.d, !!e.hs);
-            this.ctx.sound.play('pickup');
+            this.ctx.sound.play(e.hs ? 'headshot' : 'pickup');
           }
           break;
         case 'kill':
@@ -626,6 +630,33 @@ class GomuGame {
           }
           this.world?.bossFlash();
           break;
+        case 'first':
+          this.hud.pushFeed(`🩸 ファーストブラッド！ ${name(e.i)} +${e.b}`, e.i === this.me ? 'mine' : '');
+          if (e.i === this.me) this.ctx.sound.play('perfect');
+          break;
+        case 'pop':
+          this.world?.burst(e.x, e.y, e.z, 0xff4d6d, 16, 4, 0.08);
+          if (e.i === this.me) {
+            this.ctx.sound.play('pickup');
+            this.hud.pushFeed(e.item ? `🎈 風船を割った！ +1 と ${ITEM_INFO[e.item]?.name}` : '🎈 風船を割った！ +1', 'mine');
+          } else if (this._near(e)) this.ctx.sound.play('bump');
+          break;
+        case 'decoy':
+          if (e.o === this.me) this.hud.pushFeed('🎭 おとり人形を置いた！', 'mine');
+          break;
+        case 'dhit':
+          this.world?.burst(e.x, e.y, e.z, 0xdddddd, 8, 2, 0.05);
+          break;
+        case 'decoyEnd':
+          this.world?.burst(e.x, e.y + 0.6, e.z, 0xbbbbbb, 14, 3, 0.09);
+          break;
+        case 'rain':
+          this.hud.pushFeed('🌧️ 雨が降ってきた！遠くが見えにくい', 'bad');
+          this.ctx.sound.play('thunder');
+          break;
+        case 'rainEnd':
+          this.hud.pushFeed('🌤️ 雨がやんだ');
+          break;
         case 'spurt':
           this.ctx.sound.play('finalLap');
           this.hud.pushFeed('⏱️ ラストスパート！ここから点が2倍', 'mine');
@@ -658,6 +689,10 @@ class GomuGame {
           break;
         case 'bark':
           this.world?.bark(e.i);
+          {
+            const q = (this.isHost ? this.sim.s.players : this.last?.players)?.[e.i];
+            if (q && e.i !== this.me) this._pings.push({ x: q.x, z: q.z, i: e.i, t: 3 }); // ミニマップに 3 秒
+          }
           {
             const q = (this.isHost ? this.sim.s.players : this.last?.players)?.[e.i];
             if (e.i === this.me || (q && Math.hypot(q.x - this.pilot.x, q.z - this.pilot.z) < 30)) this.ctx.sound.play('bark');
@@ -977,7 +1012,8 @@ class GomuGame {
     const t = this.hud.touch;
     if (t && !this.paused) {
       const [dx, dy] = t.takeLook();
-      const k = TOUCH_LOOK * (0.75 + Math.min(1, Math.hypot(dx, dy) / 30)) * (TOUCH_LOOK_MUL[this.pilot.weapon] ?? 0.8); // ゆっくりなぞると細かく、速くなぞると大きく
+      // ゆっくりなぞると細かく、速くなぞると大きく。照準が相手に重なっている間は少しゆっくり（狙い補助）
+      const k = TOUCH_LOOK * (0.75 + Math.min(1, Math.hypot(dx, dy) / 30)) * (TOUCH_LOOK_MUL[this.pilot.weapon] ?? 0.8) * this.sens * (this._onTarget ? 0.6 : 1);
       this._turn(dx * k, dy * k);
     }
     if (!this.isHost && !this.last) {
@@ -1037,6 +1073,56 @@ class GomuGame {
       });
       w.setCrown(tie ? -1 : lead);
       w.setMark(this._nemesis ?? -1);
+      // 風船・おとり人形・雨
+      const S = this.isHost ? this.sim.s : this.last;
+      w.updateBalloons(this.isHost ? (S.balloons || []).map((x) => x <= 0) : (this.arena.balloons || []).map((_, k) => !!((S?.balloons ?? 0) & (1 << k))), dt);
+      w.updateDecoys(S?.decoys || [], (o) => this.idents[o]?.kind || 'shiba', (o) => (this.mode === MODE.TEAM ? TEAMS[this._team(o)]?.hex : parseInt((this.idents[o]?.css || '#999999').slice(1), 16)));
+      w.setRain((S?.rain ?? 0) > 0);
+      // 水しぶき（水の中で動いている犬）
+      this._splashT = (this._splashT || 0) - dt;
+      if (this._splashT <= 0 && this.arena.water?.length) {
+        this._splashT = 0.12;
+        views.forEach((q, i) => {
+          const pos = i === this.me ? this.pilot : q;
+          if (!(pos.moving || i === this.me) || q.dead > 0) return;
+          if (this.arena.water.some((wa) => pos.x > wa.x0 && pos.x < wa.x1 && pos.z > wa.z0 && pos.z < wa.z1) && pos.y < 0.3 && Math.hypot(pos.vx || 0, pos.vz || 0) + (pos.moving ? 1 : 0) > 0.5) w.burst(pos.x, 0.1, pos.z, 0x9be7ff, 5, 2.2, 0.05);
+        });
+      }
+      // チーム戦: 味方だけ名札（壁ごしでも見える。遠いほどうすく）
+      if (this.mode === MODE.TEAM) {
+        const myTeam = this._team(this.me);
+        this.hud.setNames(views.map((q, i) => {
+          if (i === this.me || q.dead > 0 || this._team(i) !== myTeam) return null;
+          const pr = w.project(q.x, q.y + heightOf(q) + 0.55, q.z);
+          if (!pr) return null;
+          const d = Math.hypot(q.x - cx, q.z - cz);
+          return { x: pr.x, y: pr.y, text: this.idents[i].name, hp: q.hp, css: TEAMS[myTeam].css, alpha: Math.max(0.45, 1 - d / 90) };
+        }));
+      } else this.hud.setNames([]);
+      // ミニマップ（味方・補給箱・おやつ・トランポリン・風船・遠吠えした犬）
+      this._pings = this._pings.filter((g) => (g.t -= dt) > 0);
+      if (this._frame % 3 === 0) {
+        const myTeam = this._team(this.me);
+        const healOn = this.isHost ? (S.heals || []).map((x) => x <= 0) : (this.arena.heals || []).map((_, k) => !!((S?.heals ?? 0) & (1 << k)));
+        const balOn = this.isHost ? (S.balloons || []).map((x) => x <= 0) : (this.arena.balloons || []).map((_, k) => !!((S?.balloons ?? 0) & (1 << k)));
+        this.hud.drawMinimap({
+          arena: { W: ROOM.W, D: ROOM.D, boxes: this.arena.draw || this.arena.boxes },
+          me: { x: p.x, z: p.z, yaw: p.yaw },
+          allies: this.mode === MODE.TEAM ? views.filter((q, i) => i !== this.me && q.dead <= 0 && this._team(i) === myTeam).map((q) => ({ x: q.x, z: q.z, css: TEAMS[myTeam].css })) : [],
+          drop: S?.drop || null,
+          treats: (this.arena.heals || []).filter((_, k) => healOn[k]),
+          tramps: this.arena.tramps || [],
+          balloons: (this.arena.balloons || []).filter((_, k) => balOn[k]),
+          pings: this._pings.map((g) => ({ x: g.x, z: g.z, css: this.idents[g.i]?.css || '#ffffff' })),
+          boss: bv && bv.hp > 0 ? bv : null,
+        });
+      }
+      // 詳しい成績表（Tab を押している間）
+      const showSb = this.ctx.input.isDown('Tab');
+      this.hud.setScoreboard(showSb, showSb ? [...views.keys()].map((i) => {
+        const q = (this.isHost ? this.sim.s.players : this.last?.players)?.[i] || {};
+        return { name: this.idents[i].name, css: this.mode === MODE.TEAM ? TEAMS[this._team(i)].css : this.idents[i].css, score: q.score | 0, kills: q.kills | 0, deaths: q.deaths | 0, acc: this.isHost ? (q.shots ? Math.round((q.landed / q.shots) * 100) : 0) : q.acc | 0, hs: q.hs | 0, me: i === this.me };
+      }).sort((a, b) => b.score - a.score) : []);
       const treats = this.isHost ? (this.sim.s.heals || []).map((x) => x <= 0) : (this.arena.heals || []).map((_, k) => !!((this.last?.heals ?? 0) & (1 << k)));
       w.updateTreats(treats, dt);
       w.updateMovables(this.movList);
@@ -1127,6 +1213,34 @@ class GomuGame {
   }
 
   // ---- 結果 ----
+  /** 試合の称号（MVP・ヘッドショット王 など）。だれも当てはまらないものは出さない */
+  _awards() {
+    const ps = this.sim.s.players;
+    const nm = (q) => this.idents[q.i].name;
+    const top = (f, min = 1) => {
+      const q = [...ps].sort((a, b) => f(b) - f(a))[0];
+      return q && f(q) >= min ? q : null;
+    };
+    const out = [];
+    const mvp = top((q) => q.score);
+    if (mvp) out.push(`MVP: ${nm(mvp)}（${mvp.score}点）`);
+    const hs = top((q) => q.hs || 0);
+    if (hs) out.push(`ヘッドショット王: ${nm(hs)}（${hs.hs}回）`);
+    const far = top((q) => q.longest || 0, 20);
+    if (far) out.push(`遠くから当てた: ${nm(far)}（${Math.round(far.longest)}m）`);
+    const st = top((q) => q.bestStreak || 0, 3);
+    if (st) out.push(`連続撃破: ${nm(st)}（${st.bestStreak}連続）`);
+    const acc = top((q) => (q.shots >= 10 ? q.landed / q.shots : 0), 0.01);
+    if (acc) out.push(`命中率: ${nm(acc)}（${Math.round((acc.landed / acc.shots) * 100)}%）`);
+    const tr = top((q) => q.treats || 0);
+    if (tr) out.push(`おやつ大好き: ${nm(tr)}（${tr.treats}個）`);
+    const pop = top((q) => q.pops || 0);
+    if (pop) out.push(`風船割り名人: ${nm(pop)}（${pop.pops}個）`);
+    const tough = top((q) => -q.deaths, -1e9);
+    if (tough && ps.length > 1) out.push(`しぶとい: ${nm(tough)}（やられた ${tough.deaths} 回）`);
+    return out.join('　/　');
+  }
+
   result() {
     const st = this.sim.standings();
     const ps = this.sim.s.players;
@@ -1166,6 +1280,7 @@ class GomuGame {
           { label: '自分の点', values: v((q) => `${q.score} 点`) },
           { label: '倒した数', values: v((q) => `${q.kills} 匹`) },
           { label: '命中率', values: v(acc) },
+          { label: '称号', text: this._awards() },
         ],
         points: humans.map((q) => q.score + (win >= 0 && this._team(q.i) === win ? 20 : 0)),
         cpu: [],
@@ -1187,6 +1302,7 @@ class GomuGame {
           { label: '合計', values: v((q) => `${q.score} 点`) },
           { label: '猫にやられた', values: v((q) => `${q.deaths} 回`) },
           { label: '命中率', values: v(acc) },
+          { label: '称号', text: this._awards() },
         ],
         points: humans.map((q) => q.score + won * 20),
         cpu: [],
@@ -1207,6 +1323,7 @@ class GomuGame {
         { label: '倒された数', values: v((q) => `${q.deaths} 回`) },
         { label: '命中率', values: v(acc) },
         { label: '順位', text: st.map((q, k) => `${k + 1}. ${this.idents[q.i].name}（${q.score}点）`).join('　') },
+        { label: '称号', text: this._awards() },
       ],
       points: humans.map((q) => q.score),
       cpu: [],

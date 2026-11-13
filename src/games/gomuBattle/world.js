@@ -202,7 +202,8 @@ export class GomuWorld {
     this.camera.rotation.order = 'YXZ';
     scene.add(this.camera);
     // 空の光（上は青白く、下は地面の照り返し）と、少し傾いた太陽（影が長めに出る）
-    scene.add(new THREE.HemisphereLight(0xdcecff, 0x8d7b5e, 1.15));
+    this.hemi = new THREE.HemisphereLight(0xdcecff, 0x8d7b5e, 1.15);
+    scene.add(this.hemi);
     scene.add(new THREE.AmbientLight(0xffffff, 0.12));
     const sun = new THREE.DirectionalLight(0xfff0d6, 2.7);
     sun.position.set(-34, 46, -26);
@@ -238,7 +239,7 @@ export class GomuWorld {
   }
 
   // ---- 会場 ----
-  setArena(arena) {
+  setArena(arena, tod = 1) {
     if (this.arenaGroup) {
       this.scene.remove(this.arenaGroup);
       this.arenaGroup.traverse((o) => {
@@ -314,6 +315,22 @@ export class GomuWorld {
       G.add(g);
       return g;
     });
+    // 風船の的（ひもつき。色はいろいろ）
+    const BCOL = [0xff4d6d, 0xffbe0b, 0x3a86ff, 0x8338ec, 0x06d6a0, 0xfb5607];
+    this.balloons = (arena.balloons || []).map(([x, z, y], k) => {
+      const g = new THREE.Group();
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 14), toon(BCOL[k % BCOL.length], { roughness: 0.25 }));
+      ball.scale.y = 1.18;
+      const knot = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.1, 8), toon(BCOL[k % BCOL.length]));
+      knot.position.y = -0.52;
+      const str = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 1.4, 4), toon(0xeeeeee));
+      str.position.y = -1.25;
+      g.add(ball, knot, str);
+      g.position.set(x, y, z);
+      g.userData = { y, ph: k * 1.7 };
+      G.add(g);
+      return g;
+    });
     // 回復のおやつ（骨の形のクッキー。足もとに緑の輪）
     this.treats = (arena.heals || []).map(([x, z, y]) => {
       const g = new THREE.Group();
@@ -348,9 +365,10 @@ export class GomuWorld {
     G.traverse((o) => {
       if (!this.itemBoxes.includes(o)) o.matrixAutoUpdate = false;
     });
-    for (const g of [...this.itemBoxes, ...this.treats]) g.traverse((o) => (o.matrixAutoUpdate = true));
+    for (const g of [...this.itemBoxes, ...this.treats, ...this.balloons]) g.traverse((o) => (o.matrixAutoUpdate = true));
     this.renderer.shadowMap.needsUpdate = true;
     this.movMeshes = null; // 押せるものは新しい会場で作り直す
+    if (arena.outdoor) this.setTimeOfDay(tod, arena.sky); // 時間帯（ラウンドごとに 朝・昼・夕方）
     // 前の会場の煙・ガム・輪ゴムは消す
     for (const id of [...this.smokes.keys()]) this.removeSmoke(id);
     for (const id of [...this.gums.keys()]) this.removeGum(id);
@@ -752,6 +770,125 @@ export class GomuWorld {
     });
   }
 
+  /** 風船の的: 浮かんでいるものだけ見せて、ふわふわ揺らす */
+  updateBalloons(on, dt) {
+    void dt;
+    (this.balloons || []).forEach((g, k) => {
+      g.visible = !!on[k];
+      if (!g.visible) return;
+      g.position.y = g.userData.y + Math.sin(this.t * 1.4 + g.userData.ph) * 0.12;
+      g.rotation.z = Math.sin(this.t * 0.9 + g.userData.ph) * 0.08;
+    });
+  }
+
+  /**
+   * おとり人形（持ち主そっくりの犬）。list = [{ id, o, x, y, z, yaw }]、kindOf(o) = 持ち主の犬の種類、colorOf(o) = 足もとの輪の色
+   */
+  updateDecoys(list, kindOf, colorOf) {
+    this.decoys ||= new Map();
+    const ids = new Set(list.map((d) => d.id));
+    for (const [id, m] of this.decoys) {
+      if (ids.has(id)) continue;
+      this.scene.remove(m);
+      this.decoys.delete(id);
+    }
+    for (const d of list) {
+      let m = this.decoys.get(d.id);
+      if (!m) {
+        m = new THREE.Group();
+        const dog = buildDog(kindOf(d.o));
+        dog.group.scale.setScalar(DOG_SCALE);
+        realisticDog(dog.group);
+        const gun = weaponRack();
+        gun.position.set(0.06, 0.62, 0.42);
+        gun.scale.setScalar(0.9);
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.36, 0.48, 24), new THREE.MeshBasicMaterial({ color: colorOf(d.o), transparent: true, opacity: 0.85 }));
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.02;
+        m.add(dog.group, gun, ring);
+        if (this.dynShadow) m.traverse((o) => o.isMesh && (o.castShadow = true));
+        this.scene.add(m);
+        this.decoys.set(d.id, m);
+      }
+      m.position.set(d.x, d.y, d.z);
+      m.rotation.y = d.yaw;
+    }
+  }
+
+  /** 時間帯（0 = 朝・1 = 昼・2 = 夕方）: 空・太陽の色と高さ・明るさ */
+  setTimeOfDay(k, baseSky) {
+    const TOD = [
+      { sun: 0xffe2c0, si: 2.3, pos: [-46, 30, -10], hs: 0xd8e8ff, hg: 0x8d7b5e, hi: 1.05, sky: 0xcfe6ff, mix: 0.35, exp: 1.0 },
+      { sun: 0xfff0d6, si: 2.7, pos: [-34, 46, -26], hs: 0xdcecff, hg: 0x8d7b5e, hi: 1.15, sky: null, mix: 0, exp: 1.05 },
+      { sun: 0xffa45c, si: 2.4, pos: [44, 16, 20], hs: 0xffc9a0, hg: 0x6b4f3a, hi: 0.85, sky: 0xffb37a, mix: 0.55, exp: 1.0 },
+    ];
+    const T = TOD[k % 3];
+    this.sun.color.setHex(T.sun);
+    this.sun.intensity = T.si;
+    this.sun.position.set(...T.pos);
+    this.hemi.color.setHex(T.hs);
+    this.hemi.groundColor.setHex(T.hg);
+    this.hemi.intensity = T.hi;
+    this.renderer.toneMappingExposure = T.exp;
+    const sky = new THREE.Color(baseSky);
+    if (T.sky != null) sky.lerp(new THREE.Color(T.sky), T.mix);
+    this._sky = sky;
+    this._sunBase = T.si;
+    this.scene.background = sky.clone();
+    if (this.scene.fog) this.scene.fog.color.copy(sky);
+    this.renderer.shadowMap.needsUpdate = true;
+    this.setRain(this._raining || false, true);
+  }
+
+  /** 雨: 降る雨つぶ・灰色の空・近い霧・少し暗く */
+  setRain(on, force = false) {
+    if (!force && this._raining === on) return;
+    this._raining = on;
+    if (!this._rain) {
+      const N = 900;
+      const pos = new Float32Array(N * 6);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xc8d6e5, transparent: true, opacity: 0.55, depthWrite: false }));
+      lines.frustumCulled = false;
+      this.scene.add(lines);
+      this._rain = { lines, N, seeded: false };
+    }
+    this._rain.lines.visible = on;
+    const sky = (this._sky || new THREE.Color(0xbfe3ff)).clone();
+    if (on) sky.lerp(new THREE.Color(0x7d8794), 0.6);
+    this.scene.background = sky;
+    if (this.scene.fog) {
+      this.scene.fog.color.copy(sky);
+      this.scene.fog.near = on ? 25 : 90;
+      this.scene.fog.far = on ? 85 : 200;
+    }
+    this.sun.intensity = (this._sunBase ?? 2.7) * (on ? 0.45 : 1);
+  }
+
+  _stepRain(dt) {
+    const R = this._rain;
+    if (!R || !R.lines.visible) return;
+    const c = this.camera.position;
+    const pos = R.lines.geometry.attributes.position;
+    const S = 18;
+    for (let i = 0; i < R.N; i++) {
+      let x = pos.getX(i * 2);
+      let y = pos.getY(i * 2);
+      let z = pos.getZ(i * 2);
+      if (!R.seeded || y < 0 || Math.abs(x - c.x) > S || Math.abs(z - c.z) > S) {
+        x = c.x + (Math.random() - 0.5) * 2 * S;
+        z = c.z + (Math.random() - 0.5) * 2 * S;
+        y = R.seeded ? c.y + 10 + Math.random() * 4 : c.y + Math.random() * 14;
+      }
+      y -= 22 * dt;
+      pos.setXYZ(i * 2, x, y, z);
+      pos.setXYZ(i * 2 + 1, x + 0.02, y + 0.45, z);
+    }
+    R.seeded = true;
+    pos.needsUpdate = true;
+  }
+
   /** 回復のおやつ: 出ているものだけ見せて、ゆっくり回す */
   updateTreats(on, dt) {
     (this.treats || []).forEach((g, k) => {
@@ -1090,9 +1227,15 @@ export class GomuWorld {
       // 爆弾（黒い玉と導火線）
       const bomb = makeBomb();
       bomb.visible = false;
-      this.scene.add(m, hair, bomb);
+      // 輪ゴムの軌跡（うしろに短い線）
+      const tg = new THREE.BufferGeometry();
+      tg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+      const trail = new THREE.Line(tg, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, depthWrite: false }));
+      trail.frustumCulled = false;
+      this.scene.add(m, hair, bomb, trail);
       m.userData.hair = hair;
       m.userData.bomb = bomb;
+      m.userData.trail = trail;
       this.bands.push(m);
     }
     this.bands.forEach((m, k) => {
@@ -1101,6 +1244,16 @@ export class GomuWorld {
       const bomb = m.userData.bomb;
       const isHair = !!b && b.kind === HAIRBALL;
       const isBomb = !!b && b.w === WEAPON.BOMB;
+      const trail = m.userData.trail;
+      trail.visible = !!b && !isHair && !isBomb;
+      if (trail.visible) {
+        const tp = trail.geometry.attributes.position;
+        const k2 = 0.05; // 0.05 秒ぶん後ろまで
+        tp.setXYZ(0, b.x, b.y, b.z);
+        tp.setXYZ(1, b.x - b.vx * k2, b.y - b.vy * k2, b.z - b.vz * k2);
+        tp.needsUpdate = true;
+        trail.material.color.setHex(BAND_COLORS[b.kind] ?? BAND_COLORS[0]);
+      }
       hair.visible = isHair;
       bomb.visible = isBomb;
       m.visible = !!b && !isHair && !isBomb;
@@ -1352,6 +1505,7 @@ export class GomuWorld {
   render(dt) {
     this._stepSmokes(dt);
     this._stepFx(dt);
+    this._stepRain(dt);
     // 動く影（パソコン）: 2 フレームに 1 回だけ描き直す
     if (this.dynShadow && (this._sf = ((this._sf || 0) + 1) % 2) === 0) this.renderer.shadowMap.needsUpdate = true;
     this.renderer.render(this.scene, this.camera);

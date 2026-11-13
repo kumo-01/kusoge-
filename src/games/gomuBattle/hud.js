@@ -36,6 +36,11 @@ export class GomuHud {
     this.vignette = h('div.gm-vignette');
     this.smoke = h('div.gm-smoke');
     this.hurtDirs = h('div.gm-hurtdirs');
+    // 味方の名札（チーム戦）・ミニマップ・詳しい成績表（Tab）
+    this.names = h('div.gm-names');
+    this._nameEls = [];
+    this.mapCv = h('canvas.gm-minimap', { width: 156, height: 120, 'aria-label': 'ミニマップ' });
+    this.scoreboard = h('div.gm-scoreboard', { hidden: true });
     this.dmg = h('div.gm-dmgpop');
     this._hurtEls = [];
     this.hint = h('div.gm-hint');
@@ -60,7 +65,7 @@ export class GomuHud {
     this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.RIFLE, 'crosshair')];
     this.pickInfo = h('p.gm-pick-info');
     this.pick = h('div.gm-pick', { hidden: true }, h('h2', null, '武器をえらぶ'), h('div.gm-pick-row', null, ...this.pickCards), this.pickInfo);
-    this.root.append(this.scope, this.smoke, this.vignette, this.hurtDirs, this.cross, this.dmg, h('div.gm-top', null, this.round, this.timer), h('div.gm-alerts', null, this.spurt, this.wind), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
+    this.root.append(this.scope, this.smoke, this.vignette, this.names, this.hurtDirs, this.cross, this.dmg, this.mapCv, this.scoreboard, h('div.gm-top', null, this.round, this.timer), h('div.gm-alerts', null, this.spurt, this.wind), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
     this.touch = touch ? new GomuTouch(this.root) : null;
     this.root.classList.add(`mode-${mode}`);
     this.root.classList.toggle('is-touch', !!touch);
@@ -187,6 +192,11 @@ export class GomuHud {
           h('table', null,
             h('tr', null, h('th', null, ''), ...Array.from({ length: ROUND.COUNT }, (_, r) => h('th', null, `R${r + 1}`)), h('th', null, '合計')),
             ...rows.map((p) => h(`tr${p.i === v.meIndex ? '.me' : ''}`, null, h('td', { style: { color: p.css } }, p.name), ...p.rs.map((x, r) => h('td', null, r <= v.round ? String(x) : '-')), h('td', null, h('b', null, String(p.score)))))),
+          (() => {
+            // このラウンドの MVP（いちばん点を取った犬）
+            const mvp = [...rows].sort((a, b) => (b.rs[v.round] || 0) - (a.rs[v.round] || 0))[0];
+            return mvp && (mvp.rs[v.round] || 0) > 0 ? h('p.gm-mvp', { html: `${iconSvg('trophy', 18)}<span>このラウンドの MVP: <b>${mvp.name}</b>（${mvp.rs[v.round]} 点）</span>` }) : null;
+          })(),
           h('p', null, v.round + 1 < ROUND.COUNT ? `次は ${v.nextArena}` : '結果発表！'));
       }
     }
@@ -210,6 +220,95 @@ export class GomuHud {
   }
 
   /** 当てた（照準に印） */
+  /** 味方の名札（画面の座標。null なら隠す）: { x, y, text, hp, css } */
+  setNames(list) {
+    while (this._nameEls.length < list.length) {
+      const el = h('div.gm-name', null, h('span'), h('i.gm-name-hp', null, h('b')));
+      this.names.append(el);
+      this._nameEls.push(el);
+    }
+    this._nameEls.forEach((el, i) => {
+      const n = list[i];
+      el.hidden = !n;
+      if (!n) return;
+      if (el.dataset.k !== n.text) {
+        el.dataset.k = n.text;
+        el.firstChild.textContent = n.text;
+      }
+      el.lastChild.firstChild.style.transform = `scaleX(${Math.max(0, Math.min(1, n.hp / PLAYER.HP))})`;
+      el.style.transform = `translate(${n.x.toFixed(0)}px, ${n.y.toFixed(0)}px) translate(-50%, -100%)`;
+      el.style.setProperty('--c', n.css);
+      el.style.opacity = n.alpha.toFixed(2);
+    });
+  }
+
+  /**
+   * ミニマップ（上から見た会場。上 = 自分の向き）。m = { arena, me: { x, z, yaw }, allies: [{ x, z, css }], drop, treats: [[x, z]], tramps, balloons, pings: [{ x, z, css }], boss }
+   */
+  drawMinimap(m) {
+    const cv = this.mapCv;
+    const x = cv.getContext('2d');
+    const W = cv.width;
+    const H = cv.height;
+    const S = 1.7; // 1 m = 1.7 ピクセル（自分のまわり 横 ±46 m）
+    x.clearRect(0, 0, W, H);
+    x.save();
+    x.beginPath();
+    x.roundRect(0, 0, W, H, 12);
+    x.clip();
+    x.fillStyle = 'rgba(30, 40, 30, 0.55)';
+    x.fillRect(0, 0, W, H);
+    x.translate(W / 2, H / 2);
+    x.rotate(m.me.yaw + Math.PI); // 自分の向きが上
+    x.scale(S, S);
+    x.translate(-m.me.x, -m.me.z);
+    const a = m.arena;
+    x.fillStyle = 'rgba(255,255,255,0.08)';
+    x.fillRect(-a.W / 2, -a.D / 2, a.W, a.D);
+    x.strokeStyle = 'rgba(255,255,255,0.5)';
+    x.lineWidth = 1.2 / S;
+    x.strokeRect(-a.W / 2, -a.D / 2, a.W, a.D);
+    x.fillStyle = 'rgba(255,255,255,0.28)';
+    for (const b of a.boxes) if (b.y0 < 1.6 && b.k !== 'tramp') x.fillRect(b.x0, b.z0, b.x1 - b.x0, b.z1 - b.z0);
+    const dot = (px, pz, r, col) => {
+      x.fillStyle = col;
+      x.beginPath();
+      x.arc(px, pz, r / S, 0, Math.PI * 2);
+      x.fill();
+    };
+    for (const t of m.tramps) dot((t.x0 + t.x1) / 2, (t.z0 + t.z1) / 2, 3, '#2f80ed');
+    for (const [tx, tz] of m.treats) dot(tx, tz, 2.4, '#5bd16a');
+    for (const [bx, bz] of m.balloons) dot(bx, bz, 2.2, '#ff4d6d');
+    if (m.drop) dot(m.drop.x, m.drop.z, 4, '#ffd23f');
+    if (m.boss) dot(m.boss.x, m.boss.z, 6, '#e85d04');
+    for (const p of m.pings) dot(p.x, p.z, 3.2, p.css);
+    for (const p of m.allies) dot(p.x, p.z, 3.4, p.css);
+    x.restore();
+    // 自分（真ん中の三角。上が前）
+    x.fillStyle = '#ffffff';
+    x.beginPath();
+    x.moveTo(W / 2, H / 2 - 7);
+    x.lineTo(W / 2 - 5, H / 2 + 5);
+    x.lineTo(W / 2 + 5, H / 2 + 5);
+    x.closePath();
+    x.fill();
+  }
+
+  /** 詳しい成績表（Tab を押している間）。rows = [{ name, css, score, kills, deaths, acc, hs, me }] */
+  setScoreboard(on, rows) {
+    this.scoreboard.hidden = !on;
+    if (!on) return;
+    const k = rows.map((r) => `${r.name}:${r.score}:${r.kills}:${r.deaths}:${r.acc}:${r.hs}`).join('|');
+    if (this._key.sb === k) return;
+    this._key.sb = k;
+    this.scoreboard.replaceChildren(
+      h('h3', null, '成績'),
+      h('table', null,
+        h('tr', null, ...['', '点', '倒した', 'やられた', '命中率', '頭'].map((t) => h('th', null, t))),
+        ...rows.map((r) => h(`tr${r.me ? '.me' : ''}`, null, h('td', { style: { color: r.css } }, r.name), h('td', null, h('b', null, String(r.score))), h('td', null, String(r.kills)), h('td', null, String(r.deaths)), h('td', null, `${r.acc}%`), h('td', null, String(r.hs))))),
+    );
+  }
+
   /** 与えたダメージの数（照準の右上にぽんと出る） */
   dmgPop(n, head = false) {
     if (!(n > 0)) return;

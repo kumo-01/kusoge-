@@ -1,7 +1,7 @@
 // 犬の動き（歩く・ジャンプ・ダッシュ・伏せ）と、輪ゴムの飛び方。
 // 自分の犬は自分の端末で、CPU の犬はホストが、同じ stepMove で動かす。輪ゴムはホストが正本（ゲストは見た目だけ同じ計算）
 
-import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL, THICK_MUL, HEADSHOT, FUN } from './constants.js';
+import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL, THICK_MUL, HEADSHOT, FUN, EXTRA } from './constants.js';
 import { ROOM, overlapXZ, segmentHit } from './arena.js';
 
 /** 動く体（犬）の初期値 */
@@ -72,7 +72,9 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
     m.stamWait = Math.max(0, (m.stamWait || 0) - dt);
     if (m.stamWait <= 0) m.stam = Math.min(PLAYER.STAMINA, m.stam + PLAYER.STAMINA_REGEN * dt);
   }
-  const sp = (m.crouch ? PLAYER.CROUCH_SPEED : m.sprint ? PLAYER.SPRINT_SPEED : PLAYER.SPEED) * slow;
+  // 水の中は遅い
+  m.inWater = !!arena.water?.some((w) => m.x > w.x0 && m.x < w.x1 && m.z > w.z0 && m.z < w.z1) && m.y < 0.3;
+  const sp = (m.crouch ? PLAYER.CROUCH_SPEED : m.sprint ? PLAYER.SPRINT_SPEED : PLAYER.SPEED) * slow * (m.inWater ? EXTRA.WATER_SLOW : 1);
   const tx = wx * sp;
   const tz = wz * sp;
   const acc = (m.ground ? PLAYER.ACCEL : PLAYER.AIR_ACCEL) * dt;

@@ -244,6 +244,11 @@ class Sound {
         case 'miss':
           this._tone({ type: 'triangle', from: 500, to: 300, dur: 0.25, vol: 0.18 });
           break;
+        case 'headshot':
+          // ヘッドショット: カキーン（高い金属の音を 2 つ）
+          this._tone({ type: 'square', from: 1800, to: 2400, dur: 0.08, vol: 0.12 });
+          this._tone({ type: 'triangle', from: 2600, to: 1900, dur: 0.25, vol: 0.18, delay: 0.05 });
+          break;
         case 'boom':
           // 爆弾: ボンッ
           this._noise({ dur: 0.55, vol: 0.75, filter: 'lowpass', from: 1800, to: 120, q: 0.6 });
