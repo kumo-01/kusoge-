@@ -1,12 +1,13 @@
 // 3D の見た目（会場・犬・輪ゴム・アイテムの箱・煙・ガム・手に持った鉄砲）。計算には関わらない
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildRealDog } from './dog3d.js';
 import { Particles, Decals, markTex, pawTex } from './fx.js';
 import { device } from '../../core/device.js';
 import { ROOM, groundY } from './arena.js';
 import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS, WEAPON, GIMMICK, geyserLevel } from './constants.js';
-import { mat as stdMat, kindMat, weaponRack } from './look.js';
+import { mat as stdMat, kindMat as kindMat0, weaponRack } from './look.js';
 
 /** 輪ゴムの色（種類ごと） */
 export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]: 0x2a9d8f, [ITEM.BOUNCE]: 0x3a86ff, [ITEM.HOMING]: 0x9b5de5, [ITEM.GOLD]: 0xffc300 };
@@ -114,7 +115,69 @@ function makeBomb() {
 }
 
 // 材質: 光の当たり方が自然なもの（look.js）。名前は前のまま
-const toon = (c, o = {}) => stdMat(c, o);
+// 会場を作っている間は、同じ色・同じ設定の材質を使い回す（あとで材質ごとに 1 つにまとめて、描画の回数を減らすため）
+let matCache = null;
+const toon = (c, o = {}) => {
+  if (!matCache || o.map) return stdMat(c, o);
+  const k = `t${c}|${JSON.stringify(o)}`;
+  if (!matCache.has(k)) matCache.set(k, stdMat(c, o));
+  return matCache.get(k);
+};
+const kindMat = (kind, c, w = 1, h = 1) => {
+  if (!matCache) return kindMat0(kind, c, w, h);
+  const k = `k${kind}|${c}|${Math.round(w * 2)}|${Math.round(h * 2)}`;
+  if (!matCache.has(k)) matCache.set(k, kindMat0(kind, c, w, h));
+  return matCache.get(k);
+};
+
+/**
+ * 動かない部品（家具・障害物）を、材質ごとに 1 つの形にまとめる（数百の描画を数十に）。
+ * keep: まとめないもの（光る電球・回るうずなど、あとで変えるもの）
+ */
+function mergeStaticByMaterial(root, isKeep) {
+  root.updateMatrixWorld(true);
+  const by = new Map();
+  const keepList = [];
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    if (isKeep(o)) {
+      keepList.push(o);
+      return;
+    }
+    const k = o.material.uuid;
+    if (!by.has(k)) by.set(k, { mat: o.material, list: [] });
+    by.get(k).list.push(o);
+  });
+  const out = new THREE.Group();
+  for (const { mat, list } of by.values()) {
+    const geos = list.map((o) => {
+      const g0 = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      for (const name of Object.keys(g0.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g0.deleteAttribute(name);
+      if (!g0.attributes.uv) g0.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g0.attributes.position.count * 2), 2));
+      if (!g0.attributes.normal) g0.computeVertexNormals();
+      g0.morphAttributes = {};
+      return g0.applyMatrix4(o.matrixWorld);
+    });
+    const merged = mergeGeometries(geos);
+    for (const g0 of geos) g0.dispose();
+    if (!merged) {
+      for (const o of list) keepList.push(o);
+      continue;
+    }
+    const m = new THREE.Mesh(merged, mat);
+    if (list.some((o) => o.userData.noCast)) m.userData.noCast = list.every((o) => o.userData.noCast);
+    out.add(m);
+  }
+  // まとめないものは、元の位置のまま付け替える
+  for (const o of keepList) {
+    o.updateMatrixWorld(true);
+    const w = o.matrixWorld.clone();
+    o.parent?.remove(o);
+    w.decompose(o.position, o.quaternion, o.scale);
+    out.add(o);
+  }
+  return out;
+}
 
 /** 床の模様（キャンバスで描く） */
 function floorTexture(kind, color) {
@@ -311,7 +374,15 @@ export class GomuWorld {
       }
     }
     // 家具
-    for (const b of arena.draw || arena.boxes) G.add(this._furniture(b)); // 見た目は元の箱（当たり判定は形に合わせた箱の組）
+    // 見た目は元の箱（当たり判定は形に合わせた箱の組）。動かない部品は材質ごとにまとめる
+    matCache = new Map();
+    const F = new THREE.Group();
+    try {
+      for (const b of arena.draw || arena.boxes) F.add(this._furniture(b));
+    } finally {
+      matCache = null;
+    }
+    G.add(F); // まとめるのは最後に、ほかの動かないものと一緒に
     for (const d of arena.decor || []) {
       const o = this._decor(d);
       if (o) G.add(o);
@@ -372,6 +443,12 @@ export class GomuWorld {
       G.add(g);
       return g;
     });
+    // 動かないもの（地面・柵・遠くの丘・雲・家具・パネルなど）は材質ごとにまとめる（描画の回数を減らす）
+    const dyn = new Set([...this.itemBoxes, ...this.treats, ...this.balloons, ...(this.geyserFx || []).map((x) => x.g), this._snowCover?.mesh].filter(Boolean));
+    const stat = new THREE.Group();
+    for (const c of [...G.children]) if (!dyn.has(c)) stat.add(c);
+    const keepSet = new Set([...this._swirls, ...this._lamps.map((L) => L.bulb)]);
+    G.add(mergeStaticByMaterial(stat, (o) => keepSet.has(o)));
     this.scene.add(G);
     G.traverse((o) => {
       if (o.isMesh && !o.userData.noCast) o.castShadow = true;

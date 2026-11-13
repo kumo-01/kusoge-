@@ -18,6 +18,7 @@ export const NET_CONFIG = {
   HEARTBEAT_MS: 1000, // ping 送信間隔
   LIVENESS_MS: 6000, // これだけ何も受信しなければ切断扱い（通常画面）
   LIVENESS_GAME_MS: 3500, // ゲーム進行中（常にデータが流れているので短め）
+  GAME_WARMUP_MS: 15000, // ゲームの始まりは、相手の端末が会場や絵を作るのに数秒止まることがあるので、この間は通常の長さで待つ
   LIVENESS_HIDDEN_MS: 120000, // 相手のタブが非表示のとき（ブラウザがタイマーを間引くため）
   CONNECT_TIMEOUT_MS: 9000, // DataConnection が open するまでの待ち時間
   JOIN_TIMEOUT_MS: 6000, // join_request / join_accepted の待ち時間
@@ -148,7 +149,8 @@ export class Link extends Emitter {
     if (t - this._lastTick > NET_CONFIG.HEARTBEAT_MS * 2) this.lastRecv = Math.max(this.lastRecv, t - NET_CONFIG.HEARTBEAT_MS);
     this._lastTick = t;
     this.send({ type: 'ping', t });
-    const limit = this.peerHidden ? NET_CONFIG.LIVENESS_HIDDEN_MS : this.timeoutMs;
+    const warm = this._warmUntil && t < this._warmUntil;
+    const limit = this.peerHidden ? NET_CONFIG.LIVENESS_HIDDEN_MS : warm ? Math.max(this.timeoutMs, NET_CONFIG.LIVENESS_MS) : this.timeoutMs;
     if (now() - this.lastRecv > limit) this.close('timeout');
   }
 
@@ -158,6 +160,7 @@ export class Link extends Emitter {
 
   /** ゲーム中は生存確認を短くする */
   setGameMode(inGame) {
+    if (inGame && this.timeoutMs !== NET_CONFIG.LIVENESS_GAME_MS) this._warmUntil = now() + NET_CONFIG.GAME_WARMUP_MS;
     this.timeoutMs = inGame ? NET_CONFIG.LIVENESS_GAME_MS : NET_CONFIG.LIVENESS_MS;
     this.lastRecv = Math.max(this.lastRecv, now() - 500);
   }
