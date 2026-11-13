@@ -56,23 +56,26 @@ test('会場: 3 つとも、出発地点・アイテムの箱・押せるもの�
 test('動き: 歩く・ベンチの座面にぶつかって止まる・ジャンプで座面に乗る・座面の下は伏せでくぐる', () => {
   const a = ARENAS[0];
   // 公園のベンチ（座面の下は高さ 0.85。立った犬は 1 なので入れない）
-  const seat = a.boxes.find((b) => b.y0 === 0.85 && b.x1 - b.x0 === 4 && b.z1 < -10);
-  const cx = (seat.x0 + seat.x1) / 2;
+  const seat0 = a.boxes.find((b) => b.y0 === 0.85 && b.x1 - b.x0 === 4 && b.z1 < -10);
+  const cx = (seat0.x0 + seat0.x1) / 2;
+  // ベンチのまわりだけの世界（ほかの障害物・ギミックの影響を受けないように）
+  const bench = { boxes: a.boxes.filter((b) => b.k === 'wood' && b.x1 > cx - 3 && b.x0 < cx + 3 && b.z1 > seat0.z0 - 2 && b.z0 < seat0.z1 + 2) };
+  const seat = seat0;
   const m = createBody(cx, seat.z1 + 4, Math.PI);
-  for (let i = 0; i < 120; i++) stepMove(m, { fz: 1 }, DT, a);
+  for (let i = 0; i < 120; i++) stepMove(m, { fz: 1 }, DT, bench);
   assert.ok(Math.abs(m.z - (seat.z1 + PLAYER.RADIUS)) < 0.02, `ベンチの前で止まる (${m.z})`);
   assert.equal(m.y, 0);
   // ジャンプしながら前へ → 座面に乗る
-  stepMove(m, { fz: 1, jump: true }, DT, a);
-  for (let i = 0; i < 60; i++) stepMove(m, { fz: 1 }, DT, a);
+  stepMove(m, { fz: 1, jump: true }, DT, bench);
+  for (let i = 0; i < 60; i++) stepMove(m, { fz: 1 }, DT, bench);
   assert.ok(Math.abs(m.y - seat.y1) < 1e-6, `座面の上 (${m.y})`);
   // 伏せれば座面の下をくぐって向こうへ抜ける
   const t = createBody(cx, seat.z1 + 4, Math.PI);
-  for (let i = 0; i < 240; i++) stepMove(t, { fz: 1, crouch: true }, DT, a);
+  for (let i = 0; i < 240; i++) stepMove(t, { fz: 1, crouch: true }, DT, bench);
   assert.ok(t.z < seat.z0 - 0.5, `伏せでくぐれる (${t.z})`);
   // 座面の下では立ち上がれない（伏せたまま）
   t.z = (seat.z0 + seat.z1) / 2;
-  stepMove(t, { crouch: false }, DT, a);
+  stepMove(t, { crouch: false }, DT, bench);
   assert.equal(t.crouch, true);
   assert.equal(heightOf(t), PLAYER.CROUCH_HEIGHT);
 });
@@ -310,7 +313,7 @@ test('押せるもの: 体当たりでズルズル押して動かせる。壁に
   assert.equal((box.x0 + box.x1) / 2, stop, '止まったまま');
   // ゲストの報告した位置が押せるものに重なっていたら、ホストが押し出す
   const b2 = movableBox({ x: -10, z: 12, w: 1.8, d: 1.8, h: 1.3, c: 0, k: 'cardboard' });
-  const w2 = { boxes: [...a.boxes, b2] };
+  const w2 = { boxes: [b2] }; // まわりに何もない所
   const g = createBody(-10.4 - 0.9, 12, 0);
   g.x = -10.9 + 0.2;
   shoveMovables(w2, g);
@@ -1029,4 +1032,65 @@ test('丘とくぼみ: 3 つの会場にあり、歩いて上り下りでき、�
   assert.ok(Math.abs(yHit - (hollow.h + 0.05)) < 0.01, `くぼみの底で当たる ${yHit}`);
   // 地形のない所では、箱の計算と同じ
   assert.equal(segHit(a, -50, 5, -40, -49, 5, -39, 0.05), segmentHitJs(a, -50, 5, -40, -49, 5, -39, 0.05));
+});
+
+import { GIMMICK, geyserOn } from '../src/games/gomuBattle/constants.js';
+import { OBSTACLE_KINDS } from '../src/games/gomuBattle/arena.js';
+
+test('障害物 10 種がどの会場にもあり、輪ゴムをさえぎる。土管の中は立ったまま通れる', () => {
+  assert.equal(OBSTACLE_KINDS.length, 10);
+  for (const a of ARENAS) for (const k of OBSTACLE_KINDS) assert.ok(a.draw.some((b) => b.k === k), `${a.id} に ${k}`);
+  const a = ARENAS[0];
+  const c = a.draw.find((b) => b.k === 'container');
+  const cx = (c.x0 + c.x1) / 2;
+  const cz = (c.z0 + c.z1) / 2;
+  assert.ok(segHit(a, cx - 6, 1, cz - 6, cx + 6, 1, cz + 6, 0.05) < 1, 'コンテナに当たる');
+  const p = a.draw.find((b) => b.k === 'pipe');
+  const along = p.x1 - p.x0 >= p.z1 - p.z0;
+  const px = (p.x0 + p.x1) / 2;
+  const pz = (p.z0 + p.z1) / 2;
+  const m = createBody(along ? p.x0 - 1.5 : px, along ? pz : p.z0 - 1.5, along ? Math.PI / 2 : 0);
+  for (let i = 0; i < 120; i++) stepMove(m, { fz: 1 }, DT, a);
+  assert.ok(along ? m.x > p.x1 : m.z > p.z1, '土管の中を通り抜けた');
+  assert.equal(m.crouch, false, '立ったまま');
+});
+
+test('ギミック: 加速パネルで速くなる・ワープ土管でもう 1 本へ・間欠泉で高く飛ばされる', () => {
+  const a = ARENAS[1];
+  assert.equal(a.pads.length, GIMMICK.PADS);
+  assert.equal(a.pipes.length, GIMMICK.WARP_PAIRS);
+  assert.equal(a.geysers.length, GIMMICK.GEYSERS);
+  // 加速パネル
+  const pd = a.pads[0];
+  const m = createBody(pd.x, pd.z, pd.yaw);
+  m.y = groundY(a, pd.x, pd.z);
+  const r = stepMove(m, { fz: 1 }, DT, a);
+  assert.ok(r.pad && m.padT > 0);
+  for (let i = 0; i < 30; i++) stepMove(m, { fz: 1 }, DT, a);
+  assert.ok(Math.hypot(m.vx, m.vz) > PLAYER.SPEED * 1.5, `速い ${Math.hypot(m.vx, m.vz)}`);
+  // ワープ土管: 上に乗ると、もう 1 本の上へ
+  const [[ax, az], [bx, bz]] = [a.pipes[0].a, a.pipes[0].b];
+  const w = createBody(ax, az, 0);
+  w.y = 0.6;
+  let warped = false;
+  for (let i = 0; i < 30 && !warped; i++) warped = !!stepMove(w, {}, DT, a).warped;
+  assert.ok(warped);
+  assert.ok(Math.hypot(w.x - bx, w.z - bz) < 1e-6, 'もう 1 本の上');
+  for (let i = 0; i < 30; i++) assert.ok(!stepMove(w, {}, DT, a).warped, 'すぐには戻らない');
+  // 間欠泉: ふき出している時刻だけ飛ばされる
+  const g = a.geysers[0];
+  let t = 0;
+  while (!geyserOn(0, t)) t += 0.05;
+  const q = createBody(g.x, g.z, 0);
+  const off = { ...a, clock: t - GIMMICK.GEYSER_TIME - 1 };
+  assert.ok(!geyserOn(0, off.clock));
+  assert.ok(!stepMove(q, {}, DT, off).geyser);
+  const on = { ...a, clock: t };
+  assert.ok(stepMove(q, {}, DT, on).geyser);
+  let top = 0;
+  for (let i = 0; i < 120; i++) {
+    stepMove(q, {}, DT, { ...a, clock: t + 5 });
+    top = Math.max(top, q.y);
+  }
+  assert.ok(top > 5, `高く飛ぶ ${top}`);
 });

@@ -197,6 +197,7 @@ export class GomuSim {
 
   /** 1 tick 進める */
   step(dt) {
+    this.cw.clock = this.s.t; // ギミック（間欠泉）の時刻
     const s = this.s;
     s.t += dt;
     if (s.phase === 'pick') {

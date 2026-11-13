@@ -289,3 +289,36 @@ export const BOSS = {
 };
 /** 毛玉（猫が吐く玉）の種類の番号（輪ゴムの種類と同じ並びで扱う） */
 export const HAIRBALL = 20;
+
+/**
+ * ステージのギミック（2026-11-13）
+ * - 加速パネル: 乗ると PAD_TIME 秒、速さが PAD_MUL 倍
+ * - ワープ土管: 2 本で 1 組。片方の上に乗ると、もう片方の上へ（WARP_CD 秒はもう一度ワープしない）
+ * - 間欠泉: GEYSER_EVERY 秒ごとに GEYSER_TIME 秒ふき出す（その前の GEYSER_WARN 秒はぶくぶく）。上にいる犬は GEYSER_V で高く飛ばされる
+ */
+export const GIMMICK = {
+  PAD_TIME: 1.4,
+  PAD_MUL: 1.75,
+  PADS: 6,
+  WARP_CD: 2.5,
+  WARP_PAIRS: 2,
+  GEYSERS: 3,
+  GEYSER_EVERY: 9,
+  GEYSER_TIME: 1.6,
+  GEYSER_WARN: 1.2,
+  GEYSER_R: 1.3,
+  GEYSER_V: 17,
+};
+
+/** 間欠泉 k が、ラウンドの時刻 t にふき出しているか（ずらして、全部が同時にはふかない） */
+export function geyserOn(k, t) {
+  const ph = (t + k * 3.1) % GIMMICK.GEYSER_EVERY;
+  return ph >= GIMMICK.GEYSER_EVERY - GIMMICK.GEYSER_TIME;
+}
+/** ふき出す前のぶくぶく（0〜1）。ふいている間は 1 */
+export function geyserLevel(k, t) {
+  const ph = (t + k * 3.1) % GIMMICK.GEYSER_EVERY;
+  const start = GIMMICK.GEYSER_EVERY - GIMMICK.GEYSER_TIME;
+  if (ph >= start) return 1;
+  return Math.max(0, (ph - (start - GIMMICK.GEYSER_WARN)) / GIMMICK.GEYSER_WARN) * 0.5;
+}

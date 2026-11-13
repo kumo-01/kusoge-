@@ -152,6 +152,17 @@ const KIND_LOOK = {
   toy: { rough: 0.5 },
   sand: { rough: 1 },
   fire: { rough: 0.9 },
+  drum: { tex: metalTex, unit: 1, rough: 0.45, metal: 0.6 },
+  container: { tex: metalTex, unit: 2, rough: 0.5, metal: 0.55 },
+  pipe: { tex: rockTex, unit: 2, rough: 0.95 },
+  tires: { rough: 0.9 },
+  hay: { tex: fabricTex, unit: 0.8, rough: 1 },
+  vending: { rough: 0.35, metal: 0.25 },
+  wall: { tex: rockTex, unit: 1.2, rough: 0.97 },
+  shed: { tex: woodTex, unit: 1.4, rough: 0.8 },
+  crates: { tex: woodTex, unit: 1.0, rough: 0.78 },
+  lamp: { rough: 0.4, metal: 0.7 },
+  warp: { rough: 0.35, metal: 0.1 },
 };
 
 /** 見た目の種類 kind・色 c・大きさ（横 w・縦 h）の材質。模様は大きさに合わせてくり返す */

@@ -270,6 +270,19 @@ class Sound {
           this._tone({ type: 'sawtooth', from: 300, to: 1400, dur: 0.3, vol: 0.14 });
           this._noise({ dur: 0.3, vol: 0.18, filter: 'highpass', from: 1500, to: 4500 });
           break;
+        case 'warp':
+          // ワープ土管: ポワワワン（下がる音を 3 回）
+          [0, 0.07, 0.14].forEach((d) => this._tone({ type: 'square', from: 900, to: 220, dur: 0.12, vol: 0.09, delay: d }));
+          break;
+        case 'geyser':
+          // 間欠泉: ブシャーッ
+          this._noise({ dur: 0.9, vol: 0.45, filter: 'bandpass', from: 700, to: 2600, q: 0.6 });
+          this._tone({ from: 140, to: 320, dur: 0.4, vol: 0.18 });
+          break;
+        case 'nv':
+          // 暗視ゴーグル: ピッ（高い電子音）
+          this._tone({ type: 'sine', from: 2200, to: 3000, dur: 0.12, vol: 0.12 });
+          break;
         case 'lose':
           [523, 494, 466, 440].forEach((f, i) => this._tone({ type: 'triangle', from: f, dur: 0.25, vol: 0.18, delay: i * 0.22 }));
           break;

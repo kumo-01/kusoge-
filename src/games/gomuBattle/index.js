@@ -280,8 +280,19 @@ class GomuGame {
     this._wantItem = false;
     const slow = !act ? 0 : rec?.stuck > 0 ? 0 : rec?.stun > 0 ? PLAYER.STUN_SPEED : 1;
     this.prevPos = { x: p.x, y: p.y, z: p.z, crouch: p.crouch };
+    this.cw.clock = this._clock(); // 間欠泉の時刻
     const mv = stepMove(p, act ? { fx, fz, jump, dash, crouch } : { crouch: false }, dt, this.cw, slow);
     if (mv.dashed) this.ctx.sound.play('boost');
+    if (mv.pad) {
+      this.ctx.sound.play('pad'); // 加速パネル
+      this.hud.speedLines?.(1);
+    }
+    if (mv.warped) {
+      this.ctx.sound.play('warp'); // ワープ土管
+      this.prevPos = { x: p.x, y: p.y, z: p.z, crouch: p.crouch };
+      this.world?.warpFx?.(p.x, p.y, p.z);
+    }
+    if (mv.geyser) this.ctx.sound.play('geyser'); // 間欠泉
     if (mv.slid) this.ctx.sound.play('slip'); // スライディング
     if (mv.bounced) this.ctx.sound.play('pad'); // トランポリン
     // 遠吠え（V。タッチは「ワン」ボタン）
@@ -789,6 +800,13 @@ class GomuGame {
     if (this._near(e)) this.ctx.sound.play('throw');
   }
 
+  /** ラウンドの時刻（ホストは計算の時刻、ゲストは最後に届いた時刻 + そこからの経過） */
+  _clock() {
+    if (this.isHost) return this.sim.s.t;
+    if (!this.last) return 0;
+    return this.last.t + Math.min(0.5, (performance.now() - (this._lastAt || performance.now())) / 1000);
+  }
+
   /** ホストとの片道の遅れ（秒）の見積もり */
   _oneWay() {
     const rtt = this.ctx.getNetInfo?.()?.rtt;
@@ -1087,6 +1105,7 @@ class GomuGame {
       // 風船・おとり人形・雨
       const S = this.isHost ? this.sim.s : this.last;
       w.updateBalloons(this.isHost ? (S.balloons || []).map((x) => x <= 0) : (this.arena.balloons || []).map((_, k) => !!((S?.balloons ?? 0) & (1 << k))), dt);
+      w.updateGimmicks(this._clock(), dt); // ワープ土管・加速パネル・間欠泉
       w.updateDecoys(S?.decoys || [], (o) => this.idents[o]?.kind || 'shiba', (o) => (this.mode === MODE.TEAM ? TEAMS[this._team(o)]?.hex : parseInt((this.idents[o]?.css || '#999999').slice(1), 16)));
       w.setRain((S?.rain ?? 0) > 0);
       // 水しぶき（水の中で動いている犬）

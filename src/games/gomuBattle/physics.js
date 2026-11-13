@@ -1,7 +1,7 @@
 // 犬の動き（歩く・ジャンプ・ダッシュ・伏せ）と、輪ゴムの飛び方。
 // 自分の犬は自分の端末で、CPU の犬はホストが、同じ stepMove で動かす。輪ゴムはホストが正本（ゲストは見た目だけ同じ計算）
 
-import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL, THICK_MUL, HEADSHOT, FUN, EXTRA } from './constants.js';
+import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL, THICK_MUL, HEADSHOT, FUN, EXTRA, GIMMICK, geyserOn } from './constants.js';
 import { ROOM, overlapXZ, segmentHit, groundY } from './arena.js';
 
 /** 動く体（犬）の初期値 */
@@ -74,7 +74,18 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
   }
   // 水の中は遅い
   m.inWater = !!arena.water?.some((w) => m.x > w.x0 && m.x < w.x1 && m.z > w.z0 && m.z < w.z1) && m.y < 0.3;
-  const sp = (m.crouch ? PLAYER.CROUCH_SPEED : m.sprint ? PLAYER.SPRINT_SPEED : PLAYER.SPEED) * slow * (m.inWater ? EXTRA.WATER_SLOW : 1);
+  // 加速パネル: 地面にいて上を通ると、しばらく速い
+  m.padT = Math.max(0, (m.padT || 0) - dt);
+  if (m.ground && arena.pads) {
+    for (const pd of arena.pads) {
+      if ((m.x - pd.x) ** 2 + (m.z - pd.z) ** 2 < 1.35 * 1.35 && m.y < groundY(arena, pd.x, pd.z) + 0.3) {
+        if (m.padT <= 0) res.pad = true;
+        m.padT = GIMMICK.PAD_TIME;
+      }
+    }
+  }
+  m.warpCd = Math.max(0, (m.warpCd || 0) - dt);
+  const sp = (m.crouch ? PLAYER.CROUCH_SPEED : m.sprint ? PLAYER.SPRINT_SPEED : PLAYER.SPEED) * slow * (m.inWater ? EXTRA.WATER_SLOW : 1) * (m.padT > 0 ? GIMMICK.PAD_MUL : 1);
   const tx = wx * sp;
   const tz = wz * sp;
   const acc = (m.ground ? PLAYER.ACCEL : PLAYER.AIR_ACCEL) * dt;
@@ -92,6 +103,17 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
     m.vy = PLAYER.JUMP;
     m.ground = false;
     res.jumped = true;
+  }
+  // 間欠泉: ふき出している間、上にいる犬は高く飛ばされる（時刻は arena.clock = ラウンドの時刻）
+  if (arena.geysers && arena.clock != null) {
+    arena.geysers.forEach((g, k) => {
+      if (!geyserOn(k, arena.clock)) return;
+      if ((m.x - g.x) ** 2 + (m.z - g.z) ** 2 < GIMMICK.GEYSER_R ** 2 && m.y < groundY(arena, g.x, g.z) + 1.5 && m.vy < GIMMICK.GEYSER_V * 0.5) {
+        m.vy = GIMMICK.GEYSER_V;
+        m.ground = false;
+        res.geyser = true;
+      }
+    });
   }
   m.vy -= PLAYER.GRAVITY * dt;
   const h = heightOf(m);
@@ -170,6 +192,15 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
         m.vy = FUN.TRAMP_V;
         m.ground = false;
         res.bounced = true;
+      }
+      // ワープ土管: 上に乗ると、もう 1 本の上へ
+      if (floorBox?.warp && m.warpCd <= 0 && overlapXZ(floorBox, m.x, m.z, -0.25)) {
+        m.x = floorBox.warp.x;
+        m.z = floorBox.warp.z;
+        m.vx = 0;
+        m.vz = 0;
+        m.warpCd = GIMMICK.WARP_CD;
+        res.warped = true;
       }
     } else {
       m.y = ny;

@@ -4,7 +4,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { buildDog } from '../dogKart/dog.js';
 import { device } from '../../core/device.js';
 import { ROOM, groundY } from './arena.js';
-import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS, WEAPON } from './constants.js';
+import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS, WEAPON, GIMMICK, geyserLevel } from './constants.js';
 import { mat as stdMat, kindMat, weaponRack, realisticDog } from './look.js';
 
 /** 輪ゴムの色（種類ごと） */
@@ -253,6 +253,8 @@ export class GomuWorld {
     const G = new THREE.Group();
     this.arenaGroup = G;
     this.arena = arena;
+    this._lamps = [];
+    this._swirls = [];
     const W = ROOM.W;
     const D = ROOM.D;
     const H = ROOM.WALL;
@@ -302,6 +304,8 @@ export class GomuWorld {
       const o = this._decor(d);
       if (o) G.add(o);
     }
+    // 加速パネル（矢印が流れる）・間欠泉
+    this._buildGimmicks(G, arena);
     // アイテムの箱
     this.itemBoxes = arena.items.map(([x, z, y]) => {
       const g = new THREE.Group();
@@ -366,7 +370,7 @@ export class GomuWorld {
     G.traverse((o) => {
       if (!this.itemBoxes.includes(o)) o.matrixAutoUpdate = false;
     });
-    for (const g of [...this.itemBoxes, ...this.treats, ...this.balloons]) g.traverse((o) => (o.matrixAutoUpdate = true));
+    for (const g of [...this.itemBoxes, ...this.treats, ...this.balloons, ...this._swirls, ...(this.geyserFx || []).map((x) => x.g)]) g.traverse((o) => (o.matrixAutoUpdate = true));
     this.renderer.shadowMap.needsUpdate = true;
     this.movMeshes = null; // 押せるものは新しい会場で作り直す
     if (arena.outdoor) this.setTimeOfDay(tod, arena.sky); // 時間帯（ラウンドごとに 朝・昼・夕方）
@@ -456,6 +460,88 @@ export class GomuWorld {
     }
   }
 
+  /** ギミックの見た目: 加速パネル（光る矢印）と間欠泉（石の輪・ぬれた地面・水の柱） */
+  _buildGimmicks(G, arena) {
+    if (!this._padTex) {
+      const cv = document.createElement('canvas');
+      cv.width = 64;
+      cv.height = 128;
+      const x = cv.getContext('2d');
+      x.fillStyle = '#1f6fb2';
+      x.fillRect(0, 0, 64, 128);
+      x.strokeStyle = '#7ff7ff';
+      x.lineWidth = 10;
+      x.lineCap = 'round';
+      for (const y of [30, 94]) {
+        x.beginPath();
+        x.moveTo(12, y + 14);
+        x.lineTo(32, y - 10);
+        x.lineTo(52, y + 14);
+        x.stroke();
+      }
+      const t = new THREE.CanvasTexture(cv);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(1, 1.5);
+      this._padTex = t;
+    }
+    const padM = new THREE.MeshBasicMaterial({ map: this._padTex, transparent: true, opacity: 0.92 });
+    for (const p of arena.pads || []) {
+      const g = new THREE.Group();
+      const plate = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 2.5), padM);
+      plate.rotation.x = -Math.PI / 2;
+      plate.position.y = 0.03;
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.04, 2.7), toon(0x2b2d42, { roughness: 0.5, metalness: 0.5 }));
+      frame.position.y = 0.01;
+      g.add(frame, plate);
+      g.position.set(p.x, groundY(arena, p.x, p.z), p.z);
+      g.rotation.y = p.yaw;
+      plate.userData.noCast = frame.userData.noCast = true;
+      G.add(g);
+    }
+    this.geyserFx = (arena.geysers || []).map((gz) => {
+      const g = new THREE.Group();
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.28, 8, 18), kindMat('rock', 0x8d8a85, 2, 1));
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.08;
+      const wet = new THREE.Mesh(new THREE.CircleGeometry(1.15, 24), toon(0x3e5c6b, { roughness: 0.15, metalness: 0.1 }));
+      wet.rotation.x = -Math.PI / 2;
+      wet.position.y = 0.03;
+      wet.userData.noCast = true;
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.85, 1, 16, 1, true), new THREE.MeshStandardMaterial({ color: 0xbfe9ff, transparent: true, opacity: 0.5, roughness: 0.05, metalness: 0.1, side: THREE.DoubleSide, depthWrite: false }));
+      col.userData.noCast = true;
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.9, 12, 8), new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, roughness: 0.2, depthWrite: false }));
+      cap.userData.noCast = true;
+      g.add(ring, wet, col, cap);
+      g.position.set(gz.x, groundY(arena, gz.x, gz.z), gz.z);
+      G.add(g);
+      return { g, col, cap };
+    });
+  }
+
+  /** ギミックを動かす: ワープ土管のうず・加速パネルの矢印・間欠泉の水の柱（clock: ラウンドの時刻） */
+  updateGimmicks(clock, dt) {
+    for (const s of this._swirls || []) s.rotation.z += dt * 3;
+    if (this._padTex) this._padTex.offset.y = (this._padTex.offset.y - dt * 1.6) % 1;
+    (this.geyserFx || []).forEach((G, k) => {
+      const lv = geyserLevel(k, clock);
+      const on = lv >= 1;
+      const hgt = on ? 7 + Math.sin(this.t * 22 + k) * 0.5 : lv * 0.8;
+      G.col.visible = hgt > 0.05;
+      G.col.scale.set(1, Math.max(0.01, hgt), 1);
+      G.col.position.y = hgt / 2;
+      G.cap.visible = on;
+      G.cap.position.y = hgt;
+      G.cap.scale.setScalar(on ? 1 + Math.sin(this.t * 15 + k) * 0.15 : 0.5);
+      if (on && Math.random() < dt * 30) this.burst(G.g.position.x + (Math.random() - 0.5), G.g.position.y + hgt * Math.random(), G.g.position.z + (Math.random() - 0.5), 0xe0f7ff, 2, 3, 0.08);
+    });
+  }
+
+  /** ワープしたときの光（その場に緑の輪が広がる） */
+  warpFx(x, y, z) {
+    this.burst(x, y + 0.6, z, 0x7dffa0, 24, 4, 0.08);
+  }
+
   /** 地面の網目（x0〜x1・z0〜z1 を nx × nz に分ける）。arena があれば丘・くぼみの高さに */
   _groundMesh(arena, x0, x1, z0, z1, nx, nz, material) {
     const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0, nx, nz);
@@ -516,6 +602,212 @@ export class GomuWorld {
     } else if (b.k === 'rock') {
       o = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5, 0), mat);
       o.scale.set(w, h * 1.1, d);
+    } else if (b.k === 'lamp') {
+      // 街灯: 柱・腕・かさ・電球（夜は光る。光は setNight で近いものに置く）
+      o = new THREE.Group();
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, h, 10), mat);
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.0, 8), mat);
+      arm.rotation.z = Math.PI / 2;
+      arm.position.set(0.45, h / 2 - 0.12, 0);
+      const shade = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.3, 14, 1, true), toon(0x30343a, { side: THREE.DoubleSide, roughness: 0.4, metalness: 0.6 }));
+      shade.position.set(0.9, h / 2 - 0.2, 0);
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 8), new THREE.MeshStandardMaterial({ color: 0xfff3c4, emissive: 0xffd27a, emissiveIntensity: 0.15, roughness: 0.3 }));
+      bulb.position.set(0.9, h / 2 - 0.33, 0);
+      bulb.userData.noCast = true;
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.4, 10), mat);
+      base.position.y = -h / 2 + 0.2;
+      o.add(pole, arm, shade, bulb, base);
+      o.userData.lamp = { bulb, x: cx + 0.9, y: b.y1 - 0.4, z: cz };
+      (this._lamps ||= []).push(o.userData.lamp);
+    } else if (b.k === 'drum') {
+      // ドラム缶: 円柱と、ふくらんだ輪 2 本・ふた
+      const r = Math.min(w, d) / 2;
+      o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 20), mat);
+      for (const y of [-h * 0.18, h * 0.18]) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(r + 0.005, 0.025, 6, 24), mat);
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = y;
+        o.add(ring);
+      }
+      const lid = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.96, r * 0.96, 0.02, 20), toon(0x1d4e6b, { roughness: 0.4, metalness: 0.6 }));
+      lid.position.y = h / 2;
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.04, 8), toon(0xbbbbbb, { metalness: 0.8, roughness: 0.3 }));
+      cap.position.set(r * 0.5, h / 2 + 0.02, 0);
+      o.add(lid, cap);
+    } else if (b.k === 'container') {
+      // コンテナ: 波板の箱（縦のすじ）と、端の扉・取っ手
+      o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      const along = w >= d;
+      const len = along ? w : d;
+      const n = Math.floor(len / 0.35);
+      const rib = toon(new THREE.Color(b.c).multiplyScalar(0.82).getHex(), { roughness: 0.5, metalness: 0.5 });
+      for (let i = 1; i < n; i++) {
+        const t = -len / 2 + (i * len) / n;
+        for (const sg of [-1, 1]) {
+          const r = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.06 : 0.05, h * 0.92, along ? 0.05 : 0.06), rib);
+          r.position.set(along ? t : (sg * w) / 2, 0, along ? (sg * d) / 2 : t);
+          o.add(r);
+        }
+      }
+      for (const k of [-0.25, 0.25]) {
+        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, h * 0.9, 6), toon(0x777777, { metalness: 0.8, roughness: 0.3 }));
+        bar.position.set(along ? w / 2 + 0.04 : k * w, 0, along ? k * d : d / 2 + 0.04);
+        o.add(bar);
+      }
+    } else if (b.k === 'pipe') {
+      // 土管: 寝かせた太い筒（中を通れる）
+      const along = w >= d;
+      const R = (along ? d : w) / 2;
+      const len = along ? w : d;
+      const tube = new THREE.CylinderGeometry(R, R, len, 24, 1, true);
+      o = new THREE.Group();
+      const outer = new THREE.Mesh(tube, mat);
+      const inner = new THREE.Mesh(new THREE.CylinderGeometry(R - 0.22, R - 0.22, len, 24, 1, true), toon(0x6e6e6e, { side: THREE.BackSide, roughness: 1 }));
+      const rimG = new THREE.RingGeometry(R - 0.22, R, 24);
+      for (const sg of [-1, 1]) {
+        const rim = new THREE.Mesh(rimG, mat);
+        rim.position.y = (sg * len) / 2;
+        rim.rotation.x = (sg * Math.PI) / 2;
+        outer.add(rim);
+      }
+      outer.add(inner);
+      outer.rotation[along ? 'z' : 'x'] = Math.PI / 2;
+      outer.position.y = R - h / 2;
+      o.add(outer);
+    } else if (b.k === 'tires') {
+      // タイヤの山: 黒い輪を 3 段
+      o = new THREE.Group();
+      const r = Math.min(w, d) / 2;
+      const n = 3;
+      for (let i = 0; i < n; i++) {
+        const t = new THREE.Mesh(new THREE.TorusGeometry(r * 0.72, r * 0.26, 10, 22), mat);
+        t.rotation.x = Math.PI / 2;
+        t.position.set(((i % 2) - 0.5) * 0.06, -h / 2 + (h / n) * (i + 0.5), 0);
+        t.scale.z = (h / n / (r * 0.52)) * 0.95;
+        o.add(t);
+      }
+    } else if (b.k === 'hay') {
+      // 干し草ロール: 寝かせた太い円柱（端はうず巻きの色）
+      const along = w >= d;
+      const r = Math.min(along ? d : w, h) / 2;
+      o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, along ? w : d, 22), mat);
+      o.rotation[along ? 'z' : 'x'] = Math.PI / 2;
+      const endM = toon(0xd4a73c, { roughness: 1 });
+      for (const sg of [-1, 1]) {
+        const e = new THREE.Mesh(new THREE.CircleGeometry(r * 0.98, 22), endM);
+        e.position.y = (sg * (along ? w : d)) / 2 + sg * 0.005;
+        e.rotation.x = sg * -Math.PI / 2;
+        o.add(e);
+        const sw = new THREE.Mesh(new THREE.RingGeometry(r * 0.3, r * 0.36, 22), toon(0xb8862b));
+        sw.position.copy(e.position);
+        sw.position.y += sg * 0.003;
+        sw.rotation.copy(e.rotation);
+        o.add(sw);
+      }
+    } else if (b.k === 'vending') {
+      // 自動販売機: 白い箱・光る見本の窓・取り出し口
+      o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, 0.05), mat);
+      const front = w >= d ? (cz > 0 ? -1 : 1) : 0;
+      const side = w < d ? (cx > 0 ? -1 : 1) : 0;
+      const face = (gw, gh, y, m, out = 0.01) => {
+        const f = new THREE.Mesh(new THREE.PlaneGeometry(gw, gh), m);
+        if (front) {
+          f.position.set(0, y, front * (d / 2 + out));
+          if (front < 0) f.rotation.y = Math.PI;
+        } else {
+          f.position.set(side * (w / 2 + out), y, 0);
+          f.rotation.y = (side * Math.PI) / 2;
+        }
+        return f;
+      };
+      const span = front ? w : d;
+      const win = face(span * 0.82, h * 0.42, h * 0.16, new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xbfe6ff, emissiveIntensity: 0.55, roughness: 0.15 }));
+      win.userData.noCast = true;
+      o.add(win);
+      const cols = [0xe63946, 0x2a9d8f, 0xffb703, 0x3a86ff];
+      for (let r = 0; r < 2; r++) for (let k = 0; k < 4; k++) {
+        const can = face(span * 0.12, h * 0.12, h * 0.26 - r * h * 0.19, toon(cols[(k + r) % 4]), 0.02);
+        if (front) can.position.x = (k - 1.5) * span * 0.19;
+        else can.position.z = (k - 1.5) * span * 0.19 * (side > 0 ? -1 : 1);
+        o.add(can);
+      }
+      o.add(face(span * 0.6, h * 0.1, -h * 0.34, toon(0x222222)));
+    } else if (b.k === 'wall') {
+      // 石垣: ごつごつした石を積んだ低い壁
+      o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, 0.12), mat);
+      const along = w >= d;
+      const len = along ? w : d;
+      const capM = toon(0x7d756b, { roughness: 0.95 });
+      const cap = new THREE.Mesh(new RoundedBoxGeometry(along ? len + 0.1 : Math.min(w, d) + 0.12, 0.16, along ? Math.min(w, d) + 0.12 : len + 0.1, 2, 0.05), capM);
+      cap.position.y = h / 2;
+      o.add(cap);
+    } else if (b.k === 'shed') {
+      // 物置小屋: 板の壁・屋根・扉
+      o = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.8, d), mat);
+      body.position.y = -h * 0.1;
+      const roofM = toon(0x5c3d2e, { roughness: 0.8 });
+      // 切妻屋根: 棟は長い方の向き。2 枚の板を外へ下がるように傾ける
+      const along = w >= d;
+      const span = along ? d : w;
+      const len = (along ? w : d) + 0.4;
+      for (const sg of [-1, 1]) {
+        const half = new THREE.Mesh(new THREE.BoxGeometry(along ? len : span * 0.58, 0.12, along ? span * 0.58 : len), roofM);
+        if (along) {
+          half.position.set(0, h * 0.36, sg * span * 0.24);
+          half.rotation.x = sg * 0.38;
+        } else {
+          half.position.set(sg * span * 0.24, h * 0.36, 0);
+          half.rotation.z = -sg * 0.38;
+        }
+        o.add(half);
+      }
+      const door = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(w, d) * 0.4, h * 0.6), toon(0x4e342e));
+      if (w >= d) door.position.set(0, -h * 0.2, d / 2 + 0.01);
+      else {
+        door.position.set(w / 2 + 0.01, -h * 0.2, 0);
+        door.rotation.y = Math.PI / 2;
+      }
+      o.add(body, door);
+    } else if (b.k === 'crates') {
+      // 木箱の山: 下に 2 つ、上に 1 つ
+      o = new THREE.Group();
+      const along = w >= d;
+      const unitW = along ? w / 2 : w;
+      const unitD = along ? d : d / 2;
+      const bh = h / 2;
+      const mk = (x, y, z) => {
+        const c = new THREE.Mesh(new RoundedBoxGeometry(unitW * 0.98, bh * 0.98, unitD * 0.98, 2, 0.04), mat);
+        c.position.set(x, y, z);
+        const slat = new THREE.Mesh(new THREE.BoxGeometry(unitW * 1.0, 0.08, unitD * 1.0), toon(0x8a6142));
+        slat.position.y = 0;
+        c.add(slat);
+        o.add(c);
+      };
+      if (along) {
+        mk(-w / 4, -h / 4, 0);
+        mk(w / 4, -h / 4, 0);
+        mk(-w / 4, h / 4, 0);
+      } else {
+        mk(0, -h / 4, -d / 4);
+        mk(0, -h / 4, d / 4);
+        mk(0, h / 4, -d / 4);
+      }
+    } else if (b.k === 'warp') {
+      // ワープ土管: 緑の太い筒（上に乗るとワープ）。ふちと、中の暗い穴
+      const r = Math.min(w, d) / 2;
+      o = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.88, r * 0.88, h, 24), toon(0x2fbf4a, { roughness: 0.3 }));
+      const rim = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.16, 24), toon(0x39d353, { roughness: 0.3 }));
+      rim.position.y = h / 2 - 0.08;
+      const hole = new THREE.Mesh(new THREE.CircleGeometry(r * 0.72, 24), new THREE.MeshBasicMaterial({ color: 0x0b2410 }));
+      hole.rotation.x = -Math.PI / 2;
+      hole.position.y = h / 2 + 0.005;
+      const swirl = new THREE.Mesh(new THREE.RingGeometry(r * 0.3, r * 0.55, 24, 1, 0, Math.PI * 1.4), new THREE.MeshBasicMaterial({ color: 0x7dffa0, transparent: true, opacity: 0.6, depthWrite: false }));
+      swirl.rotation.x = -Math.PI / 2;
+      swirl.position.y = h / 2 + 0.01;
+      swirl.userData.noCast = true;
+      o.add(rim, hole, swirl);
+      (this._swirls ||= []).push(swirl);
     } else if (b.k === 'tramp') {
       // トランポリン: 黒い枠・青い布・脚
       o = new THREE.Group();
