@@ -127,7 +127,8 @@ export class GomuSim {
     s.spurt = false; // ラストスパートに入ったか
     s.firstBlood = false; // このラウンドでもう誰かが倒したか
     s.balloons = (this.arena.balloons || []).map(() => 0); // 風船の的（0 = 浮かんでいる）
-    s.rain = 0; // 雨の残りの秒
+    s.rain = 0; // 雨・雪の残りの秒
+    s.wx = 0; // 天気の種類（0 なし・1 雨・2 雪）
     s.nextRain = EXTRA.RAIN_FIRST;
     s.decoys = []; // おとり人形 { id, o, x, y, z, yaw, hp, t }
     s.mov = (this.arena.movables || []).map(movableBox); // 押せるものはラウンドの始めの場所へ
@@ -672,12 +673,16 @@ export class GomuSim {
     // 雨
     if (s.rain > 0) {
       s.rain = Math.max(0, s.rain - dt);
-      if (s.rain === 0) this.events.push({ t: 'rainEnd' });
+      if (s.rain === 0) {
+        this.events.push({ t: 'rainEnd', wx: s.wx });
+        s.wx = 0;
+      }
     } else if (s.t >= s.nextRain) {
       s.rain = EXTRA.RAIN_TIME;
       const [lo, hi] = EXTRA.RAIN_EVERY;
       s.nextRain = s.t + EXTRA.RAIN_TIME + lo + nextRandom(s) * (hi - lo);
-      this.events.push({ t: 'rain' });
+      s.wx = nextRandom(s) < EXTRA.SNOW_RATE ? 2 : 1;
+      this.events.push({ t: 'rain', wx: s.wx });
     }
     // 風船（割れたものは時間がたつとまた出る）
     s.balloons.forEach((tm, k) => {

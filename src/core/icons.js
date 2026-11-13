@@ -71,6 +71,10 @@ const P = {
   zap: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
   arrow: '<path d="M12 20V5"/><path d="m5 11 7-7 7 7"/>',
   drum: '<ellipse cx="12" cy="9" rx="8" ry="3"/><path d="M4 9v7c0 1.7 3.6 3 8 3s8-1.3 8-3V9"/><path d="m17 2-4 6M7 2l4 6"/>',
+  snow: '<path d="M12 2v20M3.3 7l17.4 10M3.3 17 20.7 7"/><path d="m9 4 3 2 3-2M9 20l3-2 3 2M4 11l3 1-1 3M20 11l-3 1 1 3"/>',
+  moon: '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
 };
 
 /** ゲームごとのアイコン */
@@ -84,6 +88,7 @@ const EMOJI_ICON = {
   '🛡': 'shield', '🧑': 'person', '🎯': 'target', '🏆': 'trophy', '🗾': 'map', '🎁': 'gift', '🍬': 'candy', '🌀': 'spiral',
   '✂': 'scissors', '⭐': 'star', '🖱': 'mouse', '🎧': 'headphones', '🥁': 'drum', '✅': 'check', '✔': 'check', '⌛': 'clock',
   '⏱': 'clock', '🔥': 'zap', '🚗': 'car', '🎡': 'wheel', '🔱': 'triple', '🏓': 'bounce', '💨': 'cloud', '✨': 'star',
+  '❄': 'snow', '🌙': 'moon', '👁': 'eye', '🌅': 'sun', '☀': 'sun', '🌧': 'umbrella', '🌤': 'sun', '🟢': 'target', '🌋': 'cloud',
 };
 
 /** 文の頭の絵文字を、アイコン + 絵文字なしの文に（頭にないときは文だけ） */

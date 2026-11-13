@@ -34,6 +34,11 @@ export class GomuHud {
     this.center = h('div.gm-center');
     this.status = h('div.gm-status');
     this.vignette = h('div.gm-vignette');
+    // 体力が少ないとき（ドクドク赤く）・走っているとき（集中線）・暗視ゴーグル（緑の画面）
+    this.lowHp = h('div.gm-lowhp');
+    this.speed = h('div.gm-speed');
+    this.nvFx = h('div.gm-nvfx', null, h('span.gm-nv-tag', null, '暗視'));
+    this.nvHint = h('div.gm-nvhint', { hidden: true }, h('span', { html: iconSvg('eye', 16) }), h('span', null, touch ? '暗視ボタン' : 'N キーで暗視ゴーグル'));
     this.smoke = h('div.gm-smoke');
     this.hurtDirs = h('div.gm-hurtdirs');
     // 味方の名札（チーム戦）・ミニマップ・詳しい成績表（Tab）
@@ -65,7 +70,7 @@ export class GomuHud {
     this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.RIFLE, 'crosshair')];
     this.pickInfo = h('p.gm-pick-info');
     this.pick = h('div.gm-pick', { hidden: true }, h('h2', null, '武器をえらぶ'), h('div.gm-pick-row', null, ...this.pickCards), this.pickInfo);
-    this.root.append(this.scope, this.smoke, this.vignette, this.names, this.hurtDirs, this.cross, this.dmg, this.mapCv, this.scoreboard, h('div.gm-top', null, this.round, this.timer), h('div.gm-alerts', null, this.spurt, this.wind), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
+    this.root.append(this.scope, this.nvFx, this.speed, this.lowHp, this.smoke, this.vignette, this.nvHint, this.names, this.hurtDirs, this.cross, this.dmg, this.mapCv, this.scoreboard, h('div.gm-top', null, this.round, this.timer), h('div.gm-alerts', null, this.spurt, this.wind), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
     this.touch = touch ? new GomuTouch(this.root) : null;
     this.root.classList.add(`mode-${mode}`);
     this.root.classList.toggle('is-touch', !!touch);
@@ -326,6 +331,28 @@ export class GomuHud {
   }
 
   /** 当てられた（画面のふちが赤く） */
+  /** 体力が少ない（30 以下）とき、画面のふちが赤くドクドクする */
+  setLowHp(on) {
+    if (this._key.low === on) return;
+    this._key.low = on;
+    this.lowHp.classList.toggle('on', on);
+  }
+
+  /** 走っている・加速パネルのとき、画面のふちに集中線（v: 0〜1） */
+  speedLines(v) {
+    const k = Math.round(Math.max(0, Math.min(1, v)) * 10) / 10;
+    if (this._key.spd === k) return;
+    this._key.spd = k;
+    this.speed.style.opacity = String(k * 0.85);
+  }
+
+  /** 暗視ゴーグル（緑の画面・走査線）。night: 夜なら使い方を出す */
+  setNightVision(on, night) {
+    this.nvFx.classList.toggle('on', !!on);
+    this.nvHint.hidden = !night || !!on;
+    this.touch?.nvBtn?.classList.toggle('on', !!on);
+  }
+
   hurt() {
     this.vignette.classList.remove('on');
     void this.vignette.offsetWidth;
@@ -411,8 +438,10 @@ export class GomuTouch {
     this.barkBtn = btn('gt-bark', 'ワン');
     this.crouchBtn = btn('gt-crouch', '伏せ');
     this.zoomBtn = btn('gt-zoom', 'のぞく');
+    this.nv = false; // 暗視ゴーグル（押した瞬間）
+    this.nvBtn = btn('gt-nv', '暗視');
     this.onZoom = null;
-    this.el = h('div.gomu-touch', null, this.look, this.zone, this.fireBtn, this.jumpBtn, this.dashBtn, this.bombBtn, this.barkBtn, this.crouchBtn, this.zoomBtn);
+    this.el = h('div.gomu-touch', null, this.look, this.zone, this.fireBtn, this.jumpBtn, this.dashBtn, this.bombBtn, this.barkBtn, this.nvBtn, this.crouchBtn, this.zoomBtn);
     root.append(this.el);
     this._bindStick();
     this._bindLook(this.look);
@@ -422,6 +451,7 @@ export class GomuTouch {
     this._press(this.dashBtn, () => this.setRun(!this.run));
     this._hold(this.bombBtn, (on) => (this.bomb = on), true);
     this._press(this.barkBtn, () => (this.bark = true));
+    this._press(this.nvBtn, () => (this.nv = true));
     this._press(this.zoomBtn, () => this.onZoom?.());
     this._press(this.crouchBtn, () => {
       this.crouch = !this.crouch;
@@ -552,8 +582,8 @@ export class GomuTouch {
   }
 
   take() {
-    const r = { jump: this.jump, dash: this.dash, item: this.item, bark: this.bark };
-    this.jump = this.dash = this.item = this.bark = false;
+    const r = { jump: this.jump, dash: this.dash, item: this.item, bark: this.bark, nv: this.nv };
+    this.jump = this.dash = this.item = this.bark = this.nv = false;
     return r;
   }
 

@@ -2979,3 +2979,92 @@ body[data-screen='game'] {
 .gm-mvp svg {
   stroke: currentColor;
 }
+
+/* ゴム鉄砲: 体力が少ないときの赤いドクドク・走るときの集中線・暗視ゴーグル（2026-11-13） */
+.gm-lowhp {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: inset 0 0 120px 40px rgba(200, 20, 40, 0.65);
+}
+.gm-lowhp.on {
+  animation: gm-beat 1s ease-in-out infinite;
+}
+@keyframes gm-beat {
+  0%, 100% { opacity: 0.25; }
+  15% { opacity: 0.85; }
+  30% { opacity: 0.4; }
+  45% { opacity: 0.75; }
+}
+.gm-speed {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(255, 255, 255, 0.5) 0deg 0.6deg, transparent 0.6deg 7deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 42%, #000 78%);
+  mask-image: radial-gradient(circle at 50% 50%, transparent 42%, #000 78%);
+}
+.gomu-canvas.nv {
+  filter: grayscale(1) sepia(1) hue-rotate(58deg) saturate(3.2) brightness(1.05) contrast(1.15);
+}
+.gm-nvfx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 52%, rgba(0, 18, 4, 0.85) 100%),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px);
+}
+.gm-nvfx.on {
+  display: block;
+}
+.gm-nv-tag {
+  position: absolute;
+  top: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Kiwi Maru', serif;
+  font-size: 0.8rem;
+  color: #b6ffb0;
+  background: rgba(0, 40, 10, 0.6);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+.gm-nvhint {
+  position: absolute;
+  top: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.8rem;
+  color: #fff;
+  background: rgba(20, 30, 60, 0.6);
+  border-radius: 999px;
+  padding: 4px 12px;
+  pointer-events: none;
+}
+.gm-nvhint[hidden] {
+  display: none;
+}
+.gt-nv {
+  right: calc(max(24px, env(safe-area-inset-right)) + 182px);
+  bottom: 156px;
+  width: 50px;
+  height: 50px;
+  font-size: 0.75rem;
+}
+.gt-nv.on {
+  background: rgba(60, 200, 90, 0.85);
+}
+@media (prefers-reduced-motion: reduce) {
+  .gm-lowhp.on {
+    animation: none;
+    opacity: 0.5;
+  }
+}

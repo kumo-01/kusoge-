@@ -7,8 +7,9 @@
 import { PLAYERS } from '../../screens/common.js';
 import { device } from '../../core/device.js';
 import { GomuSim } from './sim.js';
-import { ARENAS } from './arena.js';
+import { ARENAS, segmentHit, groundY } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder, rayCylinder, hitDamage, isHead } from './physics.js';
+import { DOG_FUR } from './dog3d.js';
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
@@ -18,7 +19,7 @@ import { ROOM } from './arena.js';
 import { canSee } from './arena.js';
 
 const SLOT_CSS = ['#ff4d5e', '#3d8bff', '#ff5fb0', '#22b573'];
-const FUR = { shiba: 0xf2a04b, corgi: 0xe8893a, poodle: 0xfff3f6, pug: 0xead1a4 };
+
 // キーボードで向きを変える速さ（ラジアン/秒）。押し始めはゆっくり（細かく狙える）、押し続けると速くなる
 const KEY_TURN_MIN = 1.1;
 const KEY_TURN_MAX = 3.2;
@@ -203,7 +204,11 @@ class GomuGame {
     this._bombAim = false;
     this.mov = (this.arena.movables || []).map(movableBox);
     this._gcw = null;
-    this.world?.setArena(ARENAS[r % ARENAS.length], r % 3); // 1 ラウンド目は朝、2 は昼、3 は夕方
+    this.world?.setArena(ARENAS[r % ARENAS.length], r % 3); // 1 ラウンド目は朝、2 は昼、3 は夜（街灯がつく）
+    // 暗視ゴーグルは夜だけ使い方を出す（ラウンドが変わったら外す）
+    this.nv = false;
+    this.world?.setNightVision(false);
+    this.hud.setNightVision(false, r % 3 === 2);
   }
 
   /** 武器を選ぶ（ラウンドの前の選択画面） */
@@ -231,7 +236,7 @@ class GomuGame {
     if (!this.isHost && !this.last) return; // 最初の要約が届くまで待つ
     const i = this.ctx.input;
     const t = this.hud.touch;
-    const tk = t ? t.take() : { jump: false, dash: false, item: false, bark: false };
+    const tk = t ? t.take() : { jump: false, dash: false, item: false, bark: false, nv: false };
     const rec = this._myRec();
     const phase = this.phase;
     const dead = !!rec && rec.dead > 0;
@@ -283,10 +288,7 @@ class GomuGame {
     this.cw.clock = this._clock(); // 間欠泉の時刻
     const mv = stepMove(p, act ? { fx, fz, jump, dash, crouch } : { crouch: false }, dt, this.cw, slow);
     if (mv.dashed) this.ctx.sound.play('boost');
-    if (mv.pad) {
-      this.ctx.sound.play('pad'); // 加速パネル
-      this.hud.speedLines?.(1);
-    }
+    if (mv.pad) this.ctx.sound.play('pad'); // 加速パネル
     if (mv.warped) {
       this.ctx.sound.play('warp'); // ワープ土管
       this.prevPos = { x: p.x, y: p.y, z: p.z, crouch: p.crouch };
@@ -297,6 +299,15 @@ class GomuGame {
     if (mv.bounced) this.ctx.sound.play('pad'); // トランポリン
     // 遠吠え（V。タッチは「ワン」ボタン）
     if (i.consume('KeyV') || tk.bark) this._bark();
+    // 暗視ゴーグル（N。タッチは「暗視」ボタン）
+    if (i.consume('KeyN') || tk.nv) {
+      this.nv = !this.nv;
+      this.world?.setNightVision(this.nv);
+      this.hud.setNightVision(this.nv, this.round % 3 === 2);
+      this.ctx.sound.play('nv');
+    }
+    // 走っている・加速パネル: 画面のふちに集中線
+    this.hud.speedLines(p.padT > 0 ? 1 : p.sprint ? 0.55 : 0);
     if (t?.run && p.stam <= 0) t.setRun(false); // ゲージが空になったら走るのをやめる
     // 爆弾: G（タッチは爆弾ボタン）を押している間は飛ぶ道を見せ、離したら投げる
     p.bombCd = Math.max(0, (p.bombCd || 0) - dt);
@@ -533,6 +544,7 @@ class GomuGame {
           this._setRound(e.r);
           break;
         case 'spawn':
+          if (this.phase === 'play') this.world?.beam(e.x, e.y, e.z, e.i === this.me ? 0xfff3c4 : 0xcfe8ff); // 復活の光の柱
           if (e.i === this.me) {
             const first = this.pilot.g < 0;
             this._placePilot(e.x, e.y, e.z, e.yaw, e.g);
@@ -540,6 +552,7 @@ class GomuGame {
           }
           break;
         case 'shot':
+          if (e.o !== this.me && Math.hypot(e.x - this.pilot.x, e.z - this.pilot.z) < 60) this.world?.muzzle(e.x, e.y, e.z); // 撃った光
           if (!this.isHost) this._guestShot(e);
           else if (e.o !== this.me) this._near(e) && this.ctx.sound.play('throw');
           break;
@@ -549,6 +562,7 @@ class GomuGame {
             if (k >= 0) this.bands.splice(k, 1);
           }
           this.world?.burst(e.x, e.y, e.z, e.h >= 0 ? 0xffd23f : 0xffffff, e.h >= 0 ? 12 : 5, e.h >= 0 ? 3 : 1.6, e.h >= 0 ? 0.07 : 0.04);
+          if (!(e.h >= 0)) this._impactMark(e.x, e.y, e.z); // 壁・地面に当たった跡
           break;
         }
         case 'hit':
@@ -566,7 +580,9 @@ class GomuGame {
             this.ctx.sound.play(e.hs ? 'headshot' : 'pickup');
           }
           break;
-        case 'kill':
+        case 'kill': {
+          const vq = this._posOf(e.v);
+          if (vq) this.world?.confetti(vq.x, vq.y, vq.z); // 倒したときの紙吹雪
           this.hud.pushFeed(`💥 ${e.by < 0 ? BOSS.NAME : name(e.by)} が ${name(e.v)} を倒した！`, e.by === this.me ? 'mine' : e.v === this.me ? 'bad' : '');
           if (e.by === this.me) {
             this.hud.hitMarker(true);
@@ -577,15 +593,19 @@ class GomuGame {
             if (e.by >= 0) this._nemesis = e.by; // リベンジの相手（印を出す）
           }
           break;
+        }
         case 'block':
           if (e.by === this.me) this.ctx.sound.play('bump');
           break;
-        case 'pick':
+        case 'pick': {
+          const pq = this._posOf(e.i);
+          if (pq) this.world?.pickupFx(pq.x, pq.y, pq.z); // 拾ったきらめき
           if (e.i === this.me) {
             this.ctx.sound.play('itemReady');
             this.hud.pushFeed(`🎁 ${ITEM_INFO[e.item]?.name} を拾った！`, 'mine');
           }
           break;
+        }
         case 'use':
           if (e.i !== this.me) this.hud.pushFeed(`🎁 ${name(e.i)} が ${ITEM_INFO[e.item]?.name} を使った！`);
           else this.ctx.sound.play('drop');
@@ -613,12 +633,15 @@ class GomuGame {
             this.hud.pushFeed('🍬 ネバネバを踏んだ！2秒うごけない', 'bad');
           } else if (e.i < 0) this.hud.pushFeed(`🍬 ${BOSS.NAME}がネバネバを踏んだ！`, 'mine');
           break;
-        case 'heal':
+        case 'heal': {
+          const hq = this._posOf(e.i);
+          if (hq) this.world?.healFx(hq.x, hq.y, hq.z); // 回復のきらめき
           if (e.i === this.me) {
             this.ctx.sound.play('respawn');
             this.hud.pushFeed(e.k != null ? `🍖 おやつを拾った！体力 +${TREAT.HEAL}` : '🍖 体力が回復した！', 'mine');
           }
           break;
+        }
         case 'star':
           this._starT[e.i] = e.d;
           if (e.i === this.me) {
@@ -668,11 +691,14 @@ class GomuGame {
           this.world?.burst(e.x, e.y + 0.6, e.z, 0xbbbbbb, 14, 3, 0.09);
           break;
         case 'rain':
-          this.hud.pushFeed('🌧️ 雨が降ってきた！遠くが見えにくい', 'bad');
-          this.ctx.sound.play('thunder');
+          if (e.wx === 2) this.hud.pushFeed('❄️ 雪が降ってきた！地面が白くなる', 'bad');
+          else {
+            this.hud.pushFeed('🌧️ 雨が降ってきた！遠くが見えにくい', 'bad');
+            this.ctx.sound.play('thunder');
+          }
           break;
         case 'rainEnd':
-          this.hud.pushFeed('🌤️ 雨がやんだ');
+          this.hud.pushFeed(e.wx === 2 ? '🌤️ 雪がやんだ' : '🌤️ 雨がやんだ');
           break;
         case 'spurt':
           this.ctx.sound.play('finalLap');
@@ -798,6 +824,72 @@ class GomuGame {
     for (let t = 0; t < ahead - 1e-6 && !(stepBand(b, Math.min(1 / 60, ahead - t), this.cw, null, this.last?.wind) === 'end'); t += 1 / 60);
     this.bands.push(b);
     if (this._near(e)) this.ctx.sound.play('throw');
+  }
+
+  /** 犬 i のいまの見た目の位置（自分は操作中の位置） */
+  _posOf(i) {
+    if (i === this.me) return this.pilot;
+    return this._views?.[i] || (this.isHost ? this.sim.s.players[i] : this.last?.players[i]) || null;
+  }
+
+  /** 輪ゴムが壁・地面に当たった跡: 近くの面を探して、その向きに貼る */
+  _impactMark(x, y, z) {
+    const w = this.world;
+    if (!w || Math.hypot(x - this.pilot.x, z - this.pilot.z) > 45) return;
+    const gy = groundY(this.arena, x, z);
+    if (y - gy < 0.25) return w.impactMark(x, gy + 0.01, z, 0, 1, 0);
+    const out = { t: 1, nx: 0, ny: 0, nz: 0 };
+    for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]]) {
+      const t = segmentHit(this.cw, x - dx * 0.05, y - dy * 0.05, z - dz * 0.05, x + dx * 0.45, y + dy * 0.45, z + dz * 0.45, 0, out);
+      if (t < 1) return w.impactMark(x - dx * 0.05 + dx * 0.5 * t, y - dy * 0.05 + dy * 0.5 * t, z - dz * 0.05 + dz * 0.5 * t, out.nx, out.ny, out.nz);
+    }
+  }
+
+  /**
+   * 犬ごとのエフェクト: 走ると土ぼこり、着地で土煙の輪、雪の上で足あと、寒いと白い息
+   */
+  _dogFx(views, dt) {
+    const w = this.world;
+    if (!w) return;
+    const st = (this._fxSt ||= []);
+    const cold = (this.last?.wx ?? this.sim?.s.wx) === 2 || w.tod === 0 || w.night;
+    views.forEach((q, i) => {
+      const me = i === this.me;
+      const v = me ? this.pilot : q;
+      if (!v || q.dead > 0) return;
+      const s = (st[i] ||= { x: v.x, y: v.y, z: v.z, air: false, dust: 0, step: 0, side: 1, br: Math.random() * 2 });
+      const sp = Math.hypot(v.x - s.x, v.z - s.z) / Math.max(1e-3, dt);
+      const gy = groundY(this.arena, v.x, v.z);
+      const near = Math.hypot(v.x - this.pilot.x, v.z - this.pilot.z) < 40;
+      const onGround = v.y - gy < 0.08 || (me && this.pilot.ground);
+      if (near) {
+        // 着地
+        if (s.air && onGround) w.landRing(v.x, v.y, v.z);
+        // 走る土ぼこり（自分のは見えにくいので少なめ）
+        s.dust -= dt;
+        if (onGround && sp > 7 && sp < 30 && s.dust <= 0) {
+          s.dust = me ? 0.2 : 0.09;
+          w.dust(v.x, v.y, v.z, me ? 1 : 2);
+        }
+        // 雪の足あと
+        s.step -= dt;
+        if (onGround && sp > 1 && sp < 30 && s.step <= 0) {
+          s.step = 0.28;
+          s.side = -s.side;
+          w.footprint(v.x, v.z, v.yaw, s.side);
+        }
+        // 白い息
+        s.br -= dt;
+        if (cold && !me && s.br <= 0) {
+          s.br = 1.6 + Math.random() * 0.6;
+          w.breath(v.x, v.y + (v.crouch ? 0.6 : 1.05), v.z, v.yaw);
+        }
+      }
+      s.air = !onGround && v.y - gy > 0.35;
+      s.x = v.x;
+      s.y = v.y;
+      s.z = v.z;
+    });
   }
 
   /** ラウンドの時刻（ホストは計算の時刻、ゲストは最後に届いた時刻 + そこからの経過） */
@@ -1082,7 +1174,9 @@ class GomuGame {
     if (w) {
       w.updateBoss(bv, dt);
       for (let k = 0; k < this._starT.length; k++) if (this._starT[k] > 0) this._starT[k] = Math.max(0, this._starT[k] - dt);
-      w.updateDogs(views.map((q, i) => (i === this.me ? { hide: true } : { x: q.x, y: q.y, z: q.z, yaw: q.yaw, crouch: q.crouch, moving: q.moving, dead: q.dead > 0, inv: q.inv > 0, star: this._starT[i] > 0 && q.inv > 0, stuck: q.stuck > 0, stun: q.stun > 0, weapon: q.weapon })), dt);
+      this._views = views;
+      this._dogFx(views, dt);
+      w.updateDogs(views.map((q, i) => (i === this.me ? { hide: true } : { x: q.x, y: q.y, z: q.z, yaw: q.yaw, pitch: q.pitch, crouch: q.crouch, moving: q.moving, dead: q.dead > 0, inv: q.inv > 0, star: this._starT[i] > 0 && q.inv > 0, stuck: q.stuck > 0, stun: q.stun > 0, weapon: q.weapon })), dt);
       const bands = this.isHost ? this.sim.s.bands : this.bands;
       w.updateBands(bands, dt);
       const boxes = this.isHost ? this.sim.s.boxes.map((x) => x <= 0) : this.arena.items.map((_, k) => !!((this.last?.boxes ?? 0) & (1 << k)));
@@ -1107,7 +1201,7 @@ class GomuGame {
       w.updateBalloons(this.isHost ? (S.balloons || []).map((x) => x <= 0) : (this.arena.balloons || []).map((_, k) => !!((S?.balloons ?? 0) & (1 << k))), dt);
       w.updateGimmicks(this._clock(), dt); // ワープ土管・加速パネル・間欠泉
       w.updateDecoys(S?.decoys || [], (o) => this.idents[o]?.kind || 'shiba', (o) => (this.mode === MODE.TEAM ? TEAMS[this._team(o)]?.hex : parseInt((this.idents[o]?.css || '#999999').slice(1), 16)));
-      w.setRain((S?.rain ?? 0) > 0);
+      w.setWeather((S?.rain ?? 0) > 0 ? S.wx || 1 : 0, dt);
       // 水しぶき（水の中で動いている犬）
       this._splashT = (this._splashT || 0) - dt;
       if (this._splashT <= 0 && this.arena.water?.length) {
@@ -1180,7 +1274,7 @@ class GomuGame {
       }
       // 爆弾: 飛ぶ道と落ちる所を見せる
       w.setLobArc(this._bombAim && !dead && this.phase === 'play' ? this._lobPath() : null);
-      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), weapon: p.weapon, bomb: this._bombAim, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
+      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), weapon: p.weapon, bomb: this._bombAim, furColor: DOG_FUR[this.idents[this.me].kind] ?? 0xd9852f }, dt);
       this._fired = false;
       w.render(dt);
       this._frame++;
@@ -1196,6 +1290,7 @@ class GomuGame {
     const players = src.map((q, i) => ({ i, name: this.idents[i].name, css: this.mode === MODE.TEAM ? TEAMS[this._team(i)].css : this.idents[i].css, score: q.score, dead: q.dead > 0, rs: q.rs, team: this._team(i), weapon: q.weapon, picked: q.picked }));
     const round = this.isHost ? this.sim.s.round : st.round;
     const myWeapon = this._pickedLocal ?? rec.weapon ?? WEAPON.NORMAL;
+    this.hud.setLowHp(!dead && this.phase === 'play' && rec.hp > 0 && rec.hp <= 30); // 体力が少ない
     this.hud.update({
       mode: this.mode,
       boss: bv ? { hp: bv.hp, max: bv.max, fx: bv.fx ?? Math.max(bv.dizzy || 0, bv.stuck || 0) } : null,

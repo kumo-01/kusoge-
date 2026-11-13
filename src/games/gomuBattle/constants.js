@@ -94,6 +94,9 @@ export const EXTRA = {
   RAIN_EVERY: [80, 120],
   RAIN_TIME: 25,
   RAIN_VIEW: 0.6,
+  SNOW_RATE: 0.45, // 天気が崩れたとき、雪になる割合（ほかは雨）
+  SNOW_VIEW: 0.75, // 雪の間の CPU の見える距離の割合
+  NIGHT_VIEW: 0.85, // 夜の CPU の見える距離の割合（街灯があるので少しだけ）
   WATER_SLOW: 0.55,
   DECOY_TIME: 15,
   DECOY_HP: 40,

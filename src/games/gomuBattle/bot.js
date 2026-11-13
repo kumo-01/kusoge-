@@ -37,7 +37,7 @@ export function botThink(sim, p, dt) {
   if ((b.look -= dt) <= 0) {
     b.look = 0.12;
     let best = -1;
-    let bd = BOT.VIEW * (scoped(p) ? 1.6 : 1) * (sim.s.rain > 0 ? EXTRA.RAIN_VIEW : 1); // 雨の間は遠くが見えにくい
+    let bd = BOT.VIEW * (scoped(p) ? 1.6 : 1) * (sim.s.rain > 0 ? (sim.s.wx === 2 ? EXTRA.SNOW_VIEW : EXTRA.RAIN_VIEW) : 1) * (sim.s.round % 3 === 2 ? EXTRA.NIGHT_VIEW : 1); // 雨・雪・夜は遠くが見えにくい
     b.decoy = null;
     const boss = sim.s.boss;
     if (boss && boss.hp > 0) {

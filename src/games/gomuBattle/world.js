@@ -1,11 +1,12 @@
 // 3D の見た目（会場・犬・輪ゴム・アイテムの箱・煙・ガム・手に持った鉄砲）。計算には関わらない
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { buildDog } from '../dogKart/dog.js';
+import { buildRealDog } from './dog3d.js';
+import { Particles, Decals, markTex, pawTex } from './fx.js';
 import { device } from '../../core/device.js';
 import { ROOM, groundY } from './arena.js';
 import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS, WEAPON, GIMMICK, geyserLevel } from './constants.js';
-import { mat as stdMat, kindMat, weaponRack, realisticDog } from './look.js';
+import { mat as stdMat, kindMat, weaponRack } from './look.js';
 
 /** 輪ゴムの色（種類ごと） */
 export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]: 0x2a9d8f, [ITEM.BOUNCE]: 0x3a86ff, [ITEM.HOMING]: 0x9b5de5, [ITEM.GOLD]: 0xffc300 };
@@ -111,7 +112,6 @@ function makeBomb() {
   g.userData.spark = spark;
   return g;
 }
-const DOG_SCALE = 0.75; // 犬の見た目の大きさ（当たり判定の高さ PLAYER.HEIGHT = 1.25 に合わせる）
 
 // 材質: 光の当たり方が自然なもの（look.js）。名前は前のまま
 const toon = (c, o = {}) => stdMat(c, o);
@@ -223,6 +223,13 @@ export class GomuWorld {
     this.fxList = [];
     this.smokes = new Map();
     this.gums = new Map();
+    // エフェクト（まとめて描く粒・貼る跡）
+    this.pfx = new Particles(scene, device.low ? 400 : 800, false); // 土ぼこり・紙吹雪・白い息
+    this.gfx = new Particles(scene, device.low ? 300 : 600, true); // 火花・きらめき・ホタル（光る）
+    this.marks = new Decals(scene, 48, markTex(), 0.5); // 輪ゴムの当たった跡
+    this.paws = new Decals(scene, device.low ? 80 : 160, pawTex(), 0.55); // 雪の足あと
+    this._rings = [];
+    this._bounceSeen = new WeakMap();
     this._buildViewModel();
     this._ro = new ResizeObserver(() => this.resize());
     this._ro.observe(container);
@@ -236,6 +243,10 @@ export class GomuWorld {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    // 粒の大きさ（1 m の粒が、1 m 先で何ピクセルか）
+    const px = (h * this.renderer.getPixelRatio()) / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
+    this.pfx?.setScale(px);
+    this.gfx?.setScale(px);
   }
 
   // ---- 会場 ----
@@ -250,6 +261,7 @@ export class GomuWorld {
         }
       });
     }
+    this._setNight(false); // 前の会場の夜の光を片づける
     const G = new THREE.Group();
     this.arenaGroup = G;
     this.arena = arena;
@@ -390,7 +402,16 @@ export class GomuWorld {
     tex.repeat.set(1, 1); // くり返しは地面の UV（4 m で 1 枚）で決める
     const gmat = toon(0xffffff, { map: tex, vertexColors: true });
     // 会場の中は 1 m ごとの網目で、丘・くぼみの形に。色も少し変える（丘の上は明るく、くぼみの底は暗く湿った色）
-    G.add(this._groundMesh(arena, -W / 2, W / 2, -D / 2, D / 2, Math.ceil(W), Math.ceil(D), gmat));
+    const inner = this._groundMesh(arena, -W / 2, W / 2, -D / 2, D / 2, Math.ceil(W), Math.ceil(D), gmat);
+    G.add(inner);
+    // 積もる雪（同じ形の白い面を重ねて、だんだん濃くする）
+    const snowM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+    const snowMesh = new THREE.Mesh(inner.geometry, snowM);
+    snowMesh.userData.noCast = true;
+    snowMesh.userData.shared = true;
+    snowMesh.visible = false;
+    G.add(snowMesh);
+    this._snowCover = { mat: snowM, mesh: snowMesh, v: 0 };
     // 柵の外（平ら。4 枚）
     const E = 60;
     for (const [x0, x1, z0, z1] of [
@@ -1125,11 +1146,10 @@ export class GomuWorld {
       let m = this.decoys.get(d.id);
       if (!m) {
         m = new THREE.Group();
-        const dog = buildDog(kindOf(d.o));
-        dog.group.scale.setScalar(DOG_SCALE);
-        realisticDog(dog.group);
+        const dog = buildRealDog(kindOf(d.o));
+        dog.animate({ dt: 0, moving: false, pitch: 0 });
         const gun = weaponRack();
-        gun.position.set(0.06, 0.62, 0.42);
+        gun.position.set(0, dog.handY, 0.4);
         gun.scale.setScalar(0.9);
         const ring = new THREE.Mesh(new THREE.RingGeometry(0.36, 0.48, 24), new THREE.MeshBasicMaterial({ color: colorOf(d.o), transparent: true, opacity: 0.85 }));
         ring.rotation.x = -Math.PI / 2;
@@ -1145,77 +1165,237 @@ export class GomuWorld {
   }
 
   /** 時間帯（0 = 朝・1 = 昼・2 = 夕方）: 空・太陽の色と高さ・明るさ */
+  /**
+   * 時間帯: 0 朝・1 昼・2 夜（ラウンドごと）。夜は月の光と、街灯（電球が光り、足もとが明るい）。
+   * 本当の光（PointLight）は数が多いと重いので、カメラに近い街灯にだけ置く（NIGHT_LIGHTS 個）。ほかの街灯は光の輪で明るく見せる
+   */
   setTimeOfDay(k, baseSky) {
     const TOD = [
-      { sun: 0xffe2c0, si: 2.3, pos: [-46, 30, -10], hs: 0xd8e8ff, hg: 0x8d7b5e, hi: 1.05, sky: 0xcfe6ff, mix: 0.35, exp: 1.0 },
+      { sun: 0xffe2c0, si: 2.3, pos: [-46, 30, -10], hs: 0xd8e8ff, hg: 0x8d7b5e, hi: 1.05, sky: 0xffd9b0, mix: 0.3, exp: 1.0 },
       { sun: 0xfff0d6, si: 2.7, pos: [-34, 46, -26], hs: 0xdcecff, hg: 0x8d7b5e, hi: 1.15, sky: null, mix: 0, exp: 1.05 },
-      { sun: 0xffa45c, si: 2.4, pos: [44, 16, 20], hs: 0xffc9a0, hg: 0x6b4f3a, hi: 0.85, sky: 0xffb37a, mix: 0.55, exp: 1.0 },
+      { sun: 0xa9bcff, si: 0.55, pos: [30, 50, -24], hs: 0x3a4d80, hg: 0x1c1a16, hi: 0.42, sky: 0x0b1530, mix: 0.94, exp: 1.15 },
     ];
-    const T = TOD[k % 3];
+    this.tod = k % 3;
+    const T = TOD[this.tod];
     this.sun.color.setHex(T.sun);
     this.sun.intensity = T.si;
     this.sun.position.set(...T.pos);
     this.hemi.color.setHex(T.hs);
     this.hemi.groundColor.setHex(T.hg);
     this.hemi.intensity = T.hi;
-    this.renderer.toneMappingExposure = T.exp;
+    this._exp = T.exp;
+    this.renderer.toneMappingExposure = T.exp * (this.nv ? 2.6 : 1);
     const sky = new THREE.Color(baseSky);
     if (T.sky != null) sky.lerp(new THREE.Color(T.sky), T.mix);
     this._sky = sky;
     this._sunBase = T.si;
     this.scene.background = sky.clone();
     if (this.scene.fog) this.scene.fog.color.copy(sky);
+    this._setNight(this.tod === 2);
     this.renderer.shadowMap.needsUpdate = true;
-    this.setRain(this._raining || false, true);
+    this.setWeather(this._wx || 0, 0, true);
   }
 
-  /** 雨: 降る雨つぶ・灰色の空・近い霧・少し暗く */
-  setRain(on, force = false) {
-    if (!force && this._raining === on) return;
-    this._raining = on;
-    if (!this._rain) {
-      const N = 900;
-      const pos = new Float32Array(N * 6);
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xc8d6e5, transparent: true, opacity: 0.55, depthWrite: false }));
-      lines.frustumCulled = false;
-      this.scene.add(lines);
-      this._rain = { lines, N, seeded: false };
+  /** 夜: 街灯をつける・星・ホタル */
+  _setNight(on) {
+    this.night = on;
+    const lamps = this._lamps || [];
+    for (const L of lamps) L.bulb.material.emissiveIntensity = on ? 4 : 0.15;
+    // 光の輪（足もと）と、電球のまわりのぼんやりした光
+    if (!this._glowTex) {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 64;
+      const x = cv.getContext('2d');
+      const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 64, 64);
+      this._glowTex = new THREE.CanvasTexture(cv);
     }
-    this._rain.lines.visible = on;
-    const sky = (this._sky || new THREE.Color(0xbfe3ff)).clone();
-    if (on) sky.lerp(new THREE.Color(0x7d8794), 0.6);
-    this.scene.background = sky;
-    if (this.scene.fog) {
-      this.scene.fog.color.copy(sky);
-      this.scene.fog.near = on ? 25 : this._fogBase?.[0] ?? 90;
-      this.scene.fog.far = on ? 85 : this._fogBase?.[1] ?? 200;
-    }
-    this.sun.intensity = (this._sunBase ?? 2.7) * (on ? 0.45 : 1);
-  }
-
-  _stepRain(dt) {
-    const R = this._rain;
-    if (!R || !R.lines.visible) return;
-    const c = this.camera.position;
-    const pos = R.lines.geometry.attributes.position;
-    const S = 18;
-    for (let i = 0; i < R.N; i++) {
-      let x = pos.getX(i * 2);
-      let y = pos.getY(i * 2);
-      let z = pos.getZ(i * 2);
-      if (!R.seeded || y < c.y - 6 || Math.abs(x - c.x) > S || Math.abs(z - c.z) > S) {
-        x = c.x + (Math.random() - 0.5) * 2 * S;
-        z = c.z + (Math.random() - 0.5) * 2 * S;
-        y = R.seeded ? c.y + 10 + Math.random() * 4 : c.y + Math.random() * 14;
+    if (on && this.arenaGroup && !this._nightFx) {
+      const grp = new THREE.Group();
+      const poolM = new THREE.MeshBasicMaterial({ map: this._glowTex, color: 0xffc977, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+      const haloM = new THREE.SpriteMaterial({ map: this._glowTex, color: 0xffe2a8, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+      const poolG = new THREE.PlaneGeometry(13, 13);
+      for (const L of lamps) {
+        const pool = new THREE.Mesh(poolG, poolM);
+        pool.rotation.x = -Math.PI / 2;
+        pool.position.set(L.x, (this.arena ? groundY(this.arena, L.x, L.z) : 0) + 0.04, L.z);
+        const halo = new THREE.Sprite(haloM);
+        halo.scale.set(2.2, 2.2, 1);
+        halo.position.set(L.x, L.y - 0.05, L.z);
+        grp.add(pool, halo);
       }
-      y -= 22 * dt;
-      pos.setXYZ(i * 2, x, y, z);
-      pos.setXYZ(i * 2 + 1, x + 0.02, y + 0.45, z);
+      // 星
+      const N = 600;
+      const pos = new Float32Array(N * 3);
+      for (let i = 0; i < N; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const e = 0.12 + Math.random() * 1.3;
+        const R = 190;
+        pos.set([Math.cos(a) * Math.cos(e) * R, Math.sin(e) * R, Math.sin(a) * Math.cos(e) * R], i * 3);
+      }
+      const sg = new THREE.BufferGeometry();
+      sg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.3, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.85 }));
+      grp.add(stars);
+      // 月
+      const moon = new THREE.Mesh(new THREE.SphereGeometry(6, 20, 14), new THREE.MeshBasicMaterial({ color: 0xf4f1de, fog: false }));
+      moon.position.set(60, 95, -120);
+      grp.add(moon);
+      this.scene.add(grp);
+      this._nightFx = grp;
+      // 本当の光（近い街灯にだけ）
+      const n = device.low ? 4 : 8;
+      this._lampLights = Array.from({ length: n }, () => {
+        const l = new THREE.PointLight(0xffd29a, 38, 20, 1.8);
+        this.scene.add(l);
+        return l;
+      });
+      this._lampT = 0;
     }
-    R.seeded = true;
-    pos.needsUpdate = true;
+    if (!on && this._nightFx) {
+      this.scene.remove(this._nightFx);
+      this._nightFx.traverse((o) => o.geometry?.dispose?.());
+      this._nightFx = null;
+      for (const l of this._lampLights || []) this.scene.remove(l);
+      this._lampLights = null;
+    }
+  }
+
+  /** 夜: カメラに近い街灯に光を置き直す（ときどき） */
+  _stepLamps(dt) {
+    if (!this._lampLights || !this._lamps?.length) return;
+    this._lampT -= dt;
+    if (this._lampT > 0) return;
+    this._lampT = 0.25;
+    const c = this.camera.position;
+    const near = [...this._lamps].sort((a, b) => (a.x - c.x) ** 2 + (a.z - c.z) ** 2 - ((b.x - c.x) ** 2 + (b.z - c.z) ** 2));
+    this._lampLights.forEach((l, i) => {
+      const L = near[i];
+      l.visible = !!L;
+      if (L) l.position.set(L.x, L.y - 0.2, L.z);
+    });
+  }
+
+  /** 暗視ゴーグル（夜に明るく緑に見える）。画面の模様は hud が出す */
+  setNightVision(on) {
+    this.nv = !!on;
+    this.renderer.toneMappingExposure = (this._exp ?? 1.05) * (this.nv ? 2.6 : 1);
+    this.renderer.domElement.classList.toggle('nv', this.nv);
+  }
+
+  /** 天気: 0 なし・1 雨・2 雪。雪は地面がだんだん白くなる（やむと、ゆっくりとける） */
+  setWeather(wx, dt = 0, force = false) {
+    const changed = force || this._wx !== wx;
+    this._wx = wx;
+    const rain = wx === 1;
+    const snow = wx === 2;
+    if (changed) {
+      if (!this._rain) {
+        const N = 900;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 6), 3));
+        const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xc8d6e5, transparent: true, opacity: 0.55, depthWrite: false }));
+        lines.frustumCulled = false;
+        this.scene.add(lines);
+        this._rain = { lines, N, seeded: false };
+      }
+      if (!this._snow) {
+        const N = device.low ? 900 : 1600;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+        const pts = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, map: this._flakeTex(), size: 0.15, transparent: true, depthWrite: false, opacity: 0.95 }));
+        pts.frustumCulled = false;
+        this.scene.add(pts);
+        this._snow = { pts, N, seeded: false, ph: new Float32Array(N).map(() => Math.random() * 10) };
+      }
+      this._rain.lines.visible = rain;
+      this._snow.pts.visible = snow;
+      const sky = (this._sky || new THREE.Color(0xbfe3ff)).clone();
+      if (rain) sky.lerp(new THREE.Color(this.night ? 0x10141c : 0x7d8794), 0.6);
+      if (snow) sky.lerp(new THREE.Color(this.night ? 0x1c2433 : 0xdfe6ee), 0.65);
+      this.scene.background = sky;
+      if (this.scene.fog) {
+        this.scene.fog.color.copy(sky);
+        this.scene.fog.near = rain ? 25 : snow ? 30 : this._fogBase?.[0] ?? 90;
+        this.scene.fog.far = rain ? 85 : snow ? 95 : this._fogBase?.[1] ?? 200;
+      }
+      this.sun.intensity = (this._sunBase ?? 2.7) * (rain ? 0.45 : snow ? 0.6 : 1);
+    }
+    // 積もった雪（地面を白く）
+    if (this._snowCover) {
+      const k = this._snowCover;
+      k.v = Math.max(0, Math.min(0.78, k.v + (snow ? dt / 25 : -dt / 60)));
+      k.mat.opacity = k.v;
+      k.mesh.visible = k.v > 0.01;
+    }
+  }
+
+  /** 雪のひとひらの絵（丸くぼかしたもの） */
+  _flakeTex() {
+    if (this._flake) return this._flake;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 32;
+    const x = cv.getContext('2d');
+    const g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.8)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = g;
+    x.fillRect(0, 0, 32, 32);
+    this._flake = new THREE.CanvasTexture(cv);
+    return this._flake;
+  }
+
+  /** 雨つぶ・雪を動かす（カメラのまわりだけ） */
+  _stepWeather(dt) {
+    const c = this.camera.position;
+    const R = this._rain;
+    if (R?.lines.visible) {
+      const pos = R.lines.geometry.attributes.position;
+      const S = 18;
+      for (let i = 0; i < R.N; i++) {
+        let x = pos.getX(i * 2);
+        let y = pos.getY(i * 2);
+        let z = pos.getZ(i * 2);
+        if (!R.seeded || y < c.y - 6 || Math.abs(x - c.x) > S || Math.abs(z - c.z) > S) {
+          x = c.x + (Math.random() - 0.5) * 2 * S;
+          z = c.z + (Math.random() - 0.5) * 2 * S;
+          y = R.seeded ? c.y + 10 + Math.random() * 4 : c.y + Math.random() * 14;
+        }
+        y -= 22 * dt;
+        pos.setXYZ(i * 2, x, y, z);
+        pos.setXYZ(i * 2 + 1, x + 0.02, y + 0.45, z);
+      }
+      R.seeded = true;
+      pos.needsUpdate = true;
+    }
+    const W = this._snow;
+    if (W?.pts.visible) {
+      const pos = W.pts.geometry.attributes.position;
+      const S = 16;
+      for (let i = 0; i < W.N; i++) {
+        let x = pos.getX(i);
+        let y = pos.getY(i);
+        let z = pos.getZ(i);
+        if (!W.seeded || y < c.y - 5 || Math.abs(x - c.x) > S || Math.abs(z - c.z) > S) {
+          x = c.x + (Math.random() - 0.5) * 2 * S;
+          z = c.z + (Math.random() - 0.5) * 2 * S;
+          y = W.seeded ? c.y + 8 + Math.random() * 3 : c.y - 4 + Math.random() * 14;
+        }
+        const ph = W.ph[i] + this.t;
+        // ふわふわ横に揺れながら、ゆっくり落ちる
+        x += Math.sin(ph * 1.3) * 0.6 * dt;
+        z += Math.cos(ph * 0.9) * 0.6 * dt;
+        y -= (1.1 + (i % 5) * 0.12) * dt;
+        pos.setXYZ(i, x, y, z);
+      }
+      W.seeded = true;
+      pos.needsUpdate = true;
+    }
   }
 
   /** 回復のおやつ: 出ているものだけ見せて、ゆっくり回す */
@@ -1236,12 +1416,10 @@ export class GomuWorld {
     for (const d of this.dogs) this.scene.remove(d.root);
     this.dogs = kinds.map((kind, i) => {
       const root = new THREE.Group();
-      const dog = buildDog(kind);
-      dog.group.scale.setScalar(DOG_SCALE);
-      realisticDog(dog.group);
-      // 持っている武器（輪ゴム鉄砲・スナイパー・ライフル。相手からも見える）
+      const dog = buildRealDog(kind);
+      // 持っている武器（輪ゴム鉄砲・スナイパー・ライフル。相手からも見える）。前足で構える
       const gun = weaponRack();
-      gun.position.set(0.06, 0.62, 0.42);
+      gun.position.set(0, dog.handY, 0.4);
       gun.scale.setScalar(0.9);
       const ring = new THREE.Mesh(new THREE.RingGeometry(0.36, 0.48, 24), new THREE.MeshBasicMaterial({ color: colors[i] ?? 0xffffff, transparent: true, opacity: 0.85 }));
       ring.rotation.x = -Math.PI / 2;
@@ -1410,7 +1588,7 @@ export class GomuWorld {
       const sy = v.crouch ? 0.62 : 1;
       d.body.scale.y += (sy - d.body.scale.y) * Math.min(1, dt * 14);
       d.body.rotation.z += (deadK * Math.PI * 0.5 - d.body.rotation.z) * Math.min(1, dt * 8);
-      d.body.position.y = v.moving && !v.dead ? Math.abs(Math.sin(d.t * 12)) * 0.08 : 0;
+      d.body.position.y = 0; // 歩くときの揺れは犬の形（dog3d.js）が動かす
       d.body.position.x = v.stun ? Math.sin(d.t * 50) * 0.05 : 0;
       d.gun.visible = !v.dead;
       d.gun.userData.set(v.weapon ?? WEAPON.NORMAL);
@@ -1431,7 +1609,8 @@ export class GomuWorld {
         d.star.scale.setScalar(v.crouch ? 0.75 : 1);
       }
       d.body.visible = !(v.inv && !v.star && Math.floor(d.t * 10) % 2 === 0);
-      d.dog.animate({ dt, speed: v.moving ? 14 : 0, steer: 0, spin: v.stun ? 1 : 0, boost: 0, bump: v.stun ? 0.4 : 0, mood: v.dead ? -1 : 0 });
+      d.dog.animate({ dt, moving: !!v.moving, crouch: !!v.crouch, pitch: v.pitch || 0, dead: !!v.dead, stun: !!v.stun });
+      d.gun.rotation.x = -Math.max(-0.6, Math.min(0.6, v.pitch || 0)) * 0.8; // 鉄砲もねらう向きへ
     });
   }
 
@@ -1575,6 +1754,12 @@ export class GomuWorld {
       const isHair = !!b && b.kind === HAIRBALL;
       const isBomb = !!b && b.w === WEAPON.BOMB;
       const trail = m.userData.trail;
+      // 跳ねたら火花（跳ねた回数が増えたとき）
+      if (b && !isHair) {
+        const nb = b.bounced || 0;
+        if (nb > (this._bounceSeen.get(b) ?? nb)) this.sparks(b.x, b.y, b.z, 7);
+        this._bounceSeen.set(b, nb);
+      }
       trail.visible = !!b && !isHair && !isBomb;
       if (trail.visible) {
         const tp = trail.geometry.attributes.position;
@@ -1680,16 +1865,168 @@ export class GomuWorld {
 
   // ---- ちょっとした演出（粒） ----
   burst(x, y, z, color, n = 10, speed = 3, size = 0.06) {
+    // まとめて描く粒で（1 つずつ Mesh を作らない）
     for (let i = 0; i < n; i++) {
-      const m = new THREE.Mesh(this._fxGeo ||= new THREE.IcosahedronGeometry(1, 0), new THREE.MeshBasicMaterial({ color, transparent: true }));
-      m.scale.setScalar(size * (0.6 + Math.random() * 0.8));
-      m.position.set(x, y, z);
       const a = Math.random() * Math.PI * 2;
       const u = Math.random() * 2 - 1;
-      const s = speed * (0.4 + Math.random() * 0.6);
-      m.userData = { vx: Math.cos(a) * Math.sqrt(1 - u * u) * s, vy: Math.abs(u) * s + 1, vz: Math.sin(a) * Math.sqrt(1 - u * u) * s, life: 0.5 + Math.random() * 0.3, age: 0 };
+      const sp = speed * (0.4 + Math.random() * 0.6);
+      this.pfx.spawn({ x, y, z, vx: Math.cos(a) * Math.sqrt(1 - u * u) * sp, vy: Math.abs(u) * sp + 1, vz: Math.sin(a) * Math.sqrt(1 - u * u) * sp, g: 9, life: 0.5 + Math.random() * 0.3, size: size * 2.6 * (0.6 + Math.random() * 0.8), color });
+    }
+  }
+
+  // ---- エフェクト 15 種（2026-11-13） ----
+  /** 1. 走ったときの土ぼこり */
+  dust(x, y, z, n = 2) {
+    const c = this.arena?.ground === 'sand' ? 0xe9d6a8 : this.arena?.ground === 'dirt' ? 0xb59a74 : 0xb8a888;
+    for (let i = 0; i < n; i++) this.pfx.spawn({ x: x + (Math.random() - 0.5) * 0.4, y: y + 0.08, z: z + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 0.6, vy: 0.35 + Math.random() * 0.3, vz: (Math.random() - 0.5) * 0.6, drag: 2.5, life: 0.7, size: 0.32, grow: 2.2, color: c, a0: this._snowCover?.v > 0.3 ? 0.3 : 0.55 });
+  }
+
+  /** 2. 着地したときの土煙の輪 */
+  landRing(x, y, z) {
+    const c = this._snowCover?.v > 0.3 ? 0xffffff : 0xc8b898;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      this.pfx.spawn({ x, y: y + 0.06, z, vx: Math.cos(a) * 2.6, vy: 0.25, vz: Math.sin(a) * 2.6, drag: 4, life: 0.55, size: 0.28, grow: 1.6, color: c, a0: 0.6 });
+    }
+  }
+
+  /** 3. 輪ゴムが跳ねたときの火花 */
+  sparks(x, y, z, n = 8) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const u = Math.random() * 2 - 1;
+      const sp = 2.5 + Math.random() * 3;
+      this.gfx.spawn({ x, y, z, vx: Math.cos(a) * Math.sqrt(1 - u * u) * sp, vy: u * sp + 1.5, vz: Math.sin(a) * Math.sqrt(1 - u * u) * sp, g: 14, life: 0.25 + Math.random() * 0.15, size: 0.07, color: i % 2 ? 0xffe9a8 : 0xffffff });
+    }
+  }
+
+  /** 4. 輪ゴムの当たった跡（壁・地面に黒い輪。しばらくして消える） */
+  impactMark(x, y, z, nx, ny, nz) {
+    this.marks.add(x, y, z, nx, ny, nz, 0.26, 9, 0x222222);
+  }
+
+  /** 5. 倒したときの紙吹雪 */
+  confetti(x, y, z) {
+    const cols = [0xff4d6d, 0xffd23f, 0x3a86ff, 0x06d6a0, 0x8338ec, 0xfb5607];
+    for (let i = 0; i < 46; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 1.5 + Math.random() * 3;
+      this.pfx.spawn({ x, y: y + 1, z, vx: Math.cos(a) * sp, vy: 3 + Math.random() * 3, vz: Math.sin(a) * sp, g: 6, drag: 1.4, life: 1.4 + Math.random() * 0.6, size: 0.09, color: cols[i % cols.length] });
+    }
+  }
+
+  /** 6. 撃ったときの光（銃口のフラッシュ） */
+  muzzle(x, y, z) {
+    this.gfx.spawn({ x, y, z, life: 0.08, size: 0.6, color: 0xfff1b0, grow: 0.5 });
+    for (let i = 0; i < 3; i++) this.gfx.spawn({ x, y, z, vx: (Math.random() - 0.5) * 3, vy: Math.random() * 2, vz: (Math.random() - 0.5) * 3, life: 0.15, size: 0.06, color: 0xffd27a });
+  }
+
+  /** 7. 回復したときの緑のきらめき（下から上へ） */
+  healFx(x, y, z) {
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.3 + Math.random() * 0.25;
+      this.gfx.spawn({ x: x + Math.cos(a) * r, y: y + Math.random() * 0.6, z: z + Math.sin(a) * r, vy: 1 + Math.random() * 0.8, life: 0.9 + Math.random() * 0.4, size: 0.1, color: i % 3 ? 0x7dff9a : 0xe8ffe8 });
+    }
+  }
+
+  /** 9. 爆発の衝撃波（地面を広がる輪） */
+  shockwave(x, y, z, r) {
+    this._ring(x, y + 0.08, z, 0xffb35c, r * 1.6, 0.5, 0.75);
+  }
+
+  /** 10. 復活したときの光の柱 */
+  beam(x, y, z, color = 0xfff3c4) {
+    let b = this._beams?.find((q) => !q.m.visible);
+    if (!b) {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 7, 16, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
       this.scene.add(m);
-      this.fxList.push(m);
+      b = { m };
+      (this._beams ||= []).push(b);
+    }
+    b.m.visible = true;
+    b.m.material.color.setHex(color);
+    b.m.position.set(x, y + 3.5, z);
+    b.age = 0;
+    for (let i = 0; i < 10; i++) this.gfx.spawn({ x: x + (Math.random() - 0.5) * 0.8, y: y + Math.random() * 0.5, z: z + (Math.random() - 0.5) * 0.8, vy: 2 + Math.random() * 2, life: 0.8, size: 0.09, color });
+  }
+
+  /** 11. アイテムを拾ったときの金色のきらめき */
+  pickupFx(x, y, z) {
+    for (let i = 0; i < 20; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 1.5 + Math.random() * 2;
+      this.gfx.spawn({ x, y: y + 0.6, z, vx: Math.cos(a) * sp, vy: 1.5 + Math.random() * 2.5, vz: Math.sin(a) * sp, g: 4, drag: 1, life: 0.7 + Math.random() * 0.3, size: 0.1, color: i % 2 ? 0xffd23f : 0xffffff });
+    }
+    this._ring(x, y + 0.05, z, 0xffd23f, 2.2, 0.4, 0.6);
+  }
+
+  /** 12. 雪の上の足あと（積もっているときだけ） */
+  footprint(x, z, yaw, side) {
+    if (!(this._snowCover?.v > 0.25) || !this.arena) return;
+    const ox = Math.cos(yaw) * 0.12 * side;
+    const oz = -Math.sin(yaw) * 0.12 * side;
+    const px = x + ox;
+    const pz = z + oz;
+    this.paws.add(px, groundY(this.arena, px, pz) + 0.02, pz, 0, 1, 0, 0.2, 14, 0xffffff, yaw + Math.PI);
+  }
+
+  /** 13. 寒いときの白い息 */
+  breath(x, y, z, yaw) {
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    for (let i = 0; i < 3; i++) this.pfx.spawn({ x: x + fx * 0.35, y, z: z + fz * 0.35, vx: fx * 0.6 + (Math.random() - 0.5) * 0.2, vy: 0.15, vz: fz * 0.6 + (Math.random() - 0.5) * 0.2, drag: 1.5, life: 0.9, size: 0.1, grow: 2.5, color: 0xffffff, a0: 0.45 });
+  }
+
+  /** 広がって消える輪（衝撃波・拾ったとき） */
+  _ring(x, y, z, color, R, life, op) {
+    let q = this._rings.find((r) => !r.m.visible);
+    if (!q) {
+      const m = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+      m.rotation.x = -Math.PI / 2;
+      this.scene.add(m);
+      q = { m };
+      this._rings.push(q);
+    }
+    q.m.visible = true;
+    q.m.material.color.setHex(color);
+    q.m.position.set(x, y, z);
+    Object.assign(q, { age: 0, life, R, op });
+  }
+
+  /** 14. 夜のホタル（カメラのまわりに、ゆっくり光る点）と、輪・光の柱を動かす */
+  _stepAmbient(dt) {
+    this.pfx.step(dt, this.t);
+    this.gfx.step(dt, this.t);
+    this.marks.step(dt);
+    this.paws.step(dt);
+    for (const q of this._rings) {
+      if (!q.m.visible) continue;
+      q.age += dt;
+      const k = Math.min(1, q.age / q.life);
+      q.m.scale.setScalar(0.2 + q.R * (1 - (1 - k) ** 2));
+      q.m.material.opacity = q.op * (1 - k);
+      if (k >= 1) q.m.visible = false;
+    }
+    for (const b of this._beams || []) {
+      if (!b.m.visible) continue;
+      b.age += dt;
+      b.m.material.opacity = 0.45 * Math.max(0, 1 - b.age / 0.9);
+      b.m.scale.set(1 - b.age * 0.4, 1, 1 - b.age * 0.4);
+      if (b.age > 0.9) b.m.visible = false;
+    }
+    if (this.night && !(this._wx > 0)) {
+      this._ffT = (this._ffT || 0) - dt;
+      if (this._ffT <= 0) {
+        this._ffT = 0.12;
+        const c = this.camera.position;
+        const a = Math.random() * Math.PI * 2;
+        const r = 3 + Math.random() * 14;
+        const x = c.x + Math.cos(a) * r;
+        const z = c.z + Math.sin(a) * r;
+        const gy = this.arena ? groundY(this.arena, x, z) : 0;
+        this.gfx.spawn({ x, y: gy + 0.4 + Math.random() * 1.6, z, vx: (Math.random() - 0.5) * 0.5, vy: (Math.random() - 0.5) * 0.2, vz: (Math.random() - 0.5) * 0.5, life: 4 + Math.random() * 2, size: 0.07, color: 0xd9ff6a, blink: 3 + Math.random() * 3 });
+      }
     }
   }
 
@@ -1704,6 +2041,7 @@ export class GomuWorld {
     this.burst(x, y + 0.2, z, 0xff6b35, 22, 7, 0.14);
     this.burst(x, y + 0.2, z, 0xffd23f, 14, 5, 0.1);
     this.burst(x, y + 0.3, z, 0x8d8d8d, 10, 2.5, 0.22);
+    this.shockwave(x, this.arena ? groundY(this.arena, x, z) : 0, z, r);
   }
 
   /** 爆弾の飛ぶ道（点の列 [[x, y, z], ...]。null で隠す）と、落ちる所の輪 */
@@ -1835,7 +2173,9 @@ export class GomuWorld {
   render(dt) {
     this._stepSmokes(dt);
     this._stepFx(dt);
-    this._stepRain(dt);
+    this._stepWeather(dt);
+    this._stepLamps(dt);
+    this._stepAmbient(dt);
     // 動く影（パソコン）: 2 フレームに 1 回だけ描き直す
     if (this.dynShadow && (this._sf = ((this._sf || 0) + 1) % 2) === 0) this.renderer.shadowMap.needsUpdate = true;
     this.renderer.render(this.scene, this.camera);
