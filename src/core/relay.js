@@ -68,6 +68,7 @@ class RelayConn extends Ev {
     this._close = close;
     this._socket = socket;
     this.closed = false;
+    this.binOk = false; // 中継がバイナリを通せるか（"!b" が届いたら true）
   }
   /** 送信待ちのバイト数（ゲスト側は WebSocket の値。ホスト側は共有の WebSocket の値） */
   get dataChannel() {
@@ -134,6 +135,7 @@ export class RelayPeer extends Ev {
       return;
     }
     this._ws = ws;
+    ws.binaryType = 'arraybuffer';
     ws.onmessage = (ev) => this._onHostMessage(ws, ev.data);
     ws.onclose = (ev) => {
       if (this._ws !== ws) return;
@@ -161,7 +163,22 @@ export class RelayPeer extends Ev {
   }
 
   _onHostMessage(ws, data) {
-    if (this._ws !== ws || typeof data !== 'string') return;
+    if (this._ws !== ws) return;
+    if (data instanceof ArrayBuffer) {
+      // バイナリ: [L][接続 ID][本文]
+      const u8 = new Uint8Array(data);
+      const L = u8[0];
+      if (!L || u8.length < 1 + L) return;
+      const id = String.fromCharCode(...u8.subarray(1, 1 + L));
+      this._conns.get(id)?.emit('data', data.slice(1 + L));
+      return;
+    }
+    if (typeof data !== 'string') return;
+    if (data === '!b') {
+      this.binOk = true;
+      for (const c of this._conns.values()) c.binOk = true;
+      return;
+    }
     if (data === '!ok') {
       this.open = true;
       this._everOpened = true;
@@ -192,8 +209,18 @@ export class RelayPeer extends Ev {
         meta = {};
       }
       if (!id || this._conns.has(id)) return;
+      const idBytes = Array.from(id, (ch) => ch.charCodeAt(0));
       const conn = new RelayConn(
-        (d) => wsSend(ws, `${id}:${d}`),
+        (d) => {
+          if (typeof d === 'string') return wsSend(ws, `${id}:${d}`);
+          // バイナリ: 頭に接続 ID をつける
+          const body = d instanceof ArrayBuffer ? new Uint8Array(d) : new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
+          const out = new Uint8Array(1 + idBytes.length + body.length);
+          out[0] = idBytes.length;
+          out.set(idBytes, 1);
+          out.set(body, 1 + idBytes.length);
+          wsSend(ws, out);
+        },
         () => {
           try {
             wsSend(ws, `!x${id}`);
@@ -205,6 +232,7 @@ export class RelayPeer extends Ev {
         meta && typeof meta === 'object' ? meta : {},
         () => ws,
       );
+      conn.binOk = !!this.binOk;
       this._conns.set(id, conn);
       this.emit('connection', conn);
       // PeerJS と同じく、接続を受け取った側がハンドラを付けたあとで open にする
@@ -254,9 +282,18 @@ export class RelayPeer extends Ev {
       metadata,
       () => ws,
     );
+    ws.binaryType = 'arraybuffer';
     ws.onmessage = (ev) => {
       const data = ev.data;
+      if (data instanceof ArrayBuffer) {
+        if (conn.open) conn.emit('data', data);
+        return;
+      }
       if (typeof data !== 'string') return;
+      if (data === '!b') {
+        conn.binOk = true;
+        return;
+      }
       if (data === '!ok') {
         conn._opened();
         return;

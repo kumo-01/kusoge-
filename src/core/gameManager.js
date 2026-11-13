@@ -16,7 +16,8 @@
 // 画面遷移や勝敗の確定はホストの部屋管理（room.js）が行い、ゲームは context.finish(result) で結果を返す。
 
 import { Emitter, h, now } from './util.js';
-import { encodeInputFrame, encodeSnapshotFrame, decodeFrame, matchHash, FRAME_INPUT, FRAME_SNAPSHOT } from './binframe.js';
+import { encodeInputFrame, encodeSnapshotFrame, encodeDeltaFrame, decodeFrame, matchHash, FRAME_INPUT, FRAME_SNAPSHOT, FRAME_DELTA, NO_BASE } from './binframe.js';
+import { deltaEncode, deltaDecode, check16 } from './netcodec.js';
 import { EngineClient } from './engineClient.js';
 
 export const LOOP_CONFIG = {
@@ -51,6 +52,8 @@ export class GameManager extends Emitter {
     this._history = [];
     this._netSeq = 0;
     this._renderErrors = 0;
+    // 通信の量（差分の配信で送った・受け取ったバイト数と、差分にしなかったときのバイト数）
+    this.stats = { txBytes: 0, txRaw: 0, rxBytes: 0, rxRaw: 0 };
   }
 
   get isHost() {
@@ -101,7 +104,7 @@ export class GameManager extends Emitter {
         if (this.isHost) return;
         // 連続入力は順不同の高速チャンネルで送る（重複・欠落は seq と重ね送りで吸収）。
         // P2P は、読めた最新の配信の番号（受け取り確認）も一緒に送る。ホストはそれを元に差分の配信を作る
-        this.net.sendFast(this.net.binary ? encodeInputFrame(matchId, this.gen, seq, inputs, game.netAck ?? null) : { type: 'player_input', matchId, gen: this.gen, seq, inputs });
+        this.net.sendFast(this.net.binary ? encodeInputFrame(matchId, this.gen, seq, inputs, this._rx?.gen === this.gen && this._rx.last != null ? this._rx.last & 0xffff : game.netAck ?? null) : { type: 'player_input', matchId, gen: this.gen, seq, inputs });
       },
       // ゲーム固有メッセージ（双方向）
       sendGameMessage: (data) => {
@@ -304,6 +307,26 @@ export class GameManager extends Emitter {
         const player = this.players.indexOf(slot);
         if (this.running && player > 0) game.onMessage({ type: 'player_input', player, seq: f.seq, inputs: f.inputs });
         if (player > 0 && f.ack !== undefined) game.netAckFrom?.(slot, f.ack);
+        if (player > 0 && f.ack >= 0) this._deltaState().acks.set(slot, f.ack); // 共通の差分の配信の元
+      } else if (f.kind === FRAME_DELTA && !this.isHost && this.running && game.decodeNetBinary) {
+        // 共通の差分の配信: 元にした配信（前に受け取ったもの）と合わせて戻す
+        const rx = this._rxState();
+        let base = null;
+        if (f.base !== NO_BASE) {
+          base = rx.map.get(f.base);
+          if (!base) return; // 元を持っていない（取りこぼした）。受け取り確認が進めば、持っている元で届く
+        }
+        const cur = deltaDecode(base, f.payload);
+        if (!cur || check16(cur) !== f.check) return;
+        const k = f.seq & 0xffff;
+        rx.map.delete(k);
+        rx.map.set(k, cur);
+        if (rx.map.size > 64) rx.map.delete(rx.map.keys().next().value);
+        if (rx.last == null || f.seq > rx.last) rx.last = f.seq;
+        this.stats.rxBytes += f.payload.length + 16;
+        this.stats.rxRaw += cur.length + 12;
+        const d = game.decodeNetBinary(cur);
+        if (d) game.applyNetSnapshot(d.snap, d.ev, f.seq);
       } else if (f.kind === FRAME_SNAPSHOT && (!this.isHost || this.serverSim) && this.running && game.decodeNetBinary) {
         const d = game.decodeNetBinary(f.payload);
         if (d) game.applyNetSnapshot(d.snap, d.ev, f.seq);
@@ -394,7 +417,33 @@ export class GameManager extends Emitter {
       return;
     }
     if (this.net.binary && this.game.encodeNetBinary) {
-      this.net.sendFast(encodeSnapshotFrame(this.matchId, this.gen, ++this._netSeq, this.game.encodeNetBinary(ev)));
+      const cur = this.game.encodeNetBinary(ev);
+      const seq = ++this._netSeq;
+      if (this.game.netDelta && this.net.sendFastTo && this.net.isConnected) {
+        // 共通の差分の配信（netcodec.js。Rust）: ゲストごとに、そのゲストが受け取りを確認した配信との差分を送る。
+        // 毎回ほとんど同じ配信は、変わったところだけの大きさになる。元の確認がなければ、元なし（0 の連続だけまとめたもの）
+        const dx = this._deltaState();
+        dx.sent.push({ seq, bytes: cur });
+        if (dx.sent.length > 64) dx.sent.shift();
+        const check = check16(cur);
+        const cache = new Map();
+        for (const slot of this.players) {
+          if (!(slot > 0) || !this.net.isConnected(slot)) continue;
+          const a = dx.acks.get(slot);
+          const base = a == null ? null : dx.sent.find((x) => (x.seq & 0xffff) === a && x.seq !== seq) || null;
+          const key = base ? base.seq : -1;
+          let frame = cache.get(key);
+          if (!frame) {
+            frame = encodeDeltaFrame(this.matchId, this.gen, seq, base ? base.seq & 0xffff : NO_BASE, check, deltaEncode(base?.bytes, cur));
+            cache.set(key, frame);
+          }
+          this.stats.txBytes += frame.byteLength;
+          this.stats.txRaw += cur.length + 12;
+          this.net.sendFastTo(slot, frame);
+        }
+        return;
+      }
+      this.net.sendFast(encodeSnapshotFrame(this.matchId, this.gen, seq, cur));
       return;
     }
     const payload = this.game.encodeNetSnapshot ? this.game.encodeNetSnapshot(snap) : snap;
@@ -402,8 +451,22 @@ export class GameManager extends Emitter {
     this.net.sendFast({ type: 'game_snapshot', matchId: this.matchId, gen: this.gen, seq: ++this._netSeq, snap: payload, ev });
   }
 
+  /** 共通の差分の配信（ホスト）: 送った配信と、ゲストごとの受け取り確認。世代が変わったら作り直す */
+  _deltaState() {
+    if (this._dx?.gen !== this.gen || this._dx.match !== this.matchId) this._dx = { gen: this.gen, match: this.matchId, sent: [], acks: new Map() };
+    return this._dx;
+  }
+
+  /** 共通の差分の配信（ゲスト）: 受け取った配信（下 16 ビットの番号 → バイト列）と、読めた最新の番号 */
+  _rxState() {
+    if (this._rx?.gen !== this.gen || this._rx.match !== this.matchId) this._rx = { gen: this.gen, match: this.matchId, map: new Map(), last: null };
+    return this._rx;
+  }
+
   destroy() {
     this._token++;
+    this._dx = null;
+    this._rx = null;
     this._resolveFirstFrame?.();
     this._resolveFirstFrame = null;
     clearTimeout(this._runTimer);

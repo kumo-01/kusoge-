@@ -966,3 +966,23 @@ test('追加: チーム戦は味方の近くで復活する', () => {
   const dFoe = Math.min(Math.hypot(a.x - e1.x, a.z - e1.z), Math.hypot(a.x - e2.x, a.z - e2.z));
   assert.ok(dAlly < dFoe, `味方の方が近い (味方 ${dAlly.toFixed(1)} / 敵 ${dFoe.toFixed(1)})`);
 });
+
+import { deltaEncode, deltaDecode } from '../src/core/netcodec.js';
+
+test('配信のバイト列は、前の配信との差分（共通の差分の配信）にすると小さくなり、元に戻せる', () => {
+  const sim = new GomuSim({ humans: 2, bots: 5, seed: 3 });
+  run(sim, ROUND.INTRO + 10);
+  let prev = packBin(sim.s, true, null);
+  let raw = 0;
+  let small = 0;
+  for (let k = 0; k < 80; k++) {
+    for (let j = 0; j < 2; j++) sim.step(1 / 60); // 毎秒 30 回くらいの間隔
+    const cur = packBin(sim.s, true, null);
+    const d = deltaEncode(prev, cur);
+    assert.deepEqual([...deltaDecode(prev, d)], [...cur]);
+    raw += cur.length;
+    small += d.length;
+    prev = cur;
+  }
+  assert.ok(small < raw * 0.6, `差分 ${small} / そのまま ${raw}`);
+});

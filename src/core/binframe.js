@@ -1,14 +1,18 @@
 // ゲーム中の頻繁なメッセージ（位置の定期配信・操作）を、JSON ではなくバイナリで送るための枠。
-// サーバー計算（WebSocket）と P2P（WebRTC の DataChannel）で使う。中継（Cloudflare の部屋の中継）は文字しか通さないので JSON のまま。
+// サーバー計算（WebSocket）・P2P（WebRTC の DataChannel）・部屋の中継（"!b" を知らせてくる新しい中継）で使う。
 //
 //   [0] 0xB7（目印） [1] 種類（1 = 位置の定期配信 / 2 = 操作） [2..3] 世代 gen [4..7] 試合 ID のハッシュ [8..] 種類ごとの中身
 //   1: [8..11] 配信の通し番号 seq、[12..] ゲームが詰めた状態（ゲームモジュールの encodeNetBinary / decodeNetBinary）
 //   2: [8..11] 最後の操作の seq、[12] 操作の数 n、[13..] 操作のビット（古い順に n 個）
 //      そのあとに（P2P のゲストだけ）[1 バイト: 1][2 バイト: 読めた最新の配信の番号]（受け取り確認。差分の配信の元になる）
+//   3: 差分の位置の配信（共通。src/core/netcodec.js で、相手が受け取りを確認した配信との差分にしたもの）
+//      [8..11] seq、[12..13] 元にした配信の番号（下 16 ビット。0xffff = 元なし）、[14..15] 戻したバイト列の確かめ用の値、[16..] 差分
 
 const MAGIC = 0xb7;
 export const FRAME_SNAPSHOT = 1;
 export const FRAME_INPUT = 2;
+export const FRAME_DELTA = 3;
+export const NO_BASE = 0xffff;
 
 /** 試合 ID の 32bit ハッシュ（FNV-1a）。前の試合の配信を取り違えないため */
 export function matchHash(id) {
@@ -36,6 +40,17 @@ export function encodeSnapshotFrame(matchId, gen, seq, payload) {
   const dv = header(buf, FRAME_SNAPSHOT, matchId, gen);
   dv.setUint32(8, seq >>> 0, true);
   new Uint8Array(buf, 12).set(payload);
+  return buf;
+}
+
+/** 差分の位置の配信。base: 元にした配信の seq の下 16 ビット（NO_BASE = 元なし）、check: 戻したときの確かめ用の値 */
+export function encodeDeltaFrame(matchId, gen, seq, base, check, data) {
+  const buf = new ArrayBuffer(16 + data.length);
+  const dv = header(buf, FRAME_DELTA, matchId, gen);
+  dv.setUint32(8, seq >>> 0, true);
+  dv.setUint16(12, base & 0xffff, true);
+  dv.setUint16(14, check & 0xffff, true);
+  new Uint8Array(buf, 16).set(data);
   return buf;
 }
 
@@ -73,6 +88,13 @@ export function decodeFrame(data) {
     const f = { kind: u8[1], gen: dv.getUint16(2, true), hash: dv.getUint32(4, true), seq: dv.getUint32(8, true) };
     if (f.kind === FRAME_SNAPSHOT) {
       f.payload = u8.subarray(12);
+      return f;
+    }
+    if (f.kind === FRAME_DELTA) {
+      if (u8.length < 16) return null;
+      f.base = dv.getUint16(12, true);
+      f.check = dv.getUint16(14, true);
+      f.payload = u8.subarray(16);
       return f;
     }
     if (f.kind === FRAME_INPUT) {

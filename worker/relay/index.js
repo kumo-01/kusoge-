@@ -16,10 +16,15 @@
 //   "<id>:<本文>"    ゲスト <id> へ送る
 //   "!x<id>"         ゲスト <id> の接続を切る
 // ゲストへは本文をそのまま渡す。最初に "!ok"（接続できた）か "!no"（ホスト不在など）が届く。
+//
+// バイナリ（2026-11-13〜）: 位置の定期配信・操作の枠（src/core/binframe.js）は、文字にせずバイトのまま通す。
+//   "!ok" のあとに "!b" を送り、バイナリを通せることを知らせる（古い中継では届かないので、アプリは文字で送り続ける）
+//   ホストとの間のバイナリ: [1 バイト: 接続 ID の長さ L][L バイト: 接続 ID][本文]
+//   ゲストとの間のバイナリ: 本文そのまま
 
 // サーバーの版。ゲームの計算（src/games/dogKart/ の engine・race・physics など）を変えたら、ここも上げる。
 // Cloudflare の自動ビルドは worker/relay/ の変更でしか動かないことがあるため（/health で今の版を確認できる）
-const SERVER_VERSION = '2026-11-12.2';
+const SERVER_VERSION = '2026-11-13.1';
 
 const ROOM_RE = /^[A-Za-z0-9-]{8,64}$/;
 const MAX_MESSAGE = 70000; // アプリ側の上限（60000 文字）より少し大きく
@@ -102,6 +107,7 @@ export class Room {
       }
       this.state.acceptWebSocket(server, ['host']);
       server.send('!ok');
+      server.send('!b');
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -123,6 +129,7 @@ export class Room {
       /* ホストが切れかけ。ゲスト側は webSocketClose で後始末される */
     }
     server.send('!ok');
+    server.send('!b');
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -137,7 +144,11 @@ export class Room {
   }
 
   async webSocketMessage(ws, message) {
-    if (typeof message !== 'string' || message.length > MAX_MESSAGE) {
+    if (typeof message !== 'string') {
+      this.onBinary(ws, message);
+      return;
+    }
+    if (message.length > MAX_MESSAGE) {
       try {
         ws.close(1009, 'bad message');
       } catch {
@@ -176,6 +187,39 @@ export class Room {
         } catch {
           /* noop */
         }
+      }
+    }
+  }
+
+  /** バイナリ: ホストからは [L][接続 ID][本文] → ゲストへ本文。ゲストからは本文 → ホストへ [L][接続 ID][本文] */
+  onBinary(ws, message) {
+    const u8 = message instanceof ArrayBuffer ? new Uint8Array(message) : ArrayBuffer.isView(message) ? new Uint8Array(message.buffer, message.byteOffset, message.byteLength) : null;
+    if (!u8 || u8.length > MAX_MESSAGE || u8.length < 2) return;
+    const tags = this.state.getTags(ws);
+    if (tags[0] === 'host') {
+      const L = u8[0];
+      if (L < 1 || L > 12 || u8.length < 1 + L) return;
+      const id = String.fromCharCode(...u8.subarray(1, 1 + L));
+      const g = this.state.getWebSockets(`g${id}`)[0];
+      if (g) {
+        try {
+          g.send(u8.slice(1 + L));
+        } catch {
+          /* noop */
+        }
+      }
+    } else if (tags[0] === 'guest') {
+      const host = this.hostSocket();
+      if (!host) return;
+      const id = tags[1].slice(1);
+      const out = new Uint8Array(1 + id.length + u8.length);
+      out[0] = id.length;
+      for (let k = 0; k < id.length; k++) out[1 + k] = id.charCodeAt(k);
+      out.set(u8, 1 + id.length);
+      try {
+        host.send(out);
+      } catch {
+        /* noop */
       }
     }
   }

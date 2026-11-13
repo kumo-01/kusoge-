@@ -1,0 +1,17 @@
+[package]
+name = "wanwan-netcodec"
+version = "0.1.0"
+edition = "2021"
+description = "わんわんパーティーの通信の差分圧縮（前に届いた配信との XOR と、0 の連続のまとめ）。WebAssembly にしてブラウザで使う"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

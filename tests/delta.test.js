@@ -10,7 +10,7 @@ const angle = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
 
 /** 毎秒 40 回（1 tick と 2 tick の間隔を交互に）配信して、受け取った状態が元と同じかを見る */
 function run(seconds, opts = {}) {
-  const e = new DogKartEngine({ players: [0, 1, 2], npcs: 10, boss: 1, mg: 1, delta: true, ...opts });
+  const e = new DogKartEngine({ players: [0, 1, 2], npcs: 10, boss: 1, mg: 1, delta: true, seed: 3, ...opts });
   e.sim.rng = undefined;
   const dec = new NetBinDecoder();
   const v9 = new NetBinEncoder();
@@ -127,7 +127,7 @@ import { NetAckEncoder } from '../src/games/dogKart/race.js';
 
 /** 取りこぼし loss・遅れ lag（tick）のある通信で、ホスト → ゲスト 2 人に配信し、ゲストは受け取り確認を返す */
 function p2p(loss, lag, seconds = 60) {
-  const e = new DogKartEngine({ players: [0, 1, 2], npcs: 8, boss: 1, mg: 1 });
+  const e = new DogKartEngine({ players: [0, 1, 2], npcs: 8, boss: 1, mg: 1, seed: 3 });
   const enc = new NetAckEncoder();
   const v9 = new NetBinEncoder();
   const decs = { 1: new NetBinDecoder(), 2: new NetBinDecoder() };

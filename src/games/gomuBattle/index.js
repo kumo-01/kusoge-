@@ -321,8 +321,13 @@ class GomuGame {
         this.ctx.finish(this.result());
       }
     } else {
-      // 自分の位置は毎 tick（毎秒 60 回）送る（小さいので。ホストの計算・ほかの人の画面への遅れを減らす）
-      this.ctx.sendInput(++this._seq, packPilot(p));
+      // 自分の位置は、変わった tick は毎回（毎秒 60 回。ホストの計算・ほかの人の画面への遅れを減らす）、
+      // 止まっている間は 4 tick に 1 回だけ送る（受け取り確認は続けて届けたいので、止めはしない）
+      const pk = packPilot(p);
+      const key = pk.join(',');
+      this._pilotIdle = key === this._pilotKey ? (this._pilotIdle | 0) + 1 : 0;
+      this._pilotKey = key;
+      if (this._pilotIdle % 4 === 0) this.ctx.sendInput(++this._seq, pk);
       this._stepGuestBands(dt);
     }
   }
@@ -502,7 +507,8 @@ class GomuGame {
   _hostEvents(evs) {
     for (const e of evs) {
       e.id = ++this.evSeq;
-      this.netEvents.push({ e, n: 3 });
+      // 順番どおり確実に届く通信（中継）なら 1 回、取りこぼしのある P2P の高速チャンネルなら 3 回続けて載せる
+      this.netEvents.push({ e, n: this.ctx.reliableInput ? 1 : 3 });
     }
     if (this.netEvents.length > 300) this.netEvents.splice(0, this.netEvents.length - 300);
     this._handleEvents(evs);
@@ -823,9 +829,14 @@ class GomuGame {
     return { b: toB64(packBin(this.sim.s, this._withRs(), null)) };
   }
 
-  /** P2P: バイト列（起きたことも一緒に） */
+  /** バイナリを通せる通信（P2P・新しい中継）: バイト列（起きたことも一緒に）。共通の差分の配信で送るので、ラウンドごとの点も毎回載せる（変わらなければ差分は 0） */
   encodeNetBinary(ev) {
-    return packBin(this.sim.s, this._withRs(), ev);
+    return packBin(this.sim.s, true, ev);
+  }
+
+  /** 共通の差分の配信（src/core/gameManager.js・netcodec.js）を使う */
+  get netDelta() {
+    return true;
   }
 
   decodeNetBinary(u8) {

@@ -14,7 +14,7 @@ export class DogKartEngine {
   constructor(options = {}) {
     this.delta = !!options.delta;
     this.track = options.track || new Track(options.course ?? 0);
-    this.sim = new RaceSim(this.track, { npcs: options.npcs ?? 0, boss: options.boss ?? 0, players: options.players, mg: options.mg ?? 1 });
+    this.sim = new RaceSim(this.track, { npcs: options.npcs ?? 0, boss: options.boss ?? 0, players: options.players, mg: options.mg ?? 1, seed: options.seed });
     this.gq = this._newQueues(); // 人（車の番号）ごとの入力キュー
     this.evSeq = 0;
     this.netEvents = [];

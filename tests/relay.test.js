@@ -12,6 +12,7 @@ class Hub {
     this.host = null;
     this.guests = new Map();
     this.n = 0;
+    this.bin = false; // 新しい中継（バイナリを通す）のふり
   }
 }
 const hub = new Hub();
@@ -30,6 +31,7 @@ class FakeWS {
       if (hub.host) return this._reject(4403);
       hub.host = this;
       this._recv('!ok');
+      if (hub.bin) this._recv('!b');
     } else {
       if (!hub.host) {
         this._recv('!no');
@@ -39,6 +41,7 @@ class FakeWS {
       hub.guests.set(this.id, this);
       hub.host._recv(`!c${this.id}:${this.url.searchParams.get('meta') || ''}`);
       this._recv('!ok');
+      if (hub.bin) this._recv('!b');
     }
   }
   _recv(data) {
@@ -50,6 +53,23 @@ class FakeWS {
   }
   send(data) {
     assert.equal(this.readyState, 1);
+    if (typeof data !== 'string') {
+      // バイナリ（worker/relay/index.js の onBinary と同じ形）
+      assert.ok(hub.bin, 'binary only after !b');
+      const u8 = new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+      if (this.role === 'host') {
+        const L = u8[0];
+        const id = String.fromCharCode(...u8.subarray(1, 1 + L));
+        hub.guests.get(id)?._recv(u8.slice(1 + L).buffer);
+      } else {
+        const out = new Uint8Array(1 + this.id.length + u8.length);
+        out[0] = this.id.length;
+        for (let k = 0; k < this.id.length; k++) out[1 + k] = this.id.charCodeAt(k);
+        out.set(u8, 1 + this.id.length);
+        hub.host?._recv(out.buffer);
+      }
+      return;
+    }
     if (this.role === 'host') {
       if (data.startsWith('!x')) return hub.guests.get(data.slice(2))?.close();
       const i = data.indexOf(':');
@@ -181,4 +201,42 @@ test('同じ部屋 ID が使用中なら unavailable-id、ホストの回線が�
   assert.equal(a.open, true);
   assert.equal(a.disconnected, false);
   a.destroy();
+});
+
+test('新しい中継（!b）ではバイナリがバイトのまま往復する。古い中継では binOk が false のまま', async () => {
+  hub.bin = true;
+  const host = new RelayPeer('wwr-room0bin', { hostSecret: 'sec' });
+  const hostConns = [];
+  host.on('connection', (c) => hostConns.push(c));
+  await new Promise((res) => host.on('open', res));
+  const guest = new RelayPeer();
+  await new Promise((res) => (guest.open ? res() : guest.on('open', res)));
+  const conn = guest.connect('wwr-room0bin', { serialization: 'raw' });
+  const got = [];
+  conn.on('data', (d) => got.push(d));
+  await new Promise((res) => conn.on('open', res));
+  await tick();
+  assert.equal(host.binOk, true);
+  assert.equal(conn.binOk, true);
+  assert.equal(hostConns[0].binOk, true);
+  const received = [];
+  hostConns[0].on('data', (d) => received.push(d));
+  conn.send(new Uint8Array([0xb7, 2, 3, 4]).buffer);
+  hostConns[0].send(new Uint8Array([0xb7, 1, 9]).buffer);
+  hostConns[0].send('{"type":"x"}');
+  await tick();
+  assert.ok(received[0] instanceof ArrayBuffer);
+  assert.deepEqual([...new Uint8Array(received[0])], [0xb7, 2, 3, 4]);
+  assert.deepEqual([...new Uint8Array(got[0])], [0xb7, 1, 9]);
+  assert.equal(got[1], '{"type":"x"}');
+  guest.destroy();
+  host.destroy();
+  await tick();
+  hub.bin = false;
+  const old = new RelayPeer('wwr-room0old', { hostSecret: 'sec' });
+  await new Promise((res) => old.on('open', res));
+  await tick();
+  assert.equal(!!old.binOk, false);
+  old.destroy();
+  await tick();
 });

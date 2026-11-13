@@ -169,6 +169,7 @@ export class Link extends Emitter {
 
   send(msg) {
     if (!this.open || this.closed) return false;
+    if (msg instanceof ArrayBuffer && this.conn.binOk === false) return false; // バイナリを通せない中継
     try {
       this.conn.send(msg instanceof ArrayBuffer ? msg : encode(msg));
       return true;
@@ -229,7 +230,7 @@ export class Link extends Emitter {
   /** 高速チャンネルがあればそちらで送る */
   sendFast(msg) {
     const f = this.fast;
-    if (f?.open && !this.closed) {
+    if (f?.open && !this.closed && !(msg instanceof ArrayBuffer && f.conn.binOk === false)) {
       const dc = f.conn.dataChannel;
       if (!dc || dc.bufferedAmount < NET_CONFIG.CONGESTED_BYTES) {
         try {
@@ -317,9 +318,9 @@ export class HostNetwork extends Emitter {
     for (const x of this.slots) if (x.link?.rtt != null) m = Math.max(m ?? 0, x.link.rtt);
     return m;
   }
-  /** バイナリの枠を送れるか（P2P は送れる。部屋の中継は文字だけ） */
+  /** バイナリの枠を送れるか（P2P は送れる。部屋の中継は、"!b" を知らせてきた新しい中継なら送れる） */
   get binary() {
-    return this.transport !== 'relay';
+    return this.transport !== 'relay' || !!this.peer?.binOk;
   }
   rttOf(slot) {
     return this.linkOf(slot)?.rtt ?? null;
@@ -599,9 +600,9 @@ export class GuestNetwork extends Emitter {
   get reliable() {
     return isRelayRoom(this.roomId);
   }
-  /** バイナリの枠を送れるか（P2P は送れる。部屋の中継は文字だけ） */
+  /** バイナリの枠を送れるか（P2P は送れる。部屋の中継は、"!b" を知らせてきた新しい中継なら送れる） */
   get binary() {
-    return !isRelayRoom(this.roomId);
+    return !isRelayRoom(this.roomId) || !!this.link?.conn?.binOk;
   }
 
   start() {
