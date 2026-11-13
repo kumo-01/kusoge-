@@ -69,6 +69,7 @@ const P = {
   angle: '<path d="M3 20h18"/><path d="M3 20 17 5"/><path d="M10 20a7 7 0 0 0-2.2-5.1"/>',
   map: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
   zap: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  arrow: '<path d="M12 20V5"/><path d="m5 11 7-7 7 7"/>',
   drum: '<ellipse cx="12" cy="9" rx="8" ry="3"/><path d="M4 9v7c0 1.7 3.6 3 8 3s8-1.3 8-3V9"/><path d="m17 2-4 6M7 2l4 6"/>',
 };
 

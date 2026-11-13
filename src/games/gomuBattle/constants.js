@@ -66,13 +66,48 @@ export const ITEM = {
   GUM: 8, // ネバネバガム
   HEAL: 9, // 回復のおやつ
   STAR: 10, // 無敵スター
-  COUNT: 11,
+  COUNT: 11, // プレゼント箱から出る種類の数（ここまで）
+  GOLD: 11, // 金の輪ゴム（空からの補給箱の中身。箱からは出ない）
 };
 
 /** ゴムが変わるアイテム → 撃つ輪ゴムの種類 */
 export const BAND_ITEMS = [ITEM.THICK, ITEM.TRIPLE, ITEM.BOUNCE, ITEM.HOMING];
 /** プレゼント箱から出るアイテム（回復は箱からは出ない。会場に落ちているおやつを拾う） */
 export const BOX_ITEMS = Array.from({ length: ITEM.COUNT - 1 }, (_, k) => k + 1).filter((it) => it !== ITEM.HEAL);
+
+/**
+ * お楽しみの仕組み（2026-11-13）
+ * - ラストスパート: 各ラウンドの残り SPURT 秒は、入る点が 2 倍
+ * - 連続撃破: 死なずに続けて倒すと、STREAK_BONUS の数のときにおまけの点
+ * - リベンジ: 自分を倒した相手を倒し返すと +REVENGE_BONUS
+ * - トランポリン: 乗ると TRAMP_V の速さで上へ跳ねる
+ * - 補給箱: ラウンドの DROP_FIRST 秒から、取られて DROP_EVERY 秒ごとに空から落ちてくる。中身は金の輪ゴム（次の GOLD_SHOTS 発がダメージ 2 倍）
+ * - 突風: ときどき WIND_TIME 秒、横風が吹いて輪ゴム・爆弾・毛玉が流される
+ * - スライディング: 走っている間に伏せを押すと、低い姿勢で前へ滑りこむ（ゲージを使う）
+ * - 遠吠え: V で「ワン！」（吹き出しと声。BARK_CD 秒に 1 回）
+ */
+export const FUN = {
+  SPURT: 30,
+  STREAK_BONUS: { 3: 2, 5: 3, 7: 4 },
+  REVENGE_BONUS: 3,
+  TRAMP_V: 13,
+  DROP_FIRST: 35,
+  DROP_EVERY: 55,
+  DROP_HEIGHT: 26,
+  DROP_FALL: 3.2, // 落ちる速さ（パラシュート）
+  DROP_RADIUS: 1.3, // これより近づくと取れる
+  GOLD_SHOTS: 3,
+  GOLD_MUL: 2,
+  WIND_FIRST: 50,
+  WIND_EVERY: [55, 85],
+  WIND_TIME: 15,
+  WIND_ACC: 7, // 横風の強さ（輪ゴムが 1 秒に流される速さの増え方）
+  SLIDE_TIME: 0.65,
+  SLIDE_SPEED: 12,
+  SLIDE_CD: 1.2,
+  SLIDE_STAM: 20,
+  BARK_CD: 2.5,
+};
 
 export const ITEMS = {
   BOX_RESPAWN: 10, // 箱を取ってから次が出るまで
@@ -128,6 +163,7 @@ export const ITEM_INFO = {
   [ITEM.GUM]: { name: 'ネバネバガム', icon: 'candy', desc: '足もとに置く罠。踏んだ相手は2秒動けない' },
   [ITEM.HEAL]: { name: '回復おやつ', icon: 'heal', desc: '体力が40回復する' },
   [ITEM.STAR]: { name: '無敵スター', icon: 'star', desc: '10秒間、輪ゴムもガムも効かない' },
+  [ITEM.GOLD]: { name: '金の輪ゴム', icon: 'crown', desc: '空からの補給箱の中身。次の3発がダメージ2倍' },
 };
 
 /**

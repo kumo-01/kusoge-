@@ -8,7 +8,7 @@ import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS, WEAPON } from './constants.js';
 import { mat as stdMat, kindMat, weaponRack, realisticDog } from './look.js';
 
 /** 輪ゴムの色（種類ごと） */
-export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]: 0x2a9d8f, [ITEM.BOUNCE]: 0x3a86ff, [ITEM.HOMING]: 0x9b5de5 };
+export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]: 0x2a9d8f, [ITEM.BOUNCE]: 0x3a86ff, [ITEM.HOMING]: 0x9b5de5, [ITEM.GOLD]: 0xffc300 };
 
 /**
  * 背中の旗（見た目だけ）: 細い棒と、はためく布。犬の後ろ（-z）の上に立てる。color: 布の色
@@ -46,6 +46,54 @@ function waveFlag(flag, t, k) {
   pos.needsUpdate = true;
   cloth.userData.dot ||= cloth.children[0];
   cloth.userData.dot.position.z = Math.sin(0.2 * 14 - t * 9) * 0.05 * k * (0.2 / 0.46) + 0.003;
+}
+
+/** 金の王冠（1 位の犬の頭の上） */
+function makeCrown() {
+  const g = new THREE.Group();
+  const goldM = new THREE.MeshStandardMaterial({ color: 0xffc300, roughness: 0.25, metalness: 0.85, emissive: 0x664400, emissiveIntensity: 0.4 });
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.12, 20, 1, true), goldM);
+  band.material.side = THREE.DoubleSide;
+  g.add(band);
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * Math.PI * 2;
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.14, 6), goldM);
+    spike.position.set(Math.cos(a) * 0.2, 0.12, Math.sin(a) * 0.2);
+    const gem = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), new THREE.MeshStandardMaterial({ color: k % 2 ? 0xe63946 : 0x3a86ff, roughness: 0.1 }));
+    gem.position.set(Math.cos(a) * 0.215, 0, Math.sin(a) * 0.215);
+    g.add(spike, gem);
+  }
+  return g;
+}
+
+/** 吹き出し「ワン！」の絵（使い回す） */
+let _barkTex = null;
+function barkTexture() {
+  if (_barkTex) return _barkTex;
+  const cv = document.createElement('canvas');
+  cv.width = 256;
+  cv.height = 128;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#ffffff';
+  x.strokeStyle = '#2b2d42';
+  x.lineWidth = 8;
+  x.beginPath();
+  x.roundRect(10, 10, 236, 88, 40);
+  x.moveTo(110, 96);
+  x.lineTo(128, 122);
+  x.lineTo(146, 96);
+  x.fill();
+  x.stroke();
+  x.fillStyle = '#ffffff';
+  x.fillRect(112, 88, 32, 10);
+  x.fillStyle = '#2b2d42';
+  x.font = "60px 'Yusei Magic', 'Kiwi Maru', sans-serif";
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.fillText('ワン！', 128, 56);
+  _barkTex = new THREE.CanvasTexture(cv);
+  _barkTex.colorSpace = THREE.SRGBColorSpace;
+  return _barkTex;
 }
 
 /** 爆弾の見た目（半径 0.2 の黒い玉・導火線・火花）。spark は点滅させる */
@@ -413,6 +461,26 @@ export class GomuWorld {
     } else if (b.k === 'rock') {
       o = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5, 0), mat);
       o.scale.set(w, h * 1.1, d);
+    } else if (b.k === 'tramp') {
+      // トランポリン: 黒い枠・青い布・脚
+      o = new THREE.Group();
+      const R = Math.min(w, d) / 2;
+      const frame = new THREE.Mesh(new THREE.TorusGeometry(R - 0.08, 0.08, 8, 32), toon(0x222831, { roughness: 0.5, metalness: 0.4 }));
+      frame.rotation.x = Math.PI / 2;
+      frame.position.y = h / 2 - 0.06;
+      const pad = new THREE.Mesh(new THREE.CircleGeometry(R - 0.14, 32), toon(b.c, { roughness: 0.6 }));
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.y = h / 2 - 0.04;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(R * 0.35, R * 0.45, 32), toon(0xffd166));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = h / 2 - 0.035;
+      o.add(frame, pad, ring);
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, h, 6), toon(0x222831, { roughness: 0.5, metalness: 0.4 }));
+        leg.position.set(Math.cos(a) * (R - 0.1), 0, Math.sin(a) * (R - 0.1));
+        o.add(leg);
+      }
     } else if (b.k === 'hill') {
       // 高台の段（草のかたまり。ふちを少し丸く）
       o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, Math.min(0.18, h * 0.3)), mat);
@@ -726,10 +794,22 @@ export class GomuWorld {
       body.add(dog.group, gun);
       const flag = flags[i] != null ? makeFlag(flags[i]) : null;
       if (flag) body.add(flag);
-      root.add(body, ring, blob, gum, star);
+      // 1 位の王冠・リベンジの印（自分を倒した相手）・遠吠えの吹き出し
+      const crown = makeCrown();
+      crown.position.y = PLAYER.HEIGHT + 0.22;
+      crown.visible = false;
+      const mark = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.34, 4), new THREE.MeshBasicMaterial({ color: 0xff3b30 }));
+      mark.rotation.x = Math.PI; // 下向き
+      mark.position.y = PLAYER.HEIGHT + 0.85;
+      mark.visible = false;
+      const bubble = new THREE.Sprite(new THREE.SpriteMaterial({ map: barkTexture(), transparent: true, depthWrite: false }));
+      bubble.scale.set(1.1, 0.55, 1);
+      bubble.position.set(0, PLAYER.HEIGHT + 0.6, 0);
+      bubble.visible = false;
+      root.add(body, ring, blob, gum, star, crown, mark, bubble);
       if (this.dynShadow) body.traverse((o) => o.isMesh && (o.castShadow = true));
       this.scene.add(root);
-      return { kind, root, body, dog, gun, ring, blob, gum, star, flag, t: i };
+      return { kind, root, body, dog, gun, ring, blob, gum, star, flag, crown, mark, bubble, barkT: 0, t: i };
     });
   }
 
@@ -739,6 +819,113 @@ export class GomuWorld {
     if (!d) return;
     d.ring.material.color.setHex(hex);
     d.flag?.userData.cloth.material.color.setHex(hex);
+  }
+
+  /** いま 1 位の犬に王冠（-1 ならだれにも） */
+  setCrown(leader) {
+    this.dogs.forEach((d, i) => (d.crown.visible = i === leader));
+  }
+
+  /** リベンジの印（自分を倒した相手。-1 なら出さない） */
+  setMark(i) {
+    this.dogs.forEach((d, k) => (d.mark.visible = k === i));
+  }
+
+  /** 犬 i が遠吠え（吹き出し「ワン！」） */
+  bark(i) {
+    const d = this.dogs[i];
+    if (d) d.barkT = 1.6;
+  }
+
+  /** 空からの補給箱（なければ null）。落ちている間はパラシュート。遠くから見える光の柱 */
+  updateDrop(dp, dt) {
+    if (!this._drop) {
+      const g = new THREE.Group();
+      const crate = new THREE.Mesh(new RoundedBoxGeometry(1, 1, 1, 2, 0.06), kindMat('wood', 0xc49a6c, 1, 1));
+      crate.position.y = 0.5;
+      const bandM = toon(0x2f80ed, { roughness: 0.5 });
+      crate.add(new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.14, 1.02), bandM));
+      const gold = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.05, 8, 20), toon(0xffc300, { roughness: 0.3, metalness: 0.7 }));
+      gold.position.set(0, 0, 0.52);
+      crate.add(gold);
+      const chute = new THREE.Group();
+      for (let k = 0; k < 8; k++) {
+        const seg = new THREE.Mesh(new THREE.SphereGeometry(2.2, 6, 6, (k / 8) * Math.PI * 2, Math.PI / 4, 0, Math.PI / 2), toon(k % 2 ? 0xffffff : 0xe63946, { side: THREE.DoubleSide, roughness: 0.9 }));
+        chute.add(seg);
+      }
+      chute.position.y = 4.2;
+      chute.scale.y = 0.6;
+      const strings = new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints([-1, 1].flatMap((sx) => [-1, 1].flatMap((sz) => [new THREE.Vector3(sx * 0.45, 1, sz * 0.45), new THREE.Vector3(sx * 1.6, 4.2, sz * 1.6)]))),
+        new THREE.LineBasicMaterial({ color: 0x444444 }),
+      );
+      chute.userData.strings = strings;
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 60, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+      beam.position.y = 30;
+      g.add(crate, chute, strings);
+      this.scene.add(g, beam);
+      crate.castShadow = true;
+      this._drop = { g, chute, strings, beam, t: 0 };
+    }
+    const D = this._drop;
+    D.g.visible = D.beam.visible = !!dp;
+    if (!dp) return;
+    D.t += dt;
+    D.g.position.set(dp.x, dp.y, dp.z);
+    D.g.rotation.z = dp.y > 0.2 ? Math.sin(D.t * 1.3) * 0.08 : 0; // ゆらゆら
+    D.chute.visible = D.strings.visible = dp.y > 0.2;
+    D.beam.position.set(dp.x, 30, dp.z);
+    D.beam.material.opacity = 0.16 + Math.sin(D.t * 4) * 0.06;
+  }
+
+  /** 突風: 風に流される葉っぱ（カメラのまわり）。wind = { x, z, t }（t が 0 なら止む） */
+  setWind(wind, dt) {
+    const on = !!wind && wind.t > 0;
+    if (!this._leaves) {
+      const N = 140;
+      const pos = new Float32Array(N * 3);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      // 葉っぱの形の小さな絵（丸い点。四角く見えないように）
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 32;
+      const cx = cv.getContext('2d');
+      cx.fillStyle = '#ffffff';
+      cx.beginPath();
+      cx.ellipse(16, 16, 13, 7, 0.6, 0, Math.PI * 2);
+      cx.fill();
+      const tex = new THREE.CanvasTexture(cv);
+      const pts = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x7cb342, size: 0.09, map: tex, transparent: true, alphaTest: 0.4, depthWrite: false }));
+      pts.frustumCulled = false;
+      this.scene.add(pts);
+      this._leaves = { pts, N, init: false };
+    }
+    const L = this._leaves;
+    L.pts.visible = on;
+    if (!on) {
+      L.init = false;
+      return;
+    }
+    const c = this.camera.position;
+    const pos = L.pts.geometry.attributes.position;
+    const R = 14;
+    for (let i = 0; i < L.N; i++) {
+      let x = pos.getX(i);
+      let y = pos.getY(i);
+      let z = pos.getZ(i);
+      if (!L.init || Math.abs(x - c.x) > R || Math.abs(z - c.z) > R) {
+        // カメラのまわりの風上から出てくる
+        x = c.x + (Math.random() - 0.5) * 2 * R;
+        z = c.z + (Math.random() - 0.5) * 2 * R;
+        y = 0.3 + Math.random() * 4;
+      }
+      x += wind.x * 1.6 * dt;
+      z += wind.z * 1.6 * dt;
+      y += Math.sin((x + z) * 0.7 + this.t * 4) * 0.4 * dt;
+      pos.setXYZ(i, x, y, z);
+    }
+    L.init = true;
+    pos.needsUpdate = true;
   }
 
   /** views: 番号ごとの { x, y, z, yaw, crouch, moving, dead, inv, stuck, stun, hide } */
@@ -763,6 +950,12 @@ export class GomuWorld {
       d.ring.visible = !v.dead;
       d.blob.visible = !this.dynShadow; // 影が動くときは、丸い影はいらない
       if (d.flag) waveFlag(d.flag, d.t, v.moving ? 1 : 0.4);
+      // 王冠はゆっくり回る。リベンジの印は上下に揺れる。吹き出しは少しの間だけ
+      if (d.crown.visible) d.crown.rotation.y += dt * 1.5;
+      if (d.mark.visible) d.mark.position.y = PLAYER.HEIGHT + 0.85 + Math.sin(d.t * 5) * 0.08;
+      d.barkT = Math.max(0, d.barkT - dt);
+      d.bubble.visible = d.barkT > 0 && !v.dead;
+      if (d.bubble.visible) d.bubble.material.opacity = Math.min(1, d.barkT * 3);
       d.gum.visible = !!v.stuck;
       // 無敵の間は点滅（無敵スターは点滅しないで金色に光る）
       d.star.visible = !!v.star && !v.dead;

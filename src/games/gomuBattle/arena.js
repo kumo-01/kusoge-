@@ -150,19 +150,24 @@ function spread(a) {
     ...(d.z != null ? { z: d.z * SCALE } : {}),
     ...(d.type === 'rug' || d.type === 'water' ? { w: d.w * SCALE, d: d.d * SCALE } : {}),
   }));
+  // トランポリン（真ん中寄りの空いた所に 3 つ）
+  a.tramps = freeSpots(a, 3, { R: 2.2, inner: 0.62 }).map(([x, z]) => ({ x0: x - 1.2, x1: x + 1.2, z0: z - 1.2, z1: z + 1.2, y0: 0, y1: 0.45, c: 0x2f80ed, k: 'tramp' }));
+  a.boxes = [...a.boxes, ...a.tramps];
   // 見た目は元の箱のまま（draw）、当たり判定は形に合わせた箱の組（boxes）
   a.draw = a.boxes;
   a.boxes = a.boxes.flatMap(hitParts);
-  a.heals = treatSpots(a);
+  a.heals = freeSpots(a, 8);
+  // 補給箱が落ちてくる所（おやつ・トランポリンを避けた空いた所）
+  a.drops = freeSpots(a, 10, { R: 1.6, avoid: a.heals });
   return a;
 }
 
 /**
- * 回復のおやつを置く場所（会場ごとに 8 か所。毎回同じ）。家具・押せるものに重ならない地面で、
- * 出発地点・アイテムの箱から 3 以上、おやつどうしはできるだけ離す（いちばん遠い所から順に選ぶ）
+ * 空いた地面の場所を n か所（毎回同じ）。家具・押せるもの・水に重ならない、出発地点・アイテムの箱・avoid から 3 以上離れた所を、
+ * できるだけ離して選ぶ（1 つ目は真ん中にいちばん近い所、そのあとは選んだ所からいちばん遠い所）。
+ * R: 空けておく半径、inner: 会場の真ん中寄りだけ（幅・奥行きのこの割合の中）
  */
-function treatSpots(a, n = 8) {
-  const R = 1.1;
+function freeSpots(a, n, { R = 1.1, inner = 1, avoid = [] } = {}) {
   const blocked = (x, z) =>
     a.boxes.some((b) => b.y0 < 1.6 && x + R > b.x0 && x - R < b.x1 && z + R > b.z0 && z - R < b.z1) ||
     (a.movables || []).some((m) => Math.abs(x - m.x) < m.w / 2 + R + 0.5 && Math.abs(z - m.z) < m.d / 2 + R + 0.5) ||
@@ -171,11 +176,11 @@ function treatSpots(a, n = 8) {
   const cand = [];
   for (let x = -ROOM.W / 2 + 3; x <= ROOM.W / 2 - 3; x += 2) {
     for (let z = -ROOM.D / 2 + 3; z <= ROOM.D / 2 - 3; z += 2) {
-      if (!blocked(x, z) && !near(x, z, a.spawns, 3) && !near(x, z, a.items, 3)) cand.push([x, z]);
+      if (Math.abs(x) > (ROOM.W / 2) * inner || Math.abs(z) > (ROOM.D / 2) * inner) continue;
+      if (!blocked(x, z) && !near(x, z, a.spawns, 3) && !near(x, z, a.items, 3) && !near(x, z, avoid, 3)) cand.push([x, z]);
     }
   }
   const out = [];
-  // 1 つ目は真ん中にいちばん近い所。そのあとは、選んだ所からいちばん遠い所
   let first = cand[0];
   for (const c of cand) if (Math.hypot(c[0], c[1]) < Math.hypot(first[0], first[1])) first = c;
   if (first) out.push(first);

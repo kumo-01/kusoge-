@@ -225,6 +225,12 @@ function perches(arena) {
 function pickGoal(sim, p, b) {
   b.goalT = 5 + Math.random() * 3;
   const arena = sim.arena;
+  // 空からの補給箱が近くに落ちてくるなら、取りに行く
+  const dp = sim.s.drop;
+  if (dp && Math.hypot(dp.x - p.x, dp.z - p.z) < 35 && Math.random() < 0.8) {
+    b.goalT = 12;
+    return { x: dp.x, z: dp.z };
+  }
   // 体力が減っていたら、いちばん近い回復のおやつへ
   if (p.hp < 55 && arena.heals?.length) {
     let best = null;

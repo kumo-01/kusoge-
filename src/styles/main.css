@@ -2803,3 +2803,72 @@ body[data-screen='game'] {
   color: oklch(90% 0.17 95);
   white-space: nowrap;
 }
+/* ラストスパート（残り 30 秒・点が 2 倍）と突風の知らせ（上の真ん中、時間の下） */
+.gm-spurt,
+.gm-wind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 0.85rem;
+  color: var(--paper);
+}
+.gm-spurt[hidden],
+.gm-wind[hidden] {
+  display: none;
+}
+.gm-spurt {
+  background: var(--red);
+  animation: gm-spurt 0.9s ease-in-out infinite alternate;
+}
+@keyframes gm-spurt {
+  to {
+    transform: scale(1.06);
+  }
+}
+.gm-wind {
+  background: oklch(55% 0.1 220 / 0.85);
+}
+.gm-wind-arrow {
+  display: inline-flex;
+  transition: transform 0.2s;
+}
+.gm-wind-arrow svg {
+  stroke: currentColor;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gm-spurt {
+    animation: none;
+  }
+}
+/* タッチ: 遠吠えボタン（爆弾ボタンの上） */
+.gt-bark {
+  right: calc(max(24px, env(safe-area-inset-right)) + 182px);
+  bottom: 96px;
+  width: 50px;
+  height: 50px;
+  font-size: 0.75rem;
+}
+/* ラストスパート・突風の知らせは、時間の下に横並び（上のラウンドの札の幅を変えない） */
+.gm-alerts {
+  position: absolute;
+  top: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+.gomu-hud.is-touch .gm-alerts {
+  top: 96px;
+}
+@media (max-width: 560px) {
+  .gomu-hud .gm-alerts {
+    top: 44px;
+    left: 10px;
+    transform: none;
+  }
+}

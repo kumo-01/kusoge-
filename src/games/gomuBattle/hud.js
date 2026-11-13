@@ -1,7 +1,7 @@
 // 画面の表示（照準・体力・残りの輪ゴム・アイテム・時間・点数・お知らせ）と、タッチ操作（左のスティック・右でなぞって視点・ボタン）
 import { iconSvg, iconText } from '../../core/icons.js';
 import { h } from '../../core/util.js';
-import { ITEM_INFO, GUN, PLAYER, ROUND, WEAPON, WEAPONS, MODE, TEAMS, BOSS } from './constants.js';
+import { ITEM_INFO, GUN, PLAYER, ROUND, WEAPON, WEAPONS, MODE, TEAMS, BOSS, FUN } from './constants.js';
 
 const AMMO_ICON = { [WEAPON.NORMAL]: 'ring', [WEAPON.SNIPER]: 'target', [WEAPON.RIFLE]: 'crosshair' };
 
@@ -39,6 +39,10 @@ export class GomuHud {
     this.dmg = h('div.gm-dmgpop');
     this._hurtEls = [];
     this.hint = h('div.gm-hint');
+    // ラストスパート（残り 30 秒）と突風の知らせ
+    this.spurt = h('div.gm-spurt', { hidden: true }, 'ラストスパート 点が2倍');
+    this.windArrow = h('span.gm-wind-arrow', { html: iconSvg('arrow', 22) });
+    this.wind = h('div.gm-wind', { hidden: true }, this.windArrow, h('span', null, '突風'));
     this.table = h('div.gm-table');
     // ボス戦: 猫の体力のバー
     this.bossFill = h('i');
@@ -56,7 +60,7 @@ export class GomuHud {
     this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.RIFLE, 'crosshair')];
     this.pickInfo = h('p.gm-pick-info');
     this.pick = h('div.gm-pick', { hidden: true }, h('h2', null, '武器をえらぶ'), h('div.gm-pick-row', null, ...this.pickCards), this.pickInfo);
-    this.root.append(this.scope, this.smoke, this.vignette, this.hurtDirs, this.cross, this.dmg, h('div.gm-top', null, this.round, this.timer), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
+    this.root.append(this.scope, this.smoke, this.vignette, this.hurtDirs, this.cross, this.dmg, h('div.gm-top', null, this.round, this.timer), h('div.gm-alerts', null, this.spurt, this.wind), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
     this.touch = touch ? new GomuTouch(this.root) : null;
     this.root.classList.add(`mode-${mode}`);
     this.root.classList.toggle('is-touch', !!touch);
@@ -112,6 +116,12 @@ export class GomuHud {
       this.touch.zoomBtn.classList.toggle('on', !!v.zoom);
     }
     this._set(this.timer, 'timer', v.phase === 'play' ? `${left}` : '');
+    this.spurt.hidden = !(v.phase === 'play' && left <= FUN.SPURT);
+    // 突風: 風が吹いていく向き（自分の向きから見て。上 = 前）
+    const wd = v.wind;
+    const windOn = v.phase === 'play' && wd && wd.t > 0;
+    this.wind.hidden = !windOn;
+    if (windOn) this.windArrow.style.transform = `rotate(${(v.yaw - Math.atan2(wd.x, wd.z)).toFixed(3)}rad)`;
     this.timer.classList.toggle('is-low', v.phase === 'play' && left <= 10);
     // 体力
     const hpN = Math.max(0, Math.min(PLAYER.HP, v.me.hp | 0));
@@ -298,10 +308,12 @@ export class GomuTouch {
     this.run = false; // 走る（押すたびに切り替え。ゲージが空になると止まる）
     this.bomb = false; // 爆弾ボタンを押している間（離すと投げる）
     this.bombBtn = btn('gt-bomb', '爆弾');
+    this.bark = false; // 遠吠え（押した瞬間）
+    this.barkBtn = btn('gt-bark', 'ワン');
     this.crouchBtn = btn('gt-crouch', '伏せ');
     this.zoomBtn = btn('gt-zoom', 'のぞく');
     this.onZoom = null;
-    this.el = h('div.gomu-touch', null, this.look, this.zone, this.fireBtn, this.jumpBtn, this.dashBtn, this.bombBtn, this.crouchBtn, this.zoomBtn);
+    this.el = h('div.gomu-touch', null, this.look, this.zone, this.fireBtn, this.jumpBtn, this.dashBtn, this.bombBtn, this.barkBtn, this.crouchBtn, this.zoomBtn);
     root.append(this.el);
     this._bindStick();
     this._bindLook(this.look);
@@ -310,6 +322,7 @@ export class GomuTouch {
     this._press(this.jumpBtn, () => (this.jump = true));
     this._press(this.dashBtn, () => this.setRun(!this.run));
     this._hold(this.bombBtn, (on) => (this.bomb = on), true);
+    this._press(this.barkBtn, () => (this.bark = true));
     this._press(this.zoomBtn, () => this.onZoom?.());
     this._press(this.crouchBtn, () => {
       this.crouch = !this.crouch;
@@ -440,8 +453,8 @@ export class GomuTouch {
   }
 
   take() {
-    const r = { jump: this.jump, dash: this.dash, item: this.item };
-    this.jump = this.dash = this.item = false;
+    const r = { jump: this.jump, dash: this.dash, item: this.item, bark: this.bark };
+    this.jump = this.dash = this.item = this.bark = false;
     return r;
   }
 

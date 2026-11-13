@@ -72,6 +72,8 @@ export function packState(s) {
     bo: s.boss ? [r2(s.boss.x), r2(s.boss.y), r2(s.boss.z), Math.round(s.boss.yaw * 1000) / 1000, s.boss.hp, s.boss.max, BOSS_ST.indexOf(s.boss.st), r2(s.boss.t), r2(Math.max(s.boss.dizzy, s.boss.stuck))] : null,
     bx: s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0),
     hl: (s.heals || []).reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0),
+    dp: s.drop ? [r2(s.drop.x), r2(s.drop.y), r2(s.drop.z)] : null,
+    wd: s.wind ? [r2(s.wind.x), r2(s.wind.z), r2(s.wind.t)] : null,
     sm: s.smokes.map((x) => [x.id, r2(x.x), r2(x.y), r2(x.z), r2(x.age)]),
     gm: s.gums.map((x) => [x.id, r2(x.x), r2(x.y), r2(x.z)]),
     mv: (s.mov || []).map((b) => [r2((b.x0 + b.x1) / 2), r2((b.z0 + b.z1) / 2)]), // 押せるものの位置
@@ -125,6 +127,8 @@ export function unpackState(o, n) {
     players,
     boxes: num(o.bx) | 0,
     heals: num(o.hl) | 0,
+    drop: Array.isArray(o.dp) ? { x: num(o.dp[0]), y: num(o.dp[1]), z: num(o.dp[2]) } : null,
+    wind: Array.isArray(o.wd) ? { x: num(o.wd[0]), z: num(o.wd[1]), t: num(o.wd[2]) } : { x: 0, z: 0, t: 0 },
     smokes: Array.isArray(o.sm) ? o.sm.filter(Array.isArray).map((x) => ({ id: num(x[0]), x: num(x[1]), y: num(x[2]), z: num(x[3]), age: num(x[4]) })) : [],
     gums: Array.isArray(o.gm) ? o.gm.filter(Array.isArray).map((x) => ({ id: num(x[0]), x: num(x[1]), y: num(x[2]), z: num(x[3]) })) : [],
     mov: Array.isArray(o.mv) ? o.mv.slice(0, 16).map((x) => (Array.isArray(x) ? [num(x[0]), num(x[1])] : [0, 0])) : [],
@@ -134,7 +138,7 @@ export function unpackState(o, n) {
 // ---- 配信のバイト列（毎秒 40 回。JSON の約 1/4 の大きさ） ----
 // 犬 1 匹 18 バイト（位置 1mm・向き・状態・体力・アイテム・点数）。ラウンドごとの点は 10 回に 1 回だけ載せる。
 // 起きたこと（撃った・当たった…）は、数を丸めた JSON を後ろにつける（少ないので）
-const BIN_V = 5;
+const BIN_V = 6;
 /** 位置のバイト列の単位（1 m を 500。i16 で ±65 m まで。会場は ±39 m） */
 const POS = 500;
 const PH = ['intro', 'play', 'end', 'done', 'pick'];
@@ -250,6 +254,17 @@ export function packBin(s, withRs = true, ev = null) {
   }
   w.u16(s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0));
   w.u16((s.heals || []).reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0)); // 回復のおやつ（出ているもの）
+  // 補給箱（なければ 0）と突風
+  w.u8(s.drop ? 1 : 0);
+  if (s.drop) {
+    w.i16(s.drop.x * POS);
+    w.i16(s.drop.z * POS);
+    w.u16(s.drop.y * 100);
+  }
+  const wd = s.wind || { x: 0, z: 0, t: 0 };
+  w.i8(wd.x * 10);
+  w.i8(wd.z * 10);
+  w.u8(Math.ceil(wd.t * 10));
   const mov = s.mov || [];
   w.u8(mov.length);
   for (const b of mov) {
@@ -330,6 +345,8 @@ export function unpackBin(u8, n, prevRs = null) {
     }
     const boxes = r.u16();
     const heals = r.u16();
+    const drop = r.u8() ? { x: r.i16() / POS, z: r.i16() / POS, y: r.u16() / 100 } : null;
+    const wind = { x: r.i8() / 10, z: r.i8() / 10, t: r.u8() / 10 };
     const mov = Array.from({ length: Math.min(r.u8(), 16) }, () => [r.i16() / POS, r.i16() / POS]);
     const smokes = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / POS, y: r.i16() / POS, z: r.i16() / POS, age: r.u8() / 20 }));
     const gums = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / POS, y: r.i16() / POS, z: r.i16() / POS }));
@@ -353,7 +370,7 @@ export function unpackBin(u8, n, prevRs = null) {
       ev = JSON.parse(dec8.decode(r.u.subarray(r.n, r.n + len)));
       if (!Array.isArray(ev)) ev = [];
     }
-    return { st: { round, phase, t, players, boxes, heals, smokes, gums, mov, boss, bossWon }, ev };
+    return { st: { round, phase, t, players, boxes, heals, drop, wind, smokes, gums, mov, boss, bossWon }, ev };
   } catch {
     return null;
   }

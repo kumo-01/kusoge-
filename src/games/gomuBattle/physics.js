@@ -1,7 +1,7 @@
 // 犬の動き（歩く・ジャンプ・ダッシュ・伏せ）と、輪ゴムの飛び方。
 // 自分の犬は自分の端末で、CPU の犬はホストが、同じ stepMove で動かす。輪ゴムはホストが正本（ゲストは見た目だけ同じ計算）
 
-import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL, THICK_MUL, HEADSHOT } from './constants.js';
+import { PLAYER, GUN, ITEMS, ITEM, WEAPON, WEAPONS, BOSS, HAIRBALL, THICK_MUL, HEADSHOT, FUN } from './constants.js';
 import { ROOM, overlapXZ, segmentHit } from './arena.js';
 
 /** 動く体（犬）の初期値 */
@@ -44,6 +44,23 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
   }
   const wx = sy * fz - cy * fx;
   const wz = cy * fz + sy * fx;
+  // スライディング: 走っている間に伏せを押した瞬間、低い姿勢のまま前へ滑りこむ（ゲージを使う）
+  m.slideCd = Math.max(0, (m.slideCd || 0) - dt);
+  const crouchEdge = !!inp.crouch && !m.crouchIn;
+  m.crouchIn = !!inp.crouch;
+  if (crouchEdge && m.sprint && m.ground && m.slideCd <= 0 && m.stam >= FUN.SLIDE_STAM) {
+    const vl = Math.hypot(m.vx, m.vz) || 1;
+    m.slideX = m.vx / vl;
+    m.slideZ = m.vz / vl;
+    m.slideT = FUN.SLIDE_TIME;
+    m.slideCd = FUN.SLIDE_CD;
+    m.stam -= FUN.SLIDE_STAM;
+    res.slid = true;
+  }
+  if (m.slideT > 0) {
+    m.slideT = Math.max(0, m.slideT - dt);
+    m.crouch = true;
+  }
   // 走る（ゲージ式）: 押している間、動いていてゲージがあれば速く走る。空になったら STAMINA_MIN までたまるまで走れない
   const wasSprint = m.sprint;
   m.sprint = !!inp.dash && Math.hypot(wx, wz) > 0.1 && !m.crouch && slow > 0.5 && m.stam > 0 && (wasSprint || m.stam >= PLAYER.STAMINA_MIN);
@@ -60,8 +77,15 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
   const tz = wz * sp;
   const acc = (m.ground ? PLAYER.ACCEL : PLAYER.AIR_ACCEL) * dt;
   const ease = (v, t) => (Math.abs(t - v) <= acc ? t : v + Math.sign(t - v) * acc);
-  m.vx = ease(m.vx, tx);
-  m.vz = ease(m.vz, tz);
+  if (m.slideT > 0) {
+    // 滑っている間は、向きはそのまま、だんだん遅く
+    const ss = FUN.SLIDE_SPEED * (0.45 + (0.55 * m.slideT) / FUN.SLIDE_TIME) * slow;
+    m.vx = m.slideX * ss;
+    m.vz = m.slideZ * ss;
+  } else {
+    m.vx = ease(m.vx, tx);
+    m.vz = ease(m.vz, tz);
+  }
   if (inp.jump && m.ground && slow > 0) {
     m.vy = PLAYER.JUMP;
     m.ground = false;
@@ -126,11 +150,23 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
   if (m.vy <= 0) {
     // 下: 床か、箱の上に着く
     let floor = 0;
-    for (const b of arena.boxes) if (overlapXZ(b, m.x, m.z, r) && b.y1 <= m.y + 1e-3 && b.y1 > floor) floor = b.y1;
+    let floorBox = null;
+    for (const b of arena.boxes) {
+      if (overlapXZ(b, m.x, m.z, r) && b.y1 <= m.y + 1e-3 && b.y1 > floor) {
+        floor = b.y1;
+        floorBox = b;
+      }
+    }
     if (ny <= floor) {
       m.y = floor;
       m.vy = 0;
       m.ground = true;
+      // トランポリン: 乗ったら大きく跳ねる（真ん中あたりに乗ったとき）
+      if (floorBox?.k === 'tramp' && overlapXZ(floorBox, m.x, m.z, -0.3)) {
+        m.vy = FUN.TRAMP_V;
+        m.ground = false;
+        res.bounced = true;
+      }
     } else {
       m.y = ny;
       m.ground = false;
@@ -236,6 +272,7 @@ export function bandSpec(kind, weapon = WEAPON.NORMAL) {
   const base = { speed: W.speed, r: W.r, mul: 1, bounce: bomb ? 0 : GUN.BOUNCES, life: W.life, g: W.gravity, w };
   if (kind === ITEM.THICK) return { ...base, speed: w === WEAPON.NORMAL ? ITEMS.THICK_SPEED : W.speed * (bomb ? 1 : 0.8), r: bomb ? W.r * 1.3 : ITEMS.THICK_RADIUS, mul: THICK_MUL };
   if (kind === ITEM.BOUNCE) return { ...base, bounce: ITEMS.BOUNCES, life: Math.max(W.life, ITEMS.BOUNCE_LIFE) };
+  if (kind === ITEM.GOLD) return { ...base, mul: FUN.GOLD_MUL, r: W.r * 1.3 }; // 金の輪ゴム: ダメージ 2 倍
   return base;
 }
 
@@ -272,8 +309,13 @@ const hitOut = { t: 1, nx: 0, ny: 0, nz: 0 };
  * target(b): 追いかけゴムが追う相手 { x, y, z } を返す（なければ null）
  * 戻り値: 'end'（止まった）/ null
  */
-export function stepBand(b, dt, arena, target = null) {
+export function stepBand(b, dt, arena, target = null, wind = null) {
   b.age += dt;
+  // 突風: 横に流される
+  if (wind && (wind.x || wind.z)) {
+    b.vx += wind.x * dt;
+    b.vz += wind.z * dt;
+  }
   if (b.age >= b.life) return 'end';
   if (b.kind === ITEM.HOMING && target) {
     const t = target(b);

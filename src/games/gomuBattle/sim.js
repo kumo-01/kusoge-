@@ -2,7 +2,7 @@
 // 人の犬の位置は、その人の端末が計算して送ってくる（setPilot）。CPU の犬はここで動かす。
 // 起きたこと（撃った・当たった・倒れた・拾った…）は events に積み、ゲストへ配る。
 
-import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, TREAT, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL } from './constants.js';
+import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, TREAT, FUN, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL } from './constants.js';
 import { ARENAS, segmentHit, ROOM } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage, hitDamage, isHead } from './physics.js';
 import { botThink } from './bot.js';
@@ -115,6 +115,11 @@ export class GomuSim {
     s.smokes = [];
     s.boxes = this.arena.items.map(() => 0);
     s.heals = (this.arena.heals || []).map(() => 0); // 回復のおやつ（0 = 出ている。正 = また出るまでの秒）
+    s.drop = null; // 空からの補給箱 { x, y, z }（落ちている間は y が高い）
+    s.nextDrop = FUN.DROP_FIRST;
+    s.wind = { x: 0, z: 0, t: 0 }; // 突風（t: 残りの秒）
+    s.nextWind = FUN.WIND_FIRST;
+    s.spurt = false; // ラストスパートに入ったか
     s.mov = (this.arena.movables || []).map(movableBox); // 押せるものはラウンドの始めの場所へ
     this.events.push({ t: 'round', r });
     // 出発地点はばらばらに
@@ -130,7 +135,7 @@ export class GomuSim {
         p.weapon = r < 0.55 ? WEAPON.NORMAL : r < 0.85 ? WEAPON.SNIPER : WEAPON.RIFLE;
       }
       p.picked = p.bot || !this.usePick;
-      Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, star: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bombs: BOMB_COUNT, bombCd: 0, stam: PLAYER.STAMINA, sprint: false, bot2: null });
+      Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, star: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bombs: BOMB_COUNT, bombCd: 0, stam: PLAYER.STAMINA, sprint: false, streak: 0, nemesis: -1, barkCd: 0, bot2: null });
       this._place(p, this.arena.spawns[spots[k % spots.length]]);
     });
     s.boss = this.mode === MODE.BOSS ? this._newBoss(r) : null;
@@ -216,10 +221,11 @@ export class GomuSim {
     if (s.boss) this._stepBoss(dt);
     this._stepBands(dt);
     this._stepItems(dt);
+    this._stepFun(dt);
   }
 
   _stepPlayer(p, dt) {
-    for (const f of ['inv', 'star', 'stun', 'stuck', 'shake', 'noAmmo', 'fireCd', 'bombCd']) p[f] = Math.max(0, (p[f] || 0) - dt);
+    for (const f of ['inv', 'star', 'stun', 'stuck', 'shake', 'noAmmo', 'fireCd', 'bombCd', 'barkCd']) p[f] = Math.max(0, (p[f] || 0) - dt);
     if (p.dead > 0) {
       p.dead = Math.max(0, p.dead - dt);
       if (p.dead === 0) this._respawn(p);
@@ -409,7 +415,7 @@ export class GomuSim {
       const ax = b.x;
       const ay = b.y;
       const az = b.z;
-      const res = stepBand(b, dt, arena, tgt);
+      const res = stepBand(b, dt, arena, tgt, s.wind);
       // 当たり（撃った本人には当たらない。撃った人の端末で決める輪ゴムは、ここでは当てない）
       let hit = null;
       let ht = 2;
@@ -528,17 +534,97 @@ export class GomuSim {
       q.item = 0;
       q.sp = 0;
       q.spN = 0;
+      q.streak = 0; // 連続撃破はここで終わり
+      this.events.push({ t: 'kill', v: q.i, by: b.o });
       if (by) {
         by.kills++;
         this._addScore(by, SCORE.KILL);
+        // 連続撃破
+        by.streak = (by.streak || 0) + 1;
+        const bonus = FUN.STREAK_BONUS[by.streak];
+        if (bonus) {
+          this._addScore(by, bonus);
+          this.events.push({ t: 'streak', i: by.i, n: by.streak, b: bonus });
+        }
+        // リベンジ（自分を倒した相手を倒し返した）
+        if (by.nemesis === q.i) {
+          this._addScore(by, FUN.REVENGE_BONUS);
+          by.nemesis = -1;
+          this.events.push({ t: 'revenge', i: by.i, v: q.i, b: FUN.REVENGE_BONUS });
+        }
+        q.nemesis = by.i;
+        // CPU はうれしいと吠える
+        if (by.bot && nextRandom(this.s) < 0.5) this.bark(by.i);
       }
-      this.events.push({ t: 'kill', v: q.i, by: b.o });
     }
   }
 
   _addScore(p, n) {
+    // ラストスパート（残り 30 秒）は 2 倍
+    const s = this.s;
+    if (s.phase === 'play' && s.t >= ROUND.TIME - FUN.SPURT) n *= 2;
     p.score += n;
-    p.rs[this.s.round] += n;
+    p.rs[s.round] += n;
+  }
+
+  /** お楽しみの仕組み: ラストスパートの合図・補給箱・突風 */
+  _stepFun(dt) {
+    const s = this.s;
+    if (s.phase !== 'play') return;
+    if (!s.spurt && s.t >= ROUND.TIME - FUN.SPURT) {
+      s.spurt = true;
+      this.events.push({ t: 'spurt' });
+    }
+    // 補給箱: 決まった時間に空から落ちてきて、着いたら一番に触った犬が取る（金の輪ゴム）
+    if (!s.drop && s.t >= s.nextDrop) {
+      const spots = this.arena.drops || this.arena.heals || [[0, 0]];
+      const [x, z] = spots[Math.floor(nextRandom(s) * spots.length)];
+      s.drop = { x, z, y: FUN.DROP_HEIGHT };
+      s.nextDrop = Infinity;
+      this.events.push({ t: 'drop', x, z });
+    }
+    const dp = s.drop;
+    if (dp) {
+      dp.y = Math.max(0, dp.y - FUN.DROP_FALL * dt);
+      if (dp.y < 1.4) {
+        for (const p of s.players) {
+          if (p.dead > 0 || Math.hypot(p.x - dp.x, p.z - dp.z) > FUN.DROP_RADIUS || Math.abs(p.y - dp.y) > 1.6) continue;
+          p.sp = ITEM.GOLD;
+          p.spN = FUN.GOLD_SHOTS;
+          this.events.push({ t: 'sp', i: p.i, k: ITEM.GOLD, n: p.spN });
+          this.events.push({ t: 'dropget', i: p.i });
+          s.drop = null;
+          s.nextDrop = s.t + FUN.DROP_EVERY;
+          break;
+        }
+      }
+    }
+    // 突風
+    const w = s.wind;
+    if (w.t > 0) {
+      w.t = Math.max(0, w.t - dt);
+      if (w.t === 0) {
+        w.x = w.z = 0;
+        this.events.push({ t: 'windEnd' });
+      }
+    } else if (s.t >= s.nextWind) {
+      const a = nextRandom(s) * Math.PI * 2;
+      w.x = Math.sin(a) * FUN.WIND_ACC;
+      w.z = Math.cos(a) * FUN.WIND_ACC;
+      w.t = FUN.WIND_TIME;
+      const [lo, hi] = FUN.WIND_EVERY;
+      s.nextWind = s.t + FUN.WIND_TIME + lo + nextRandom(s) * (hi - lo);
+      this.events.push({ t: 'wind', x: w.x, z: w.z });
+    }
+  }
+
+  /** 遠吠え（「ワン！」）。BARK_CD 秒に 1 回 */
+  bark(i) {
+    const p = this.s.players[i];
+    if (!p || p.dead > 0 || p.barkCd > 0 || !['play', 'intro', 'pick', 'end'].includes(this.s.phase)) return false;
+    p.barkCd = FUN.BARK_CD;
+    this.events.push({ t: 'bark', i });
+    return true;
   }
 
   _stepItems(dt) {

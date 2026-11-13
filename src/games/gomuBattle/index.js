@@ -12,7 +12,7 @@ import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, mova
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
-import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT, TREAT } from './constants.js';
+import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT, TREAT, FUN } from './constants.js';
 import { canSee } from './arena.js';
 
 const SLOT_CSS = ['#ff4d5e', '#3d8bff', '#ff5fb0', '#22b573'];
@@ -195,6 +195,7 @@ class GomuGame {
     this.buffer = [];
     this._starT = [];
     this._bombLocal = BOMB_COUNT; // ゲスト: 自分の残りの爆弾（投げた瞬間に減らす。ホストの数とずれたら合わせる）
+    this._nemesis = -1; // 自分を倒した相手（リベンジの印。ラウンドごとにやり直し）
     this._bombAim = false;
     this.mov = (this.arena.movables || []).map(movableBox);
     this._gcw = null;
@@ -226,7 +227,7 @@ class GomuGame {
     if (!this.isHost && !this.last) return; // 最初の要約が届くまで待つ
     const i = this.ctx.input;
     const t = this.hud.touch;
-    const tk = t ? t.take() : { jump: false, dash: false, item: false };
+    const tk = t ? t.take() : { jump: false, dash: false, item: false, bark: false };
     const rec = this._myRec();
     const phase = this.phase;
     const dead = !!rec && rec.dead > 0;
@@ -277,6 +278,10 @@ class GomuGame {
     this.prevPos = { x: p.x, y: p.y, z: p.z, crouch: p.crouch };
     const mv = stepMove(p, act ? { fx, fz, jump, dash, crouch } : { crouch: false }, dt, this.cw, slow);
     if (mv.dashed) this.ctx.sound.play('boost');
+    if (mv.slid) this.ctx.sound.play('slip'); // スライディング
+    if (mv.bounced) this.ctx.sound.play('pad'); // トランポリン
+    // 遠吠え（V。タッチは「ワン」ボタン）
+    if (i.consume('KeyV') || tk.bark) this._bark();
     if (t?.run && p.stam <= 0) t.setRun(false); // ゲージが空になったら走るのをやめる
     // 爆弾: G（タッチは爆弾ボタン）を押している間は飛ぶ道を見せ、離したら投げる
     p.bombCd = Math.max(0, (p.bombCd || 0) - dt);
@@ -364,6 +369,17 @@ class GomuGame {
     });
   }
 
+  /** いまの突風（ホストは計算、ゲストは配信） */
+  _windNow() {
+    return this.isHost ? this.sim.s.wind : this.last?.wind;
+  }
+
+  /** 遠吠え（「ワン！」） */
+  _bark() {
+    if (this.isHost) this.sim.bark(this.me);
+    else this.ctx.sendGameMessage({ t: 'k' });
+  }
+
   /** 自分の残りの爆弾（ホストは計算の数。ゲストは投げた瞬間に減らした数と、ホストの数の少ない方） */
   _bombsLeft(rec) {
     const host = rec?.bombs ?? BOMB_COUNT;
@@ -432,7 +448,7 @@ class GomuGame {
       const ax = b.x;
       const ay = b.y;
       const az = b.z;
-      const res = stepBand(b, dt, this.cw, target);
+      const res = stepBand(b, dt, this.cw, target, this.last?.wind);
       if (b.o === this.me && b.w !== WEAPON.BOMB && views && this._localHit(b, ax, ay, az, views)) {
         this.bands.splice(n, 1);
         continue;
@@ -535,7 +551,10 @@ class GomuGame {
             this.hud.hitMarker(true);
             this.ctx.sound.play('bark');
           }
-          if (e.v === this.me) this.ctx.sound.play('lose');
+          if (e.v === this.me) {
+            this.ctx.sound.play('lose');
+            if (e.by >= 0) this._nemesis = e.by; // リベンジの相手（印を出す）
+          }
           break;
         case 'block':
           if (e.by === this.me) this.ctx.sound.play('bump');
@@ -606,6 +625,43 @@ class GomuGame {
             this.ctx.sound.play('pickup');
           }
           this.world?.bossFlash();
+          break;
+        case 'spurt':
+          this.ctx.sound.play('finalLap');
+          this.hud.pushFeed('⏱️ ラストスパート！ここから点が2倍', 'mine');
+          break;
+        case 'streak':
+          this.hud.pushFeed(`🔥 ${name(e.i)} が${e.n}連続で倒した！ +${e.b}`, e.i === this.me ? 'mine' : '');
+          if (e.i === this.me) this.ctx.sound.play('chance');
+          break;
+        case 'revenge':
+          this.hud.pushFeed(`👊 ${name(e.i)} が ${name(e.v)} にリベンジ！ +${e.b}`, e.i === this.me ? 'mine' : e.v === this.me ? 'bad' : '');
+          if (e.i === this.me) {
+            this._nemesis = -1;
+            this.ctx.sound.play('perfect');
+          }
+          break;
+        case 'drop':
+          this.hud.pushFeed('🪂 空から補給箱が落ちてくる！（光の柱の下）', 'mine');
+          this.ctx.sound.play('itemReady');
+          break;
+        case 'dropget':
+          this.hud.pushFeed(`🪂 ${name(e.i)} が補給箱を取った！金の輪ゴム ×${FUN.GOLD_SHOTS}`, e.i === this.me ? 'mine' : '');
+          if (e.i === this.me) this.ctx.sound.play('chance');
+          break;
+        case 'wind':
+          this.hud.pushFeed('🌬️ 突風！輪ゴムと爆弾が流される', 'bad');
+          this.ctx.sound.play('slip');
+          break;
+        case 'windEnd':
+          this.hud.pushFeed('🌬️ 風がやんだ');
+          break;
+        case 'bark':
+          this.world?.bark(e.i);
+          {
+            const q = (this.isHost ? this.sim.s.players : this.last?.players)?.[e.i];
+            if (e.i === this.me || (q && Math.hypot(q.x - this.pilot.x, q.z - this.pilot.z) < 30)) this.ctx.sound.play('bark');
+          }
           break;
         case 'boom': {
           // 爆弾の爆発: 光と音。近ければ画面がゆれる
@@ -687,7 +743,7 @@ class GomuGame {
     const b = { id: e.id, o: e.o, kind: e.k, w: spec.w, g: spec.g, x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, r: spec.r, bounce: spec.bounce, life: spec.life, age: 0 };
     // ホストで撃たれてから届くまでの時間（片道）だけ先へ進めて出す（相手の輪ゴムが遅れて見えないように）
     const ahead = Math.min(0.25, this._oneWay());
-    for (let t = 0; t < ahead - 1e-6 && !(stepBand(b, Math.min(1 / 60, ahead - t), this.cw) === 'end'); t += 1 / 60);
+    for (let t = 0; t < ahead - 1e-6 && !(stepBand(b, Math.min(1 / 60, ahead - t), this.cw, null, this.last?.wind) === 'end'); t += 1 / 60);
     this.bands.push(b);
     if (this._near(e)) this.ctx.sound.play('throw');
   }
@@ -713,6 +769,7 @@ class GomuGame {
     else if (d.t === 'u') this.sim.useItem(msg.player, d.o, d.d);
     else if (d.t === 'w') this.sim.pickWeapon(msg.player, d.w | 0);
     else if (d.t === 'g') this.sim.throwBomb(msg.player, d.o, d.d, d.c | 0); // 爆弾
+    else if (d.t === 'k') this.sim.bark(msg.player); // 遠吠え
     this._hostEvents(this.sim.drainEvents());
   }
 
@@ -869,7 +926,7 @@ class GomuGame {
     pts.length = 0;
     pts.push([b.x, b.y, b.z]);
     for (let k = 0; k < 63; k++) {
-      const res = stepBand(b, 1 / 30, this.cw);
+      const res = stepBand(b, 1 / 30, this.cw, null, this._windNow()); // 突風のときは流される道を見せる
       pts.push([b.x, b.y, b.z]);
       if (res === 'end') break;
     }
@@ -965,6 +1022,21 @@ class GomuGame {
       w.updateBands(bands, dt);
       const boxes = this.isHost ? this.sim.s.boxes.map((x) => x <= 0) : this.arena.items.map((_, k) => !!((this.last?.boxes ?? 0) & (1 << k)));
       w.updateItemBoxes(boxes, dt);
+      // 補給箱・突風の葉っぱ・1 位の王冠・リベンジの印
+      w.updateDrop(this.isHost ? this.sim.s.drop : this.last?.drop, dt);
+      w.setWind(this._windNow(), dt);
+      let lead = -1;
+      let best = 0;
+      let tie = false;
+      views.forEach((q, i) => {
+        if (q.score > best) {
+          best = q.score;
+          lead = i;
+          tie = false;
+        } else if (q.score === best && best > 0) tie = true;
+      });
+      w.setCrown(tie ? -1 : lead);
+      w.setMark(this._nemesis ?? -1);
       const treats = this.isHost ? (this.sim.s.heals || []).map((x) => x <= 0) : (this.arena.heals || []).map((_, k) => !!((this.last?.heals ?? 0) & (1 << k)));
       w.updateTreats(treats, dt);
       w.updateMovables(this.movList);
@@ -1022,6 +1094,8 @@ class GomuGame {
       meIndex: this.me,
       players,
       inSmoke: w ? w.inSmoke(cx, cy + this._eye, cz) : false,
+      wind: this._windNow(),
+      yaw: this.pilot.yaw,
       me: { hp: rec.hp, dead: rec.dead, item: rec.item, ammo: p.ammo, maxAmmo: WEAPONS[p.weapon].ammo, reloadT: WEAPONS[p.weapon].reload, weapon: p.weapon, reload: p.reload, bombs: this._bombsLeft(rec), bombAim: this._bombAim, stam: p.stam ?? PLAYER.STAMINA, sprint: !!p.sprint, sp: p.sp && p.spN > 0 ? p.sp : 0, spN: p.spN, shake: rec.shake, noAmmo: rec.noAmmo, stuck: rec.stuck, inv: rec.inv, star: rec.inv > 0 ? this._starT[this.me] || 0 : 0 },
     });
     // 3・2・1 の音

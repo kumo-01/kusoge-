@@ -788,3 +788,109 @@ test('回復のおやつ: 会場に落ちていて、体力が減った犬が拾
   const d = unpackBin(packBin(sim.s), 2);
   assert.equal(d.st.heals & 1, 1, '配信に載る');
 });
+
+test('お楽しみ: ラストスパート（残り 30 秒は点が 2 倍）・連続撃破・リベンジ', async () => {
+  const { FUN } = await import('../src/games/gomuBattle/constants.js');
+  const sim = new GomuSim({ humans: 2, bots: 2, seed: 5 });
+  run(sim, ROUND.INTRO + 0.1);
+  const [a, b, c, d] = sim.s.players;
+  for (const p of [c, d]) p.bot = false;
+  sim.drainEvents();
+  const kill = (by, v) => sim._hit(v, { o: by.i, dmg: 999, vx: 1, vz: 0 });
+  // 連続撃破: 3 匹目で +2
+  kill(a, b);
+  b.dead = 0; b.hp = PLAYER.HP; b.inv = 0;
+  kill(a, c);
+  const s2 = a.score;
+  kill(a, d);
+  const ev = sim.drainEvents();
+  assert.ok(ev.some((e) => e.t === 'streak' && e.i === 0 && e.n === 3));
+  assert.ok(a.score - s2 >= SCORE.KILL + FUN.STREAK_BONUS[3]);
+  // リベンジ: b を倒したのは a。b が a を倒すと +3
+  assert.equal(b.nemesis, 0);
+  const sb = b.score;
+  kill(b, a);
+  assert.ok(sim.drainEvents().some((e) => e.t === 'revenge' && e.i === 1 && e.v === 0));
+  assert.ok(b.score - sb >= SCORE.KILL + FUN.REVENGE_BONUS);
+  assert.equal(a.streak, 0, '倒されたら連続はおしまい');
+  // ラストスパート: 残り 30 秒からは 2 倍
+  sim.s.t = ROUND.TIME - FUN.SPURT + 0.5;
+  run(sim, 0.05);
+  assert.ok(sim.drainEvents().some((e) => e.t === 'spurt'));
+  const s0 = c.score;
+  sim._addScore(c, 3);
+  assert.equal(c.score - s0, 6);
+});
+
+test('お楽しみ: トランポリンで跳ねる・走りながら伏せるとスライディング', async () => {
+  const { FUN } = await import('../src/games/gomuBattle/constants.js');
+  const a = ARENAS[0];
+  const t = a.tramps[0];
+  const m = createBody((t.x0 + t.x1) / 2, (t.z0 + t.z1) / 2 - 3, 0);
+  let bounced = false;
+  let top = 0;
+  for (let i = 0; i < 120; i++) {
+    const r = stepMove(m, { fz: i < 40 ? 1 : 0 }, DT, a);
+    bounced ||= !!r.bounced;
+    top = Math.max(top, m.y);
+  }
+  assert.ok(bounced, 'トランポリンに乗ると跳ねる');
+  assert.ok(top > 3, `高く跳ねる (${top.toFixed(2)})`);
+  // スライディング
+  const s = createBody(0, 20, Math.PI / 2);
+  const open = { boxes: [] };
+  for (let i = 0; i < 20; i++) stepMove(s, { fz: 1, dash: true }, DT, open);
+  const st0 = s.stam;
+  const r = stepMove(s, { fz: 1, dash: true, crouch: true }, DT, open);
+  assert.equal(r.slid, true);
+  assert.ok(s.crouch, '低い姿勢');
+  assert.ok(Math.hypot(s.vx, s.vz) > PLAYER.SPRINT_SPEED, '走るより速く滑る');
+  assert.ok(st0 - s.stam >= FUN.SLIDE_STAM - 1, 'ゲージを使う');
+});
+
+test('お楽しみ: 補給箱が空から落ちてきて、取ると金の輪ゴム（ダメージ 2 倍）。突風で輪ゴムが流される。遠吠え', async () => {
+  const { FUN } = await import('../src/games/gomuBattle/constants.js');
+  const sim = ready();
+  const [a, b] = sim.s.players;
+  sim.s.t = FUN.DROP_FIRST;
+  run(sim, 0.05);
+  const dp = sim.s.drop;
+  assert.ok(dp && dp.y > 20, '空の高い所に出る');
+  assert.ok(sim.drainEvents().some((e) => e.t === 'drop'));
+  // 配信に載る
+  let d = unpackBin(packBin(sim.s), 2);
+  assert.ok(Math.abs(d.st.drop.x - dp.x) < 0.01 && d.st.drop.y > 20);
+  run(sim, FUN.DROP_HEIGHT / FUN.DROP_FALL + 0.5);
+  assert.equal(sim.s.drop.y, 0, '地面に着く');
+  Object.assign(a, { x: dp.x, z: dp.z, y: 0 });
+  run(sim, 0.1);
+  assert.equal(sim.s.drop, null, '取った');
+  assert.equal(a.sp, ITEM.GOLD);
+  assert.equal(a.spN, FUN.GOLD_SHOTS);
+  assert.ok(sim.drainEvents().some((e) => e.t === 'dropget' && e.i === 0));
+  // 金の輪ゴム: 近くから 14 × 2 = 28
+  Object.assign(a, { x: -4, z: 1, y: 0 });
+  Object.assign(b, { x: 4, z: 1, y: 0, hp: PLAYER.HP, inv: 0 });
+  sim.fire(0, eye(a), chestDir(a, b), ITEM.GOLD);
+  run(sim, 0.4);
+  assert.equal(b.hp, PLAYER.HP - 28);
+  // 突風
+  sim.s.nextWind = sim.s.t;
+  run(sim, 0.05);
+  const w = sim.s.wind;
+  assert.ok(w.t > 0 && Math.hypot(w.x, w.z) > 1, '風が吹く');
+  sim.s.bands = [];
+  b.dead = 0;
+  sim.fire(1, eye(b), [0, 0.99, 0.14]); // 上へ（何にも当たらない）
+  const band = sim.s.bands[0];
+  const v0 = [band.vx, band.vz];
+  run(sim, 0.5);
+  if (sim.s.bands[0] === band) assert.ok(Math.hypot(band.vx - v0[0], band.vz - v0[1]) > 1, '横に流される');
+  d = unpackBin(packBin(sim.s), 2);
+  assert.ok(Math.abs(d.st.wind.x - w.x) < 0.11 && d.st.wind.t > 0, '突風も配信に載る');
+  // 遠吠え（続けては吠えられない）
+  sim.drainEvents();
+  assert.equal(sim.bark(0), true);
+  assert.equal(sim.bark(0), false);
+  assert.ok(sim.drainEvents().some((e) => e.t === 'bark' && e.i === 0));
+});
