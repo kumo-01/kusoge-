@@ -1094,3 +1094,25 @@ test('ギミック: 加速パネルで速くなる・ワープ土管でもう 1 
   }
   assert.ok(top > 5, `高く飛ぶ ${top}`);
 });
+
+test('天気: 雨か雪。雪は配信に載り、CPU の見える距離が短くなる', () => {
+  let snow = 0;
+  let rain = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    const sim = new GomuSim({ humans: 1, bots: 1, seed });
+    run(sim, ROUND.INTRO + 0.1);
+    sim.s.nextRain = sim.s.t;
+    run(sim, 0.05);
+    const e = sim.drainEvents().find((x) => x.t === 'rain');
+    assert.ok(e && (e.wx === 1 || e.wx === 2));
+    assert.equal(sim.s.wx, e.wx);
+    if (e.wx === 2) snow++;
+    else rain++;
+    const d = unpackBin(packBin(sim.s), 2);
+    assert.equal(d.st.wx, sim.s.wx, '配信に載る');
+    sim.s.rain = 0.01;
+    run(sim, 0.05);
+    assert.equal(sim.s.wx, 0, 'やむと元に戻る');
+  }
+  assert.ok(snow > 0 && rain > 0, `雪 ${snow}・雨 ${rain}`);
+});
