@@ -42,7 +42,7 @@ const matCache = new Map();
 /** 毛の材質（模様つき・つやなし） */
 function furMat(c) {
   const k = `f${c}`;
-  if (!matCache.has(k)) matCache.set(k, new THREE.MeshStandardMaterial({ color: c, map: furTex(), bumpMap: furTex(), bumpScale: 0.6, roughness: 0.92 }));
+  if (!matCache.has(k)) matCache.set(k, new THREE.MeshStandardMaterial({ color: c, map: furTex(), bumpMap: furTex(), bumpScale: 0.18, roughness: 0.85 }));
   return matCache.get(k);
 }
 /** つやのある材質（目・鼻・肉球） */
@@ -116,12 +116,12 @@ const BREED = {
   corgi: { fur: 0xd77a2c, light: 0xfbf7f0, dark: 0xb35f1c, ears: 'big', snout: 1, tail: 'stub', leg: 0.78 },
   poodle: { fur: 0xf1e9e2, light: 0xfaf6f2, dark: 0xd9cfc6, ears: 'drop', snout: 1.05, tail: 'pom', leg: 1.05, curly: true },
   pug: { fur: 0xe3c9a0, light: 0xeedcbc, dark: 0x2e2622, ears: 'fold', snout: 0.45, tail: 'curl', leg: 0.9, muzzleDark: true },
-  dachs: { fur: 0x8b4a1f, light: 0xa8612f, dark: 0x5e2f12, ears: 'drop', snout: 1.35, tail: 'thin', leg: 0.72 },
-  doberman: { fur: 0x1f1f25, light: 0xa8642c, dark: 0x111114, ears: 'up', snout: 1.35, tail: 'stub', leg: 1.1, tan: true },
+  dachs: { fur: 0xa55a2a, light: 0xc98a52, dark: 0x6e3a18, ears: 'drop', snout: 1.35, tail: 'thin', leg: 0.72 },
+  doberman: { fur: 0x3a2e2c, light: 0xc07a3c, dark: 0x2a2120, ears: 'up', snout: 1.35, tail: 'stub', leg: 1.1, tan: true },
   chihuahua: { fur: 0xe2b47a, light: 0xf6e4c8, dark: 0xc08c50, ears: 'big', snout: 0.6, tail: 'thin', leg: 0.9 },
   beagle: { fur: 0xc98843, light: 0xfbf8f2, dark: 0x2a211c, ears: 'drop', snout: 1.15, tail: 'flag', leg: 0.95, saddle: true },
   golden: { fur: 0xdba650, light: 0xf0cf8f, dark: 0xc08a3a, ears: 'drop', snout: 1.15, tail: 'plume', leg: 1.05 },
-  husky: { fur: 0x737c8c, light: 0xf5f6f8, dark: 0x3f4552, ears: 'up', snout: 1.1, tail: 'plume', leg: 1.05, mask: true, eye: 0x6fb7ff },
+  husky: { fur: 0x8a93a2, light: 0xf5f6f8, dark: 0x3f4552, ears: 'up', snout: 1.1, tail: 'plume', leg: 1.05, mask: true, eye: 0x2f5f9e },
 };
 
 /** 一人称の手の色（鉄砲を持つ前足） */
@@ -163,10 +163,12 @@ export function buildRealDog(kind) {
   torso.add(part(SPH(), B.mask || kind === 'shiba' || kind === 'corgi' ? light : fur, [0, 0.5, 0.1], [0.1, 0.1, 0.07]));
 
   // ---- 頭（ねらう向きに少し上下する） ----
+  // かわいく見えるように: 頭は大きめ（子犬の割合）、鼻先は短め、目は大きく丸く光を 2 つ
   const head = new THREE.Group();
-  head.position.set(0, 0.66, 0.08);
+  head.position.set(0, 0.7, 0.08);
+  head.scale.setScalar(1.3);
   torso.add(head);
-  const sn = B.snout;
+  const sn = 0.5 + 0.35 * B.snout;
   head.add(part(SPH(), fur, [0, 0.03, 0], [0.15, 0.135, 0.15])); // 頭の丸み
   head.add(part(SPH(), B.mask ? light : fur, [0, -0.03, 0.06], [0.135, 0.11, 0.12])); // ほお
   // 鼻先（犬種で長さが違う）。口元は白っぽい（パグは黒）
@@ -174,16 +176,16 @@ export function buildRealDog(kind) {
   head.add(part(CAP(), kind === 'doberman' ? fur : mz, [0, -0.045, 0.13 + 0.05 * sn], [0.065, 0.05 * sn, 0.06], [Math.PI / 2 - 0.12, 0, 0]));
   if (kind === 'doberman') head.add(part(SPH(), light, [0, -0.08, 0.14 + 0.05 * sn], [0.055, 0.03, 0.05 * sn + 0.04]));
   head.add(part(SPH(), light, [0, -0.085, 0.1 + 0.04 * sn], [0.06, 0.03, 0.05 * sn + 0.03])); // あご
-  if (B.mask) head.add(part(SPH(), dark, [0, 0.1, 0.02], [0.11, 0.06, 0.12])); // ハスキーの額の濃い色
+  if (B.mask) head.add(part(SPH(), fur, [0, 0.1, 0.03], [0.07, 0.045, 0.11])); // ハスキーの額の模様（地の色。やわらかく）
   // 鼻（つや）
   const noseZ = 0.13 + 0.1 * sn + 0.055;
   head.add(part(SPH_LO(), nose, [0, -0.02, noseZ], [0.032, 0.024, 0.025]));
   // 目（つやのある黒目と、光の点）・まぶたの毛
   for (const sd of [-1, 1]) {
-    head.add(part(SPH_LO(), eyeM, [sd * 0.062, 0.03, 0.115], [0.026, 0.027, 0.018]));
-    head.add(part(SPH_LO(), white, [sd * 0.062 - 0.006, 0.04, 0.13], [0.006, 0.006, 0.004]));
-    head.add(part(SPH_LO(), B.tan ? light : fur, [sd * 0.065, 0.06, 0.11], [0.03, 0.012, 0.02])); // まゆ
-    if (kind === 'shiba') head.add(part(SPH_LO(), light, [sd * 0.06, 0.065, 0.112], [0.018, 0.01, 0.01])); // 麻呂眉
+    head.add(part(SPH(), eyeM, [sd * 0.058, 0.026, 0.142], [0.032, 0.034, 0.022]));
+    head.add(part(SPH_LO(), white, [sd * 0.058 - 0.01, 0.04, 0.162], [0.01, 0.01, 0.005])); // 大きい光
+    head.add(part(SPH_LO(), white, [sd * 0.058 + 0.01, 0.013, 0.163], [0.005, 0.005, 0.004])); // 小さい光
+    if (kind === 'shiba') head.add(part(SPH_LO(), light, [sd * 0.055, 0.074, 0.14], [0.016, 0.009, 0.01])); // 麻呂眉（まゆはやさしい色だけ）
   }
   // 口・舌（ハアハア）
   const tongue = part(SPH_LO(), tongueM, [0, -0.1, 0.12 + 0.04 * sn], [0.03, 0.012, 0.045]);
@@ -197,8 +199,8 @@ export function buildRealDog(kind) {
       const s = B.ears === 'big' ? 1.45 : 1;
       piv.position.set(sd * 0.08, 0.12, -0.02);
       piv.rotation.set(-0.1, 0, -sd * 0.22);
-      piv.add(part(EAR(), fur, [0, 0, 0], [0.09 * s, 0.13 * s, 0.12]));
-      piv.add(part(EAR(), plainMat(0xe9a9a0, 0.8), [0, 0.012, 0.012], [0.055 * s, 0.09 * s, 0.06]));
+      piv.add(part(EAR(), fur, [0, 0, 0], [0.1 * s, 0.11 * s, 0.12]));
+      piv.add(part(EAR(), plainMat(0xe9a9a0, 0.8), [0, 0.012, 0.012], [0.062 * s, 0.075 * s, 0.06]));
     } else if (B.ears === 'drop') {
       const long = kind === 'dachs' || kind === 'beagle' ? 1.35 : 1;
       piv.position.set(sd * 0.13, 0.08, -0.01);
@@ -307,7 +309,7 @@ export function buildRealDog(kind) {
     tail.rotation.y = a.dead ? 0 : Math.sin(t * (mv ? 16 : 9)) * 0.45;
     tail.rotation.x = a.dead ? 0.8 : 0;
     // 舌: 走っている・暑い（ハアハア）
-    tongue.visible = mv > 0 || kind === 'pug' || kind === 'golden';
+    tongue.visible = !a.dead; // いつもニコッと舌を出す（走るとハアハア）
     tongue.position.y = -0.1 - Math.abs(Math.sin(t * 9)) * 0.008;
   }
 
