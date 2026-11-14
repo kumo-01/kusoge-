@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { buildRealDog } from './dog3d.js';
+import { buildDog } from '../dogKart/dog.js';
 import { Particles, Decals, markTex, pawTex } from './fx.js';
 import { device } from '../../core/device.js';
 import { ROOM, groundY } from './arena.js';
@@ -117,6 +117,8 @@ function makeBomb() {
 // 材質: 光の当たり方が自然なもの（look.js）。名前は前のまま
 // 会場を作っている間は、同じ色・同じ設定の材質を使い回す（あとで材質ごとに 1 つにまとめて、描画の回数を減らすため）
 let matCache = null;
+const DOG_SCALE = 0.75; // 犬の見た目の大きさ（当たり判定の高さ PLAYER.HEIGHT = 1.25 に合わせる）。犬はほかのゲームと同じ形（dogKart/dog.js）
+
 const toon = (c, o = {}) => {
   if (!matCache || o.map) return stdMat(c, o);
   const k = `t${c}|${JSON.stringify(o)}`;
@@ -1223,10 +1225,10 @@ export class GomuWorld {
       let m = this.decoys.get(d.id);
       if (!m) {
         m = new THREE.Group();
-        const dog = buildRealDog(kindOf(d.o));
-        dog.animate({ dt: 0, moving: false, pitch: 0 });
+        const dog = buildDog(kindOf(d.o));
+        dog.group.scale.setScalar(DOG_SCALE);
         const gun = weaponRack();
-        gun.position.set(0, dog.handY, 0.4);
+        gun.position.set(0.06, 0.62, 0.42);
         gun.scale.setScalar(0.9);
         const ring = new THREE.Mesh(new THREE.RingGeometry(0.36, 0.48, 24), new THREE.MeshBasicMaterial({ color: colorOf(d.o), transparent: true, opacity: 0.85 }));
         ring.rotation.x = -Math.PI / 2;
@@ -1493,10 +1495,11 @@ export class GomuWorld {
     for (const d of this.dogs) this.scene.remove(d.root);
     this.dogs = kinds.map((kind, i) => {
       const root = new THREE.Group();
-      const dog = buildRealDog(kind);
-      // 持っている武器（輪ゴム鉄砲・スナイパー・ライフル。相手からも見える）。前足で構える
+      const dog = buildDog(kind);
+      dog.group.scale.setScalar(DOG_SCALE);
+      // 持っている武器（輪ゴム鉄砲・スナイパー・ライフル。相手からも見える）
       const gun = weaponRack();
-      gun.position.set(0, dog.handY, 0.4);
+      gun.position.set(0.06, 0.62, 0.42);
       gun.scale.setScalar(0.9);
       const ring = new THREE.Mesh(new THREE.RingGeometry(0.36, 0.48, 24), new THREE.MeshBasicMaterial({ color: colors[i] ?? 0xffffff, transparent: true, opacity: 0.85 }));
       ring.rotation.x = -Math.PI / 2;
@@ -1665,7 +1668,7 @@ export class GomuWorld {
       const sy = v.crouch ? 0.62 : 1;
       d.body.scale.y += (sy - d.body.scale.y) * Math.min(1, dt * 14);
       d.body.rotation.z += (deadK * Math.PI * 0.5 - d.body.rotation.z) * Math.min(1, dt * 8);
-      d.body.position.y = 0; // 歩くときの揺れは犬の形（dog3d.js）が動かす
+      d.body.position.y = v.moving && !v.dead ? Math.abs(Math.sin(d.t * 12)) * 0.08 : 0;
       d.body.position.x = v.stun ? Math.sin(d.t * 50) * 0.05 : 0;
       d.gun.visible = !v.dead;
       d.gun.userData.set(v.weapon ?? WEAPON.NORMAL);
@@ -1686,8 +1689,7 @@ export class GomuWorld {
         d.star.scale.setScalar(v.crouch ? 0.75 : 1);
       }
       d.body.visible = !(v.inv && !v.star && Math.floor(d.t * 10) % 2 === 0);
-      d.dog.animate({ dt, moving: !!v.moving, crouch: !!v.crouch, pitch: v.pitch || 0, dead: !!v.dead, stun: !!v.stun });
-      d.gun.rotation.x = -Math.max(-0.6, Math.min(0.6, v.pitch || 0)) * 0.8; // 鉄砲もねらう向きへ
+      d.dog.animate({ dt, speed: v.moving ? 14 : 0, steer: 0, spin: v.stun ? 1 : 0, boost: 0, bump: v.stun ? 0.4 : 0, mood: v.dead ? -1 : 0 });
     });
   }
 

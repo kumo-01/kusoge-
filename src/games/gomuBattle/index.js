@@ -9,7 +9,6 @@ import { device } from '../../core/device.js';
 import { GomuSim } from './sim.js';
 import { ARENAS, segmentHit, groundY } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder, rayCylinder, hitDamage, isHead } from './physics.js';
-import { DOG_FUR } from './dog3d.js';
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
@@ -17,6 +16,9 @@ import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE,
 import { getSens } from './prefs.js';
 import { ROOM } from './arena.js';
 import { canSee } from './arena.js';
+
+/** 一人称の手（前足）の色。犬の形は dogKart/dog.js と同じ */
+const FUR = { shiba: 0xf2a04b, corgi: 0xe8893a, poodle: 0xfff3f6, pug: 0xead1a4, chihuahua: 0xe9c08a, dachs: 0xb5622e, husky: 0x8d97aa, beagle: 0xc98a4b, golden: 0xf0c060, doberman: 0x2d2d38 };
 
 const SLOT_CSS = ['#ff4d5e', '#3d8bff', '#ff5fb0', '#22b573'];
 
@@ -1274,7 +1276,7 @@ class GomuGame {
       }
       // 爆弾: 飛ぶ道と落ちる所を見せる
       w.setLobArc(this._bombAim && !dead && this.phase === 'play' ? this._lobPath() : null);
-      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), weapon: p.weapon, bomb: this._bombAim, furColor: DOG_FUR[this.idents[this.me].kind] ?? 0xd9852f }, dt);
+      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), weapon: p.weapon, bomb: this._bombAim, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
       this._fired = false;
       w.render(dt);
       this._frame++;

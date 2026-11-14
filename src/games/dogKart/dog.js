@@ -56,6 +56,12 @@ function mesh(geometry, material, { pos, scale, rot } = {}) {
   return o;
 }
 
+/** 頭の大きさ（楕円体の半径）と、立ち耳の付け根を頭に沈める深さ */
+const HEAD_RX = 0.56;
+const HEAD_RY = 0.5;
+const HEAD_RZ = 0.5;
+const EAR_SINK = 0.07;
+
 const STYLE = {
   shiba: { fur: 0xf2a04b, dark: 0xcf7a2a, cream: 0xfff1d6, inner: 0xffd2a6, earH: 0.42, earW: 0.24, earSpread: 0.33, earTilt: 0.18, scarf: 0xe8384f },
   corgi: { fur: 0xe8893a, dark: 0xc46a22, cream: 0xffffff, inner: 0xffc1a3, earH: 0.62, earW: 0.3, earSpread: 0.38, earTilt: 0.32, scarf: 0x3b82f6 },
@@ -115,7 +121,7 @@ export function buildDog(kind) {
   const head = new THREE.Group();
   head.position.set(0, 1.28, 0.08);
   body.add(head);
-  head.add(mesh(SPHERE(), fur, { scale: [0.56, 0.5, 0.5] }));
+  head.add(mesh(SPHERE(), fur, { scale: [HEAD_RX, HEAD_RY, HEAD_RZ] }));
   // 口元
   if (kind === 'corgi') {
     head.add(mesh(SPHERE(), cream, { pos: [0, 0.18, 0.32], scale: [0.12, 0.32, 0.2] })); // 額の白いライン
@@ -160,13 +166,23 @@ export function buildDog(kind) {
       pivot.add(mesh(SPHERE_LO(), dark, { pos: [side * 0.05, -0.28, 0], scale: [0.1, 0.36, 0.2] }));
     } else if (st.ears === 'fold') {
       // パグ: 小さく前に折れた耳
-      pivot.position.set(side * st.earSpread, 0.34, 0.02);
-      pivot.add(mesh(CONE(), dark, { pos: [side * 0.06, 0.02, 0.08], scale: [0.2, 0.2, 0.08], rot: [1.9, Math.PI / 4, side * 0.4] }));
+      // パグ: 小さく前に折れた耳。頭の表面に沿って寝かせ、半分ほど頭に沈める（浮かないように）
+      const x = st.earSpread;
+      const surf = HEAD_RY * Math.sqrt(Math.max(0, 1 - (x / HEAD_RX) ** 2 - (0.06 / HEAD_RZ) ** 2));
+      pivot.position.set(side * x, surf - 0.03, 0.06);
+      pivot.add(mesh(SPHERE_LO(), dark, { scale: [0.16, 0.07, 0.13], rot: [0.25, 0, side * 0.75] }));
     } else {
-      pivot.position.set(side * st.earSpread, 0.36, -0.02);
+      // 立ち耳: 付け根を頭の表面より少し内側に沈めて、頭から浮かないようにする。
+      // 頭（半径 0.56 × 0.5 × 0.5 の楕円体）からはみ出さないよう、付け根が外に寄りすぎる耳は少し内側へ
+      const spread = Math.min(st.earSpread, HEAD_RX - st.earW * 0.55);
+      const z = -0.02;
+      const surf = HEAD_RY * Math.sqrt(Math.max(0, 1 - (spread / HEAD_RX) ** 2 - (z / HEAD_RZ) ** 2));
+      const baseY = surf - EAR_SINK;
+      const h = st.earH + (0.36 - baseY); // 先の高さは前と同じに（沈めた分だけ長く）
+      pivot.position.set(side * spread, baseY, z);
       pivot.rotation.z = -side * st.earTilt;
-      const ear = mesh(CONE(), fur, { pos: [0, st.earH / 2, 0], scale: [st.earW, st.earH, 0.12], rot: [0, Math.PI / 4, 0] });
-      const inner = mesh(CONE(), m(st.inner), { pos: [0, st.earH * 0.42, 0.045], scale: [st.earW * 0.6, st.earH * 0.7, 0.05], rot: [0, Math.PI / 4, 0] });
+      const ear = mesh(CONE(), fur, { pos: [0, h / 2, 0], scale: [st.earW, h, 0.12], rot: [0, Math.PI / 4, 0] });
+      const inner = mesh(CONE(), m(st.inner), { pos: [0, h - st.earH * 0.58, 0.045], scale: [st.earW * 0.6, st.earH * 0.7, 0.05], rot: [0, Math.PI / 4, 0] });
       pivot.add(ear, inner);
     }
     head.add(pivot);

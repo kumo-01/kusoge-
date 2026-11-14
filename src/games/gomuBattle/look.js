@@ -328,12 +328,3 @@ export function weaponRack(bandColor) {
   g.userData.band = () => list[g.userData.cur]?.userData.band;
   return g;
 }
-
-/** 犬の模型の材質（輪郭のはっきりした塗り）を、光の当たり方が自然な材質に置きかえる（その犬だけ） */
-export function realisticDog(group) {
-  group.traverse((o) => {
-    if (!o.isMesh || !o.material) return;
-    const conv = (m) => (m && m.isMeshToonMaterial ? mat(m.color.getHex(), { map: m.map || null, transparent: m.transparent, opacity: m.opacity, side: m.side, roughness: 0.9 }) : m);
-    o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
-  });
-}
