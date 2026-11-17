@@ -319,6 +319,7 @@ export function isHead(q, y) {
 /** 当たったときのダメージ（距離・極太ゴム・ヘッドショットこみ） */
 export function hitDamage(weapon, dist, mul = 1, head = false) {
   const base = weaponDamage(weapon, dist, mul);
+  if (WEAPONS[weapon]?.head) return head ? Math.max(1, Math.round(WEAPONS[weapon].head * mul)) : base; // マシンガン: 頭は 5
   if (!head || weapon === WEAPON.BOMB || weapon === WEAPON.RIFLE) return base;
   if (weapon === WEAPON.SNIPER) return Math.max(base, Math.round(PLAYER.HP * HEADSHOT.SNIPER_RATE));
   return Math.round(base * HEADSHOT.MUL);

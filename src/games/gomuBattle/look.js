@@ -302,8 +302,35 @@ function rifleGun(bandColor) {
   return g;
 }
 
+/** マシンガン: 短く太い銃身を 3 本束ねた回る筒・丸いドラムの弾倉・前の握り */
+function mgGun(bandColor) {
+  const g = new THREE.Group();
+  const metal = METAL();
+  const black = BLACK();
+  const body = box(0.09, 0.1, 0.3, black, 0, 0.0, 0.05);
+  const stock = box(0.06, 0.08, 0.18, black, 0, -0.01, -0.18);
+  const grip = box(0.05, 0.16, 0.07, black, 0, -0.1, -0.02);
+  grip.rotation.x = -0.3;
+  const fore = box(0.05, 0.12, 0.06, black, 0, -0.08, 0.26); // 前の握り
+  const barrels = new THREE.Group();
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2;
+    barrels.add(cyl(0.014, 0.42, metal, Math.cos(a) * 0.024, 0.02 + Math.sin(a) * 0.024, 0.4));
+  }
+  const ring = cyl(0.042, 0.03, metal, 0, 0.02, 0.56);
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.05, 20), mat(0xc0392b, { roughness: 0.45, metalness: 0.3 }));
+  drum.rotation.z = Math.PI / 2;
+  drum.position.set(0, -0.07, 0.1);
+  const b = band(bandColor, 0.3, 0.07, 0.3);
+  g.add(body, stock, grip, fore, barrels, ring, drum, trigger(metal, -0.0), b);
+  g.userData.band = b;
+  g.userData.spin = barrels;
+  return g;
+}
+
 /** 武器 weapon の形 */
 export function makeWeapon(weapon, bandColor = 0xf4a261) {
+  if (weapon === WEAPON.MG) return mgGun(bandColor);
   if (weapon === WEAPON.SNIPER) return sniperGun(bandColor);
   if (weapon === WEAPON.RIFLE) return rifleGun(bandColor);
   return rubberGun(bandColor);
@@ -312,7 +339,8 @@ export function makeWeapon(weapon, bandColor = 0xf4a261) {
 /** 3 つの武器をまとめた入れ物（見せるのは 1 つ）。set(weapon) で持ちかえる */
 export function weaponRack(bandColor) {
   const g = new THREE.Group();
-  const list = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.RIFLE].map((w) => {
+  const list = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.RIFLE, WEAPON.BOMB, WEAPON.MG].map((w) => {
+    if (w === WEAPON.BOMB) return null; // 爆弾は武器ではない（番号をそろえるための空き）
     const m = makeWeapon(w, bandColor);
     m.visible = w === WEAPON.NORMAL;
     g.add(m);
@@ -323,7 +351,7 @@ export function weaponRack(bandColor) {
   g.userData.set = (w) => {
     if (g.userData.cur === w) return;
     g.userData.cur = w;
-    list.forEach((m, k) => (m.visible = k === w));
+    list.forEach((m, k) => m && (m.visible = k === w));
   };
   g.userData.band = () => list[g.userData.cur]?.userData.band;
   return g;

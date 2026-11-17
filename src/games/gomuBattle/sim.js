@@ -2,7 +2,7 @@
 // 人の犬の位置は、その人の端末が計算して送ってくる（setPilot）。CPU の犬はここで動かす。
 // 起きたこと（撃った・当たった・倒れた・拾った…）は events に積み、ゲストへ配る。
 
-import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, TREAT, FUN, EXTRA, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL } from './constants.js';
+import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, TREAT, FUN, EXTRA, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL, noAmmoProof } from './constants.js';
 import { ARENAS, segmentHit, ROOM, groundY } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage, hitDamage, isHead } from './physics.js';
 import { botThink } from './bot.js';
@@ -178,6 +178,7 @@ export class GomuSim {
   pickWeapon(i, w) {
     const p = this.s.players[i];
     if (!p || !WEAPON_LIST.includes(w) || this.s.phase !== 'pick') return false;
+    if (p.bot && w === WEAPON.MG) return false; // マシンガンは人だけ
     p.weapon = w;
     p.picked = true;
     p.ammo = WEAPONS[w].ammo;
@@ -318,7 +319,7 @@ export class GomuSim {
   fire(i, o, d, kind = 0, cid = 0) {
     const s = this.s;
     const p = s.players[i];
-    if (!p || s.phase !== 'play' || p.dead > 0 || p.noAmmo > 0) return false;
+    if (!p || s.phase !== 'play' || p.dead > 0 || (p.noAmmo > 0 && !noAmmoProof(p.weapon))) return false;
     if (!Array.isArray(o) || !Array.isArray(d) || ![...o, ...d].every(Number.isFinite)) return false;
     const dl = Math.hypot(d[0], d[1], d[2]);
     if (dl < 0.5) return false;
@@ -397,10 +398,11 @@ export class GomuSim {
 
   /** CPU とホストのための弾数つきの発射（人の端末も同じ数え方をする） */
   tryFire(p, o, d) {
-    if (p.reload > 0 || p.fireCd > 0 || p.ammo <= 0 || p.noAmmo > 0) return false;
+    if (p.reload > 0 || p.fireCd > 0 || p.ammo <= 0 || (p.noAmmo > 0 && !noAmmoProof(p.weapon))) return false;
     if (!this.fire(p.i, o, d, p.sp, 0)) return false;
     const w = WEAPONS[p.weapon];
     p.fireCd = p.bot ? Math.max(w.gap, BOT.FIRE_GAP) * (0.8 + nextRandom(this.s) * 0.6) : w.gap;
+    if (w.inf) return true; // 弾数は無限
     p.ammo--;
     if (p.ammo <= 0) p.reload = w.reload;
     return true;

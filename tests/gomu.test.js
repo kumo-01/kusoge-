@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GomuSim } from '../src/games/gomuBattle/sim.js';
 import { ARENAS, ROOM, SCALE } from '../src/games/gomuBattle/arena.js';
-import { createBody, stepMove, fits, aimDir, heightOf, movableBox, shoveMovables, bandSpec, weaponDamage } from '../src/games/gomuBattle/physics.js';
+import { createBody, stepMove, fits, aimDir, heightOf, movableBox, shoveMovables, bandSpec, weaponDamage, hitDamage } from '../src/games/gomuBattle/physics.js';
 import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE } from '../src/games/gomuBattle/constants.js';
 
 const DT = 1 / 60;
@@ -1115,4 +1115,35 @@ test('天気: 雨か雪。雪は配信に載り、CPU の見える距離が短�
     assert.equal(sim.s.wx, 0, 'やむと元に戻る');
   }
   assert.ok(snow > 0 && rain > 0, `雪 ${snow}・雨 ${rain}`);
+});
+
+test('マシンガン: 人だけ選べる・弾数は無限・ほぼ休みなく撃てる・ダメージ 3〜1、頭は 5・ゴム切れが効かない・配信に載る', () => {
+  const sim = new GomuSim({ humans: 2, bots: 2, seed: 4, pick: true });
+  run(sim, 0.1);
+  assert.equal(sim.s.phase, 'pick');
+  assert.ok(sim.pickWeapon(1, WEAPON.MG));
+  assert.equal(sim.pickWeapon(2, WEAPON.MG), false, 'CPU は選べない');
+  for (let r = 0; r < 20; r++) for (const p of sim.s.players) if (p.bot) assert.notEqual(p.weapon, WEAPON.MG);
+  const W = WEAPONS[WEAPON.MG];
+  assert.ok(W.inf && W.gap <= 0.06);
+  assert.equal(weaponDamage(WEAPON.MG, 1), 3);
+  assert.equal(weaponDamage(WEAPON.MG, 60), 1);
+  assert.equal(hitDamage(WEAPON.MG, 1, 1, true), 5);
+  assert.equal(hitDamage(WEAPON.MG, 60, 1, true), 5);
+  assert.ok(hitDamage(WEAPON.MG, 10, 1, false) <= 3);
+  // 試合で: 100 発撃っても弾が減らない。ゴム切れでも撃てる
+  run(sim, ROUND.PICK + ROUND.INTRO + 0.2);
+  assert.equal(sim.s.phase, 'play');
+  const p = sim.s.players[1];
+  p.bot = true; // tryFire で数える（人の端末と同じ数え方）
+  p.noAmmo = 5;
+  let n = 0;
+  for (let k = 0; k < 100; k++) {
+    p.fireCd = 0;
+    if (sim.tryFire(p, [p.x, p.y + 1, p.z], [0, 0, 1])) n++;
+  }
+  assert.equal(n, 100);
+  assert.equal(p.ammo, W.ammo);
+  const d = unpackBin(packBin(sim.s), 4);
+  assert.equal(d.st.players[1].weapon, WEAPON.MG, '配信に載る');
 });

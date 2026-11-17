@@ -2439,7 +2439,7 @@ body[data-screen='game'] {
 }
 .gm-pick-card {
   font: inherit;
-  width: min(230px, 29vw);
+  width: min(210px, 22vw);
   display: grid;
   justify-items: center;
   gap: 6px;
@@ -3066,5 +3066,19 @@ body[data-screen='game'] {
   .gm-lowhp.on {
     animation: none;
     opacity: 0.5;
+  }
+}
+
+/* マシンガン: 弾数は無限（∞） */
+.gm-inf {
+  font-size: 1.3rem;
+  margin-left: 4px;
+  color: #fff;
+}
+/* 武器えらび: 4 つ並ぶので、狭い画面では 2 × 2 に */
+@media (max-width: 700px) {
+  .gm-pick-card {
+    width: min(210px, 42vw);
+    padding: 10px 8px;
   }
 }

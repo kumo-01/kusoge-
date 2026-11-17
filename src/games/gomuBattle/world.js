@@ -117,6 +117,8 @@ function makeBomb() {
 // 材質: 光の当たり方が自然なもの（look.js）。名前は前のまま
 // 会場を作っている間は、同じ色・同じ設定の材質を使い回す（あとで材質ごとに 1 つにまとめて、描画の回数を減らすため）
 let matCache = null;
+/** 自分の鉄砲だけを描く層（2 回目の描画） */
+const VM_LAYER = 1;
 const DOG_SCALE = 0.75; // 犬の見た目の大きさ（当たり判定の高さ PLAYER.HEIGHT = 1.25 に合わせる）。犬はほかのゲームと同じ形（dogKart/dog.js）
 
 const toon = (c, o = {}) => {
@@ -154,8 +156,11 @@ function mergeStaticByMaterial(root, isKeep) {
   for (const { mat, list } of by.values()) {
     const geos = list.map((o) => {
       const g0 = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
-      for (const name of Object.keys(g0.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g0.deleteAttribute(name);
+      // 頂点の色を使う材質（地面）は色を残す（消すと真っ黒になる）
+      const keepAttrs = mat.vertexColors ? ['position', 'normal', 'uv', 'color'] : ['position', 'normal', 'uv'];
+      for (const name of Object.keys(g0.attributes)) if (!keepAttrs.includes(name)) g0.deleteAttribute(name);
       if (!g0.attributes.uv) g0.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g0.attributes.position.count * 2), 2));
+      if (mat.vertexColors && !g0.attributes.color) g0.setAttribute('color', new THREE.BufferAttribute(new Float32Array(g0.attributes.position.count * 3).fill(1), 3));
       if (!g0.attributes.normal) g0.computeVertexNormals();
       g0.morphAttributes = {};
       return g0.applyMatrix4(o.matrixWorld);
@@ -241,6 +246,7 @@ const VM_FIT = {
   [WEAPON.NORMAL]: { s: 0.4, x: 0, y: 0, z: 0 },
   [WEAPON.SNIPER]: { s: 0.3, x: 0.01, y: 0.01, z: -0.05 },
   [WEAPON.RIFLE]: { s: 0.26, x: 0.01, y: 0.01, z: -0.07 },
+  [WEAPON.MG]: { s: 0.36, x: 0, y: 0.01, z: -0.02 },
 };
 
 export class GomuWorld {
@@ -269,7 +275,9 @@ export class GomuWorld {
     // 空の光（上は青白く、下は地面の照り返し）と、少し傾いた太陽（影が長めに出る）
     this.hemi = new THREE.HemisphereLight(0xdcecff, 0x8d7b5e, 1.15);
     scene.add(this.hemi);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+    const amb = new THREE.AmbientLight(0xffffff, 0.12);
+    amb.layers.enableAll();
+    scene.add(amb);
     const sun = new THREE.DirectionalLight(0xfff0d6, 2.7);
     sun.position.set(-34, 46, -26);
     sun.castShadow = true;
@@ -282,6 +290,7 @@ export class GomuWorld {
     sun.shadow.radius = 3;
     scene.add(sun, sun.target);
     this.sun = sun;
+    for (const l of [this.hemi, sun]) l.layers.enableAll(); // 自分の鉄砲（別の層）も照らす
     this.arenaGroup = null;
     this.dogs = [];
     this.bands = [];
@@ -1330,6 +1339,7 @@ export class GomuWorld {
       const n = device.low ? 4 : 8;
       this._lampLights = Array.from({ length: n }, () => {
         const l = new THREE.PointLight(0xffd29a, 38, 20, 1.8);
+        l.layers.enableAll();
         this.scene.add(l);
         return l;
       });
@@ -2199,13 +2209,8 @@ export class GomuWorld {
     bm.visible = false;
     vm.add(gun, paw, bm);
     vm.position.set(0.2, -0.19, -0.36);
-    vm.traverse((o) => {
-      if (o.material) {
-        o.material = o.material.clone();
-        o.material.depthTest = false; // 壁に近づいても鉄砲が壁にめりこんで見えないように、いちばん手前に描く
-      }
-      o.renderOrder = 1000;
-    });
+    // 自分の鉄砲は、会場を描いたあとに奥行きを消してから、別に描く（壁や地面にめりこまず、半透明の道・雪・粒も上に重ならない）
+    vm.traverse((o) => o.layers.set(VM_LAYER));
     this.camera.add(vm);
     this.vm = { root: vm, gun, paw, bm, recoil: 0, bob: 0 };
   }
@@ -2257,7 +2262,21 @@ export class GomuWorld {
     this._stepAmbient(dt);
     // 動く影（パソコン）: 2 フレームに 1 回だけ描き直す
     if (this.dynShadow && (this._sf = ((this._sf || 0) + 1) % 2) === 0) this.renderer.shadowMap.needsUpdate = true;
-    this.renderer.render(this.scene, this.camera);
+    const r = this.renderer;
+    r.render(this.scene, this.camera);
+    if (this.vm?.root.visible) {
+      const ac = r.autoClear;
+      r.autoClear = false;
+      r.clearDepth();
+      // 空の色（background）があると、2 回目の描画で画面ごと塗りつぶされるので、この間だけ外す
+      const bg = this.scene.background;
+      this.scene.background = null;
+      this.camera.layers.set(VM_LAYER);
+      r.render(this.scene, this.camera);
+      this.camera.layers.set(0);
+      this.scene.background = bg;
+      r.autoClear = ac;
+    }
   }
 
   dispose() {

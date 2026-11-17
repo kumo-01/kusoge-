@@ -199,17 +199,21 @@ export const ITEM_INFO = {
  * ダメージは距離で決まる: dmg = [近い, 遠い]、fall = [この距離まで「近い」, この距離から「遠い」]（間はなめらかに）
  * ふつうの鉄砲は近いほど強く、スナイパーは遠いほど強い。爆弾は爆発の中心からの距離（blast = 半径）
  */
-export const WEAPON = { NORMAL: 0, SNIPER: 1, RIFLE: 2, BOMB: 3 }; // BOMB は武器ではなく、全員が持つ爆弾（輪ゴムの種類として使う）
+export const WEAPON = { NORMAL: 0, SNIPER: 1, RIFLE: 2, BOMB: 3, MG: 4 }; // BOMB は武器ではなく、全員が持つ爆弾（輪ゴムの種類として使う）
 export const WEAPONS = {
   [WEAPON.NORMAL]: { name: '輪ゴム鉄砲', desc: '10発ずつ。連射がきく。近いほど痛い（14〜6）', ammo: 10, reload: 1.5, gap: 0.18, speed: 50.4, gravity: 2.5, dmg: [14, 6], fall: [8, 40], r: 0.08, life: 1.8 },
   [WEAPON.SNIPER]: { name: 'スナイパー', desc: '5発ずつ。まっすぐ飛ぶ。遠いほど痛い（30〜60）。のぞくと拡大', ammo: 5, reload: 2.4, gap: 1.0, speed: 72, gravity: 0.3, dmg: [30, 60], fall: [10, 45], r: 0.06, life: 1.6, zoomFov: 24 },
   // ライフル: どんな距離でも当たれば一撃（体力 100 ぶん）。1 発しか込められず、補充はスナイパーより少し長い
   [WEAPON.RIFLE]: { name: 'ライフル', desc: '1発ずつ。どんな距離でも、当たれば一撃で倒す。1発ごとに3秒かけて補充。のぞくと拡大', ammo: 1, reload: 3.0, gap: 0.3, speed: 90, gravity: 0.2, dmg: [100, 100], fall: [0, 1], r: 0.05, life: 1.3, zoomFov: 20 },
+  // マシンガン（人だけが選べる。CPU は選ばない）: 弾数は無限、撃つ間隔はほぼ 0。1 発は弱い（近いほど 3〜1、頭は 5）。ゴム切れも効かない
+  [WEAPON.MG]: { name: 'マシンガン', desc: '弾は無限・ほぼ休みなく連射。1発は弱い（3〜1、頭に当てると5）。ゴム切れも効かない', ammo: 99, inf: true, reload: 0, gap: 0.05, speed: 55, gravity: 2.5, dmg: [3, 1], fall: [6, 30], r: 0.06, life: 1.5, head: 5, noAmmoProof: true },
   // 爆弾（全員が 1 ラウンドに BOMB_COUNT 回まで投げられる。G キー）
   [WEAPON.BOMB]: { name: '爆弾', desc: '山なりに投げて、何かに当たると爆発。まわりの相手まとめて（中心36〜はじ8）', gap: 0.9, speed: 19, gravity: 15, dmg: [36, 8], blast: 3.5, r: 0.2, life: 3.2 },
 };
-/** ラウンドの前に選べる武器 */
-export const WEAPON_LIST = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.RIFLE];
+/** ラウンドの前に選べる武器（マシンガンは人だけ。CPU は選ばない） */
+export const WEAPON_LIST = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.RIFLE, WEAPON.MG];
+/** ゴム切れ（アイテム）が効かない武器か */
+export const noAmmoProof = (w) => !!WEAPONS[w]?.noAmmoProof;
 /** 爆弾: 1 ラウンドに投げられる数（全員） */
 export const BOMB_COUNT = 5;
 /** ヘッドショット（頭に当たった）: スナイパーは体力の 8 割（80）、ほかの鉄砲はいつもより 15% 多い。ライフルは頭でなくても一撃 */

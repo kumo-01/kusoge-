@@ -12,7 +12,7 @@ import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, mova
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
-import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT, TREAT, FUN, EXTRA } from './constants.js';
+import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, noAmmoProof, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT, TREAT, FUN, EXTRA } from './constants.js';
 import { getSens } from './prefs.js';
 import { ROOM } from './arena.js';
 import { canSee } from './arena.js';
@@ -31,7 +31,7 @@ const KEY_RAMP = 0.4; // 速くなりきるまでの秒数
 const LOOK = 0.0024; // マウスの感度（ラジアン / ピクセル）
 const TOUCH_LOOK = 0.006; // タッチの感度（ゆっくりなぞると細かく、速くなぞると大きく回る）
 // タッチで指を 100 動かしたときに視点が動く割合（武器ごと。重い武器ほどゆっくり）
-const TOUCH_LOOK_MUL = { [WEAPON.NORMAL]: 0.8, [WEAPON.SNIPER]: 0.7, [WEAPON.RIFLE]: 0.6 };
+const TOUCH_LOOK_MUL = { [WEAPON.NORMAL]: 0.8, [WEAPON.SNIPER]: 0.7, [WEAPON.RIFLE]: 0.6, [WEAPON.MG]: 0.8 };
 const AIM_RANGE = 45; // 照準が相手に重なっているかを調べる距離
 const PITCH_MAX = 1.35;
 
@@ -262,6 +262,7 @@ class GomuGame {
       if (i.consume('Digit1', 'Numpad1')) this._pickWeapon(WEAPON.NORMAL);
       if (i.consume('Digit2', 'Numpad2')) this._pickWeapon(WEAPON.SNIPER);
       if (i.consume('Digit3', 'Numpad3')) this._pickWeapon(WEAPON.RIFLE);
+      if (i.consume('Digit4', 'Numpad4')) this._pickWeapon(WEAPON.MG);
     }
     // のぞく（スナイパー・ライフル）: 右クリックか Z を押している間、タッチはボタンで切り替え
     const canZoom = WEAPONS[p.weapon].zoomFov != null && act;
@@ -328,11 +329,11 @@ class GomuGame {
     if (i.consume('Enter', 'NumpadEnter')) this._tapFire = 0.3;
     this._tapFire = Math.max(0, (this._tapFire || 0) - dt);
     const firing = this.fireHeld || !!t?.fire || i.isDown('KeyF') || this._tapFire > 0;
-    if (firing && act && !(rec?.noAmmo > 0) && p.reload <= 0 && p.fireCd <= 0 && p.ammo > 0) {
+    if (firing && act && (!(rec?.noAmmo > 0) || noAmmoProof(p.weapon)) && p.reload <= 0 && p.fireCd <= 0 && p.ammo > 0) {
       this._fire();
       this._tapFire = 0;
     }
-    if (i.consume('KeyR') && p.ammo < WEAPONS[p.weapon].ammo && p.reload <= 0) p.reload = WEAPONS[p.weapon].reload; // 自分で補充
+    if (i.consume('KeyR') && !WEAPONS[p.weapon].inf && p.ammo < WEAPONS[p.weapon].ammo && p.reload <= 0) p.reload = WEAPONS[p.weapon].reload; // 自分で補充
     if (wantItem && act && rec?.item) this._useItem();
     this.shakeT += dt;
     // 自分の位置をホストへ
@@ -375,7 +376,7 @@ class GomuGame {
     const p = this.pilot;
     const kind = p.sp && p.spN > 0 ? p.sp : 0;
     const W = WEAPONS[p.weapon];
-    p.ammo--;
+    if (!W.inf) p.ammo--; // マシンガンは弾数が無限
     p.fireCd = W.gap;
     if (p.ammo <= 0) p.reload = W.reload;
     if (kind) {
@@ -1276,7 +1277,7 @@ class GomuGame {
       }
       // 爆弾: 飛ぶ道と落ちる所を見せる
       w.setLobArc(this._bombAim && !dead && this.phase === 'play' ? this._lobPath() : null);
-      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || rec.noAmmo > 0, kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), weapon: p.weapon, bomb: this._bombAim, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
+      w.setViewModel({ fired: this._fired, reloading: p.reload > 0 || (rec.noAmmo > 0 && !noAmmoProof(p.weapon)), kind: p.sp && p.spN > 0 ? p.sp : 0, moving: p.moving && p.ground, visible: !dead && !(this.zoom && this._fov < 40), weapon: p.weapon, bomb: this._bombAim, furColor: FUR[this.idents[this.me].kind] ?? 0xf2a04b }, dt);
       this._fired = false;
       w.render(dt);
       this._frame++;
@@ -1309,7 +1310,7 @@ class GomuGame {
       inSmoke: w ? w.inSmoke(cx, cy + this._eye, cz) : false,
       wind: this._windNow(),
       yaw: this.pilot.yaw,
-      me: { hp: rec.hp, dead: rec.dead, item: rec.item, ammo: p.ammo, maxAmmo: WEAPONS[p.weapon].ammo, reloadT: WEAPONS[p.weapon].reload, weapon: p.weapon, reload: p.reload, bombs: this._bombsLeft(rec), bombAim: this._bombAim, stam: p.stam ?? PLAYER.STAMINA, sprint: !!p.sprint, sp: p.sp && p.spN > 0 ? p.sp : 0, spN: p.spN, shake: rec.shake, noAmmo: rec.noAmmo, stuck: rec.stuck, inv: rec.inv, star: rec.inv > 0 ? this._starT[this.me] || 0 : 0 },
+      me: { hp: rec.hp, dead: rec.dead, item: rec.item, ammo: p.ammo, maxAmmo: WEAPONS[p.weapon].ammo, reloadT: WEAPONS[p.weapon].reload, weapon: p.weapon, reload: p.reload, bombs: this._bombsLeft(rec), bombAim: this._bombAim, stam: p.stam ?? PLAYER.STAMINA, sprint: !!p.sprint, sp: p.sp && p.spN > 0 ? p.sp : 0, spN: p.spN, shake: rec.shake, noAmmo: noAmmoProof(p.weapon) ? 0 : rec.noAmmo, inf: !!WEAPONS[p.weapon].inf, stuck: rec.stuck, inv: rec.inv, star: rec.inv > 0 ? this._starT[this.me] || 0 : 0 },
     });
     // 3・2・1 の音
     if (this.phase === 'intro') {

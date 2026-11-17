@@ -3,7 +3,7 @@ import { iconSvg, iconText } from '../../core/icons.js';
 import { h } from '../../core/util.js';
 import { ITEM_INFO, GUN, PLAYER, ROUND, WEAPON, WEAPONS, MODE, TEAMS, BOSS, FUN } from './constants.js';
 
-const AMMO_ICON = { [WEAPON.NORMAL]: 'ring', [WEAPON.SNIPER]: 'target', [WEAPON.RIFLE]: 'crosshair' };
+const AMMO_ICON = { [WEAPON.NORMAL]: 'ring', [WEAPON.SNIPER]: 'target', [WEAPON.RIFLE]: 'crosshair', [WEAPON.MG]: 'zap' };
 
 export class GomuHud {
   constructor(root, { touch, mode = MODE.FFA }) {
@@ -66,8 +66,8 @@ export class GomuHud {
         h('span.gm-pick-ic', { html: iconSvg(ic, 44) }),
         h('b', null, WEAPONS[w].name),
         h('small', null, WEAPONS[w].desc),
-        h('kbd', null, String(w + 1)));
-    this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.RIFLE, 'crosshair')];
+        h('kbd', null, String(w === WEAPON.MG ? 4 : w + 1)));
+    this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.RIFLE, 'crosshair'), card(WEAPON.MG, 'zap')];
     this.pickInfo = h('p.gm-pick-info');
     this.pick = h('div.gm-pick', { hidden: true }, h('h2', null, '武器をえらぶ'), h('div.gm-pick-row', null, ...this.pickCards), this.pickInfo);
     this.root.append(this.scope, this.nvFx, this.speed, this.lowHp, this.smoke, this.vignette, this.nvHint, this.names, this.hurtDirs, this.cross, this.dmg, this.mapCv, this.scoreboard, h('div.gm-top', null, this.round, this.timer), h('div.gm-alerts', null, this.spurt, this.wind), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
@@ -156,7 +156,9 @@ export class GomuHud {
     this.bombs.classList.toggle('is-empty', bn <= 0);
     // 輪ゴム
     const ammoN = v.me.reload > 0 ? -1 : Math.max(0, v.me.ammo);
-    this._setHtml(this.ammo, 'ammo', `${ammoN}:${v.me.weapon}`, () => (ammoN < 0 ? '' : Array.from({ length: v.me.maxAmmo || GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg(AMMO_ICON[v.me.weapon] || 'ring', (v.me.maxAmmo || GUN.AMMO) > 5 ? 18 : 24)}</span>`).join('')));
+    // マシンガンは弾数が無限（∞ だけ出す）
+    if (v.me.inf) this._setHtml(this.ammo, 'ammo', `inf:${v.me.weapon}`, () => `<span class="gm-band on">${iconSvg('zap', 18)}</span><b class="gm-inf">∞</b>`);
+    else this._setHtml(this.ammo, 'ammo', `${ammoN}:${v.me.weapon}`, () => (ammoN < 0 ? '' : Array.from({ length: v.me.maxAmmo || GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg(AMMO_ICON[v.me.weapon] || 'ring', (v.me.maxAmmo || GUN.AMMO) > 5 ? 18 : 24)}</span>`).join('')));
     this.reloadBar.hidden = !(v.me.reload > 0);
     if (v.me.reload > 0) this.reloadBar.firstChild.style.width = `${(1 - v.me.reload / (v.me.reloadT || GUN.RELOAD)) * 100}%`;
     this._setHtml(this.special, 'sp', v.me.sp ? `${v.me.sp}:${v.me.spN}` : '', () => (v.me.sp ? `${iconSvg(ITEM_INFO[v.me.sp].icon, 18)} ${ITEM_INFO[v.me.sp].name} ×${v.me.spN}` : ''));
