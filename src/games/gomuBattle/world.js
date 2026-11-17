@@ -2226,8 +2226,14 @@ export class GomuWorld {
     v.gun.scale.setScalar(fit.s);
     v.gun.position.set(fit.x, fit.y, fit.z);
     v.bm.visible = bomb; // 爆弾は補充中でもかまえられる
-    if (fired) v.recoil = 1;
-    v.recoil = Math.max(0, v.recoil - dt * 8);
+    // マシンガン: 反動は小さく細かく震えて、銃身が回る（撃つと速く、やめるとゆっくり止まる）
+    const mg = weapon === WEAPON.MG;
+    if (fired) v.recoil = mg ? 0.3 + Math.random() * 0.15 : 1;
+    v.recoil = Math.max(0, v.recoil - dt * (mg ? 14 : 8));
+    const spin = mg ? v.gun.userData.list[WEAPON.MG]?.userData.spin : null;
+    v.spinV = fired && mg ? 28 : Math.max(0, (v.spinV || 0) - dt * 30);
+    if (spin) spin.rotation.z += v.spinV * dt;
+    if (fired && mg) this._vmFlash(v);
     v.bob += dt * (moving ? 10 : 2);
     const rl = reloading && !bomb; // 爆弾をかまえている間は下げない
     const down = rl ? 0.12 : 0;
@@ -2237,6 +2243,23 @@ export class GomuWorld {
     band.visible = !reloading;
     band.material.color.setHex(BAND_COLORS[kind] ?? BAND_COLORS[0]);
     if (furColor != null) v.paw.material.color.setHex(furColor);
+  }
+
+  /** マシンガンの銃口の光（一人称。鉄砲と同じ層に、ほんの一瞬） */
+  _vmFlash(v) {
+    if (!v.flash) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+      m.layers.set(VM_LAYER);
+      v.root.add(m);
+      v.flash = m;
+      v.flashT = 0;
+    }
+    const fit = VM_FIT[WEAPON.MG];
+    v.flash.position.set(fit.x, fit.y, fit.z - 0.25);
+    v.flash.scale.setScalar(0.7 + Math.random() * 0.6);
+    v.flash.visible = true;
+    clearTimeout(v.flashT);
+    v.flashT = setTimeout(() => (v.flash.visible = false), 35);
   }
 
   setCamera(x, y, z, yaw, pitch) {

@@ -1182,3 +1182,34 @@ test('通信: 起きたこと（撃った・止まった・当たった）はバ
   assert.deepEqual([h.t, h.c, h.v], ['h', 1204, 3]);
   assert.equal(unpackGameBin(new Uint8Array([9, 9])), null);
 });
+
+test('マシンガン: 箱・風船から輪ゴムが強くなるアイテムは出ない・補給箱（金の輪ゴム）は取れない', async () => {
+  const { BAND_ITEMS, BOX_ITEMS_MG, FUN: F } = await import('../src/games/gomuBattle/constants.js');
+  assert.ok(BOX_ITEMS_MG.length > 0 && BOX_ITEMS_MG.every((it) => !BAND_ITEMS.includes(it)));
+  const sim = ready();
+  const [a, b] = sim.s.players;
+  a.weapon = WEAPON.MG;
+  const got = new Set();
+  for (let k = 0; k < 200; k++) {
+    a.item = 0;
+    sim.s.boxes = sim.s.boxes.map(() => 0);
+    const [bx, bz, by] = sim.arena.items[0];
+    Object.assign(a, { x: bx, z: bz, y: by, dead: 0 });
+    sim.step(DT);
+    if (a.item) got.add(a.item);
+  }
+  assert.ok(got.size >= 3);
+  for (const it of got) assert.ok(!BAND_ITEMS.includes(it), `出たアイテム ${it}`);
+  // 補給箱: マシンガンの犬は取れない（ふつうの鉄砲の犬は取れる）
+  sim.s.nextDrop = sim.s.t;
+  run(sim, 0.05);
+  const dp = sim.s.drop;
+  run(sim, F.DROP_HEIGHT / F.DROP_FALL + 0.5);
+  Object.assign(a, { x: dp.x, z: dp.z, y: dp.y });
+  run(sim, 0.2);
+  assert.ok(sim.s.drop, 'マシンガンは取れない');
+  Object.assign(b, { x: dp.x, z: dp.z, y: dp.y });
+  run(sim, 0.2);
+  assert.equal(sim.s.drop, null);
+  assert.equal(b.sp, ITEM.GOLD);
+});

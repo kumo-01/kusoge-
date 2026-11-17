@@ -75,6 +75,8 @@ export const ITEM = {
 export const BAND_ITEMS = [ITEM.THICK, ITEM.TRIPLE, ITEM.BOUNCE, ITEM.HOMING];
 /** プレゼント箱から出るアイテム（回復は箱からは出ない。会場に落ちているおやつを拾う） */
 export const BOX_ITEMS = [...Array.from({ length: ITEM.COUNT - 1 }, (_, k) => k + 1).filter((it) => it !== ITEM.HEAL), ITEM.DECOY];
+/** マシンガンを持っている犬の箱から出るアイテム（輪ゴムが強くなるもの: 極太・3方向・跳ね返り・追いかけ は出ない） */
+export const BOX_ITEMS_MG = BOX_ITEMS.filter((it) => !BAND_ITEMS.includes(it));
 
 /**
  * さらに足した仕組み（2026-11-13 その 3）

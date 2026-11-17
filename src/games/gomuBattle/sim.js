@@ -2,7 +2,7 @@
 // 人の犬の位置は、その人の端末が計算して送ってくる（setPilot）。CPU の犬はここで動かす。
 // 起きたこと（撃った・当たった・倒れた・拾った…）は events に積み、ゲストへ配る。
 
-import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, TREAT, FUN, EXTRA, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL, noAmmoProof } from './constants.js';
+import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, BOX_ITEMS_MG, TREAT, FUN, EXTRA, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL, noAmmoProof } from './constants.js';
 import { ARENAS, segmentHit, ROOM, groundY } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage, hitDamage, isHead } from './physics.js';
 import { botThink } from './bot.js';
@@ -661,7 +661,7 @@ export class GomuSim {
       dp.y = Math.max(gy, dp.y - FUN.DROP_FALL * dt);
       if (dp.y < gy + 1.4) {
         for (const p of s.players) {
-          if (p.dead > 0 || Math.hypot(p.x - dp.x, p.z - dp.z) > FUN.DROP_RADIUS || Math.abs(p.y - dp.y) > 1.6) continue;
+          if (p.dead > 0 || p.weapon === WEAPON.MG || Math.hypot(p.x - dp.x, p.z - dp.z) > FUN.DROP_RADIUS || Math.abs(p.y - dp.y) > 1.6) continue; // マシンガンは金の輪ゴムを取れない
           p.sp = ITEM.GOLD;
           p.spN = FUN.GOLD_SHOTS;
           this.events.push({ t: 'sp', i: p.i, k: ITEM.GOLD, n: p.spN });
@@ -729,11 +729,17 @@ export class GomuSim {
       p.pops = (p.pops || 0) + 1;
       this._addScore(p, 1);
       if (!p.item && nextRandom(s) < EXTRA.BALLOON_ITEM) {
-        item = BOX_ITEMS[Math.floor(nextRandom(s) * BOX_ITEMS.length)];
+        item = this._boxItem(p);
         p.item = item;
       }
     }
     this.events.push({ t: 'pop', k, i: by, x, y, z, item });
+  }
+
+  /** 箱・風船から出るアイテム（マシンガンには、輪ゴムが強くなるものは出ない） */
+  _boxItem(p) {
+    const list = p.weapon === WEAPON.MG ? BOX_ITEMS_MG : BOX_ITEMS;
+    return list[Math.floor(nextRandom(this.s) * list.length)];
   }
 
   /** 遠吠え（「ワン！」）。BARK_CD 秒に 1 回 */
@@ -759,7 +765,7 @@ export class GomuSim {
       for (const p of s.players) {
         if (p.dead > 0 || p.item) continue;
         if (Math.hypot(p.x - bx, p.z - bz) < ITEMS.BOX_RADIUS && Math.abs(p.y - by) < 0.9) {
-          p.item = BOX_ITEMS[Math.floor(nextRandom(s) * BOX_ITEMS.length)];
+          p.item = this._boxItem(p);
           s.boxes[k] = ITEMS.BOX_RESPAWN;
           this.events.push({ t: 'pick', i: p.i, b: k, item: p.item });
           break;
@@ -824,6 +830,7 @@ export class GomuSim {
     const p = s.players[i];
     if (!p || !p.item || p.dead > 0 || s.phase !== 'play') return false;
     const it = p.item;
+    if (p.weapon === WEAPON.MG && (BAND_ITEMS.includes(it) || it === ITEM.GOLD)) return false; // マシンガンでは輪ゴムを強くできない
     p.item = 0;
     this.events.push({ t: 'use', i, item: it });
     if (BAND_ITEMS.includes(it)) {
