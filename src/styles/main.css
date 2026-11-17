@@ -2230,6 +2230,15 @@ body[data-screen='game'] {
   pointer-events: auto;
   touch-action: none;
   -webkit-touch-callout: none;
+  /* 長押ししても文字の選択・虫めがね・メニューが出ないように（出ると指が離れた扱いになり、撃ち続けられない） */
+  -webkit-user-select: none;
+  user-select: none;
+}
+.gomu-touch,
+.gomu-touch * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .gt-stick.on {
   opacity: 1;

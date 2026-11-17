@@ -11,7 +11,7 @@ import { ARENAS, segmentHit, groundY } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder, rayCylinder, hitDamage, isHead } from './physics.js';
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
-import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64 } from './net.js';
+import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64, packFire, packRemoteHit, unpackGameBin } from './net.js';
 import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, noAmmoProof, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT, TREAT, FUN, EXTRA } from './constants.js';
 import { getSens } from './prefs.js';
 import { ROOM } from './arena.js';
@@ -348,11 +348,26 @@ class GomuGame {
     } else {
       // 自分の位置は、変わった tick は毎回（毎秒 60 回。ホストの計算・ほかの人の画面への遅れを減らす）、
       // 止まっている間は 4 tick に 1 回だけ送る（受け取り確認は続けて届けたいので、止めはしない）
+      // 動いている間は毎秒 40 回（ホストの配信と同じ。1 tick と 2 tick の間隔を交互に）。
+      // 伏せ・ジャンプ・着地・復活のように、状態が変わった tick はすぐに送る。止まっている間は 4 tick に 1 回
       const pk = packPilot(p);
       const key = pk.join(',');
-      this._pilotIdle = key === this._pilotKey ? (this._pilotIdle | 0) + 1 : 0;
+      const flags = pk[9] | (pk[10] << 8);
+      this._pilotAcc = (this._pilotAcc || 0) + 1;
+      let send;
+      if (key === this._pilotKey) {
+        this._pilotIdle = (this._pilotIdle | 0) + 1;
+        send = this._pilotIdle % 4 === 0;
+      } else {
+        this._pilotIdle = 0;
+        send = flags !== this._pilotFlags || this._pilotAcc >= 1.5;
+      }
       this._pilotKey = key;
-      if (this._pilotIdle % 4 === 0) this.ctx.sendInput(++this._seq, pk);
+      this._pilotFlags = flags;
+      if (send) {
+        this._pilotAcc = Math.max(0, this._pilotAcc - 1.5);
+        this.ctx.sendInput(++this._seq, pk);
+      }
       this._stepGuestBands(dt);
     }
   }
@@ -391,7 +406,8 @@ class GomuGame {
       this.sim.fire(this.me, o, d, kind, cid);
       return;
     }
-    this.ctx.sendGameMessage({ t: 'f', o: o.map((v) => Math.round(v * 1000) / 1000), d: d.map((v) => Math.round(v * 10000) / 10000), k: kind, c: cid });
+    // バイナリで送る（約 25 バイト。JSON の約 1/5）。送れない通信なら JSON
+    if (!this.ctx.sendGameBinary?.(packFire(o, d, kind, cid))) this.ctx.sendGameMessage({ t: 'f', o: o.map((v) => Math.round(v * 1000) / 1000), d: d.map((v) => Math.round(v * 10000) / 10000), k: kind, c: cid });
     // 自分の画面ではすぐに飛ばす（ホストの知らせが来たら、それと結びつける）
     const yaw = Math.atan2(d[0], d[2]);
     const pitch = Math.asin(d[1]);
@@ -517,7 +533,7 @@ class GomuGame {
     const hx = ax + (b.x - ax) * ht;
     const hy = ay + (b.y - ay) * ht;
     const hz = az + (b.z - az) * ht;
-    this.ctx.sendGameMessage({ t: 'h', c: b.cid, v: hit, p: [hx, hy, hz].map((x) => Math.round(x * 1000) / 1000) });
+    if (!this.ctx.sendGameBinary?.(packRemoteHit(b.cid, hit, [hx, hy, hz]))) this.ctx.sendGameMessage({ t: 'h', c: b.cid, v: hit, p: [hx, hy, hz].map((x) => Math.round(x * 1000) / 1000) });
     this.hud.hitMarker(false);
     const head = isHead(views[hit], hy);
     this.hud.dmgPop(hitDamage(b.w, Math.hypot(hx - b.ox, hy - b.oy, hz - b.oz), b.mul, head), head);
@@ -531,7 +547,7 @@ class GomuGame {
   /** ホスト: 計算で起きたことを、自分の画面に反映して、ゲストへ配る準備をする */
   _hostEvents(evs) {
     for (const e of evs) {
-      e.id = ++this.evSeq;
+      e.n = ++this.evSeq; // 知らせの通し番号（取りこぼし・重なりを見分ける）。e.id は輪ゴム・煙・ガムの番号のまま
       // 順番どおり確実に届く通信（中継）なら 1 回、取りこぼしのある P2P の高速チャンネルなら 3 回続けて載せる
       this.netEvents.push({ e, n: this.ctx.reliableInput ? 1 : 3 });
     }
@@ -916,6 +932,8 @@ class GomuGame {
       if (st && msg.player > 0 && msg.player < this.humans) this.sim.setPilot(msg.player, st);
       return;
     }
+    // バイナリのメッセージ（撃った・当たった）は、JSON と同じ形に戻して同じように扱う
+    if (msg.type === 'game_bin') msg = { type: 'game_msg', player: msg.player, data: unpackGameBin(msg.data) };
     if (msg.type !== 'game_msg' || !msg.data || !(msg.player > 0)) return;
     const d = msg.data;
     if (d.t === 'f') this.sim.fire(msg.player, d.o, d.d, d.k | 0, d.c | 0);
@@ -957,10 +975,26 @@ class GomuGame {
     return d ? { snap: { st: d.st }, ev: d.ev } : null;
   }
 
-  drainNetEvents() {
+  /**
+   * 配信に載せる起きたこと。ack（P2P の共通の差分の配信）があれば、ゲスト全員が受け取りを確認するまで（最長 ACK_KEEP 回の配信のあいだ）
+   * 載せ直す。ack がなければ、決まった回数（中継は順番どおり確実に届くので 1 回）
+   */
+  drainNetEvents(ack = null) {
     const out = [];
+    const ACK_KEEP = 40; // 1 秒ぶん
     for (const x of this.netEvents) {
       if (out.length >= 120) break;
+      if (ack) {
+        if (x.sent == null) x.sent = ack.seq;
+        const k = ack.seq - x.sent;
+        if (x.sent <= ack.minAck || k >= ACK_KEEP) {
+          x.n = 0;
+          continue;
+        }
+        // 最初の 3 回は続けて、そのあとは確認されるまで 4 回に 1 回だけ（取りこぼしても必ず届き、量はほとんど増えない）
+        if (k < 3 || k % 4 === 0) out.push(x.e);
+        continue;
+      }
       out.push(x.e);
       x.n--;
     }
@@ -972,12 +1006,12 @@ class GomuGame {
     if (this.isHost) return;
     const evs = [];
     for (const e of events || []) {
-      if (!e || typeof e !== 'object' || !Number.isInteger(e.id) || this.seenEv.has(e.id)) continue;
-      this.seenEv.add(e.id);
+      if (!e || typeof e !== 'object' || !Number.isInteger(e.n) || this.seenEv.has(e.n)) continue;
+      this.seenEv.add(e.n);
       evs.push(e);
     }
     if (this.seenEv.size > 800) this.seenEv = new Set([...this.seenEv].slice(-400));
-    evs.sort((a, b) => a.id - b.id);
+    evs.sort((a, b) => a.n - b.n);
     const prevRs = this.last?.players.map((p) => p.rs);
     const st = snap?.st || (typeof snap?.b === 'string' ? unpackBin(fromB64(snap.b), this.n, prevRs)?.st : unpackState(snap, this.n));
     if (st) {

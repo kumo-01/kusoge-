@@ -1147,3 +1147,38 @@ test('マシンガン: 人だけ選べる・弾数は無限・ほぼ休みなく
   const d = unpackBin(packBin(sim.s), 4);
   assert.equal(d.st.players[1].weapon, WEAPON.MG, '配信に載る');
 });
+
+import { packFire, packRemoteHit, unpackGameBin } from '../src/games/gomuBattle/net.js';
+
+test('通信: 起きたこと（撃った・止まった・当たった）はバイナリで小さく、元に戻る。番号 n で重なりを見分け、輪ゴムの番号 id はそのまま', () => {
+  const sim = new GomuSim({ humans: 2, bots: 0, seed: 3 });
+  run(sim, ROUND.INTRO + 1);
+  sim.drainEvents();
+  const ev = [
+    { t: 'shot', n: 101, id: 77, o: 1, cid: 12, k: 0, w: 4, x: 12.345, y: 1.002, z: -40.5, vx: 50.12, vy: -1.5, vz: 3.25 },
+    { t: 'end', n: 102, id: 77, x: 13.1, y: 0.5, z: -39.9, h: -1 },
+    { t: 'hit', n: 103, v: 0, by: 1, d: 3, hp: 97, kx: 1.23, kz: -0.5, hs: 1 },
+    { t: 'spawn', n: 104, i: 0, x: 1, y: 0, z: 2, yaw: 0.5, g: 3 },
+  ];
+  const withEv = packBin(sim.s, true, ev);
+  const none = packBin(sim.s, true, null);
+  const d = unpackBin(withEv, 2);
+  assert.equal(d.ev.length, 4);
+  const [s0, e0, h0, o0] = d.ev;
+  assert.deepEqual([s0.t, s0.n, s0.id, s0.o, s0.cid, s0.w], ['shot', 101, 77, 1, 12, 4]);
+  assert.ok(Math.abs(s0.x - 12.345) < 0.002 && Math.abs(s0.vx - 50.12) < 0.006 && Math.abs(s0.vz - 3.25) < 0.006);
+  assert.deepEqual([e0.t, e0.n, e0.id, e0.h], ['end', 102, 77, -1]);
+  assert.deepEqual([h0.t, h0.n, h0.v, h0.by, h0.d, h0.hp, h0.hs], ['hit', 103, 0, 1, 3, 97, 1]);
+  assert.deepEqual(o0, ev[3], 'ほかの知らせは JSON のまま');
+  const binBytes = withEv.length - none.length;
+  const jsonBytes = JSON.stringify(ev.slice(0, 3)).length;
+  assert.ok(binBytes - JSON.stringify(ev[3]).length < jsonBytes / 3, `バイナリ ${binBytes} / JSON ${jsonBytes}`);
+  // ゲスト → ホストの撃った・当たった
+  const f = unpackGameBin(packFire([1.5, 1.0, -2.25], [0.6, 0, 0.8], 2, 300));
+  assert.equal(f.t, 'f');
+  assert.ok(Math.abs(f.o[2] + 2.25) < 0.002 && Math.abs(f.d[0] - 0.6) < 0.0001 && f.k === 2 && f.c === 300);
+  assert.ok(packFire([1.5, 1.0, -2.25], [0.6, 0, 0.8], 2, 300).length < 20);
+  const h = unpackGameBin(packRemoteHit(1204, 3, [4, 0.5, -1]));
+  assert.deepEqual([h.t, h.c, h.v], ['h', 1204, 3]);
+  assert.equal(unpackGameBin(new Uint8Array([9, 9])), null);
+});

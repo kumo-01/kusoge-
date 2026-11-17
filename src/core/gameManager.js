@@ -16,7 +16,7 @@
 // 画面遷移や勝敗の確定はホストの部屋管理（room.js）が行い、ゲームは context.finish(result) で結果を返す。
 
 import { Emitter, h, now } from './util.js';
-import { encodeInputFrame, encodeSnapshotFrame, encodeDeltaFrame, decodeFrame, matchHash, FRAME_INPUT, FRAME_SNAPSHOT, FRAME_DELTA, NO_BASE } from './binframe.js';
+import { encodeInputFrame, encodeSnapshotFrame, encodeDeltaFrame, encodeGameFrame, decodeFrame, matchHash, FRAME_INPUT, FRAME_SNAPSHOT, FRAME_DELTA, FRAME_GAME, NO_BASE } from './binframe.js';
 import { deltaEncode, deltaDecode, check16 } from './netcodec.js';
 import { EngineClient } from './engineClient.js';
 
@@ -110,6 +110,11 @@ export class GameManager extends Emitter {
       sendGameMessage: (data) => {
         if (this.game !== game) return;
         this.net.send({ type: 'game_msg', matchId, gen: this.gen, data });
+      },
+      // ゲスト → ホストのゲーム固有メッセージを、バイナリで（JSON より小さい）。送れない通信（古い中継）なら false（呼んだ側が JSON で送る）
+      sendGameBinary: (u8) => {
+        if (this.game !== game || this.isHost || this.serverSim || !this.net.binary) return false;
+        return this.net.send(encodeGameFrame(matchId, this.gen, u8));
       },
       // ホストのみ: 勝敗確定
       finish: (result) => {
@@ -308,6 +313,9 @@ export class GameManager extends Emitter {
         if (this.running && player > 0) game.onMessage({ type: 'player_input', player, seq: f.seq, inputs: f.inputs });
         if (player > 0 && f.ack !== undefined) game.netAckFrom?.(slot, f.ack);
         if (player > 0 && f.ack >= 0) this._deltaState().acks.set(slot, f.ack); // 共通の差分の配信の元
+      } else if (f.kind === FRAME_GAME && this.isHost && !this.serverSim) {
+        const player = this.players.indexOf(slot);
+        if (player > 0) game.onMessage({ type: 'game_bin', data: f.payload, player });
       } else if (f.kind === FRAME_DELTA && !this.isHost && this.running && game.decodeNetBinary) {
         // 共通の差分の配信: 元にした配信（前に受け取ったもの）と合わせて戻す
         const rx = this._rxState();
@@ -400,7 +408,9 @@ export class GameManager extends Emitter {
     // 巻き戻し用の完全な状態は 8 回に 1 回（約 0.2 秒おき）だけ残す。毎回コピーすると重い
     const keep = !this.game.encodeNetSnapshot || (this._histN = (this._histN | 0) + 1) % 8 === 0;
     const snap = keep ? this.game.getSnapshot() : null;
-    const ev = this.game.drainNetEvents ? this.game.drainNetEvents() : [];
+    // 起きたこと: 共通の差分の配信を使うゲームには、次の配信の番号と、全員が受け取りを確認した配信の番号も渡す
+    // （確認されるまで載せ続けられる。取りこぼしても必ず届き、届いたらすぐやめられる）。順番どおり確実に届く中継では 1 回だけ
+    const ev = this.game.drainNetEvents ? this.game.drainNetEvents(this.game.netDelta && this.net.binary && !this.net.reliable ? this._ackInfo() : null) : [];
     const t = now();
     if (snap) {
       this._history.push({ t, snap });
@@ -455,6 +465,19 @@ export class GameManager extends Emitter {
   _deltaState() {
     if (this._dx?.gen !== this.gen || this._dx.match !== this.matchId) this._dx = { gen: this.gen, match: this.matchId, sent: [], acks: new Map() };
     return this._dx;
+  }
+
+  /** 次に送る配信の番号 seq と、つながっているゲスト全員が受け取りを確認した配信の番号 minAck（だれかが未確認なら -1） */
+  _ackInfo() {
+    const dx = this._deltaState();
+    let minAck = Infinity;
+    for (const slot of this.players) {
+      if (!(slot > 0) || !this.net.isConnected?.(slot)) continue;
+      const a = dx.acks.get(slot);
+      const hit = a == null ? null : dx.sent.find((x) => (x.seq & 0xffff) === a);
+      minAck = Math.min(minAck, hit ? hit.seq : -1);
+    }
+    return { seq: this._netSeq + 1, minAck: minAck === Infinity ? this._netSeq : minAck };
   }
 
   /** 共通の差分の配信（ゲスト）: 受け取った配信（下 16 ビットの番号 → バイト列）と、読めた最新の番号 */

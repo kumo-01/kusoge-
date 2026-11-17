@@ -445,6 +445,8 @@ export class GomuTouch {
     this.onZoom = null;
     this.el = h('div.gomu-touch', null, this.look, this.zone, this.fireBtn, this.jumpBtn, this.dashBtn, this.bombBtn, this.barkBtn, this.nvBtn, this.crouchBtn, this.zoomBtn);
     root.append(this.el);
+    // 長押しで出るメニュー・文字の選択を止める（出ると押している指が取り消され、マシンガンが止まる）
+    for (const ev of ['contextmenu', 'selectstart', 'dragstart']) this.el.addEventListener(ev, (e) => e.preventDefault());
     this._bindStick();
     this._bindLook(this.look);
     // 発射ボタンは押している間ずっと撃つ。押したまま指を動かすと視点も動く
@@ -557,7 +559,24 @@ export class GomuTouch {
       this.lookDY += e.clientY - p[1];
       last.set(e.pointerId, [e.clientX, e.clientY]);
     });
+    // 指が本当に触れている数（タッチのイベントで数える）。ブラウザの都合で押している途中に pointercancel が来ても、
+    // 指がまだ触れていれば押したままにする（長押しでマシンガンを撃ち続けられるように）
+    let touching = 0;
+    el.addEventListener('touchstart', (e) => (touching = e.targetTouches.length), { passive: true });
+    const touchEnd = (e) => {
+      touching = e.targetTouches.length;
+      if (touching === 0 && !last.size) {
+        set(false);
+        el.classList.remove('down');
+      }
+    };
+    el.addEventListener('touchend', touchEnd);
+    el.addEventListener('touchcancel', touchEnd);
     const up = (e) => {
+      if (e.type === 'pointercancel' && touching > 0) {
+        last.delete(e.pointerId);
+        return; // 指はまだ触れている（離したときに touchend で止める）
+      }
       last.delete(e.pointerId);
       if (last.size) return;
       set(false);

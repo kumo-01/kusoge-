@@ -7,12 +7,14 @@
 //      そのあとに（P2P のゲストだけ）[1 バイト: 1][2 バイト: 読めた最新の配信の番号]（受け取り確認。差分の配信の元になる）
 //   3: 差分の位置の配信（共通。src/core/netcodec.js で、相手が受け取りを確認した配信との差分にしたもの）
 //      [8..11] seq、[12..13] 元にした配信の番号（下 16 ビット。0xffff = 元なし）、[14..15] 戻したバイト列の確かめ用の値、[16..] 差分
+//   4: ゲームのメッセージ（ゲストからホストへ。順番どおり確実に届く通常の接続で送る。JSON の game_msg のバイナリ版）[8..11] 0、[12..] ゲームが詰めた中身
 
 const MAGIC = 0xb7;
 export const FRAME_SNAPSHOT = 1;
 export const FRAME_INPUT = 2;
 export const FRAME_DELTA = 3;
 export const NO_BASE = 0xffff;
+export const FRAME_GAME = 4;
 
 /** 試合 ID の 32bit ハッシュ（FNV-1a）。前の試合の配信を取り違えないため */
 export function matchHash(id) {
@@ -54,6 +56,14 @@ export function encodeDeltaFrame(matchId, gen, seq, base, check, data) {
   return buf;
 }
 
+/** ゲームのメッセージ（バイナリ）。payload: Uint8Array */
+export function encodeGameFrame(matchId, gen, payload) {
+  const buf = new ArrayBuffer(12 + payload.length);
+  header(buf, FRAME_GAME, matchId, gen);
+  new Uint8Array(buf, 12).set(payload);
+  return buf;
+}
+
 /** 操作。inputs: 直近の操作ビット（古い順）、seq: 最後の操作の番号、ack: 読めた最新の配信の番号（なければ付けない） */
 export function encodeInputFrame(matchId, gen, seq, inputs, ack = null) {
   const n = Math.min(255, inputs.length);
@@ -87,6 +97,10 @@ export function decodeFrame(data) {
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
     const f = { kind: u8[1], gen: dv.getUint16(2, true), hash: dv.getUint32(4, true), seq: dv.getUint32(8, true) };
     if (f.kind === FRAME_SNAPSHOT) {
+      f.payload = u8.subarray(12);
+      return f;
+    }
+    if (f.kind === FRAME_GAME) {
       f.payload = u8.subarray(12);
       return f;
     }

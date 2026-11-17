@@ -153,7 +153,7 @@ export function unpackState(o, n) {
 // 差分が効くように、いつも同じ長さのもの（犬・箱・天気・押せるもの・猫）を前に、数が変わるもの（おとり人形・煙・ガム・
 // ラウンドごとの点・起きたこと）を後ろに並べる。止まっている犬・変わらない値は、ほぼ 0 バイトになる。
 // 起きたこと（撃った・当たった…）は、数を丸めた JSON を後ろにつける（少ないので）
-const BIN_V = 9;
+const BIN_V = 10;
 /** 位置のバイト列の単位（1 m を 500。i16 で ±65 m まで。会場は ±39 m） */
 const POS = 500;
 const PH = ['intro', 'play', 'end', 'done', 'pick'];
@@ -190,6 +190,19 @@ class W {
     this.need(2);
     this.dv.setInt16(this.n, clampInt(v, -32768, 32767), true);
     this.n += 2;
+  }
+  /** 0 以上の整数（小さいほど短い。1〜5 バイト） */
+  vu(v) {
+    let x = Math.max(0, Math.min(4294967295, Math.round(v) || 0)) >>> 0;
+    for (;;) {
+      this.need(1);
+      if (x < 128) {
+        this.b[this.n++] = x;
+        return;
+      }
+      this.b[this.n++] = (x & 127) | 128;
+      x >>>= 7;
+    }
   }
   i32(v) {
     this.need(4);
@@ -228,6 +241,17 @@ class R {
     this.n += 2;
     return v;
   }
+  vu() {
+    let v = 0;
+    let sh = 0;
+    for (;;) {
+      const b = this.dv.getUint8(this.n++);
+      v += (b & 127) * 2 ** sh;
+      if (!(b & 128)) return v;
+      sh += 7;
+      if (sh > 35) throw new Error('varint');
+    }
+  }
   i32() {
     const v = this.dv.getInt32(this.n, true);
     this.n += 4;
@@ -240,10 +264,109 @@ const dec8 = typeof TextDecoder !== 'undefined' ? new TextDecoder() : null;
 /** 起きたことの JSON（数は小数 3 けたに丸める） */
 const evJson = (ev) => JSON.stringify(ev, (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 1000) / 1000 : v));
 
+// ---- 起きたこと（2026-11-17〜 バイナリ）----
+// いちばん多い「撃った」「輪ゴムが止まった」「当たった」は決まった形の数バイトで、ほかは JSON で送る（JSON の約 1/6）。
+//   [u8 数] のあと 1 つずつ [u8 種類] [varint 知らせの通し番号 n] [中身]
+//   1 撃った:   varint 輪ゴム id, i8 撃った犬, varint 端末での番号, u8 ゴムの種類, u8 武器, i16×3 位置, i16×3 速さ（1/100）
+//   2 止まった: varint 輪ゴム id, i16×3 位置, i8 当たった犬（-1 なし・-2 猫）
+//   3 当たった: u8 当てられた犬, i8 当てた犬, u16 ダメージ, u8 体力, i16×2 押される速さ（1/100）, u8 印（1 爆弾・2 頭）
+//   0 そのほか: u16 長さ + JSON
+const EV_KEYS = {
+  shot: ['t', 'n', 'id', 'o', 'cid', 'k', 'w', 'x', 'y', 'z', 'vx', 'vy', 'vz'],
+  end: ['t', 'n', 'id', 'x', 'y', 'z', 'h'],
+  hit: ['t', 'n', 'v', 'by', 'd', 'hp', 'kx', 'kz', 'bm', 'hs'],
+};
+const fits = (e) => {
+  const keys = EV_KEYS[e.t];
+  if (!keys || !Number.isInteger(e.n) || e.n < 0 || (e.t !== 'hit' && !(Number.isInteger(e.id) && e.id >= 0))) return false;
+  for (const k of Object.keys(e)) if (!keys.includes(k)) return false;
+  return true;
+};
+const V = 100; // 速さの単位（1/100 m/s）
+
+function writeEvents(w, evs) {
+  const list = evs.slice(0, 255);
+  w.u8(list.length);
+  for (const e of list) {
+    if (!fits(e)) {
+      const js = enc8.encode(evJson(e));
+      w.u8(0);
+      w.u16(js.length);
+      w.bytes(js);
+      continue;
+    }
+    if (e.t === 'shot') {
+      w.u8(1);
+      w.vu(e.n);
+      w.vu(e.id);
+      w.i8(e.o);
+      w.vu(e.cid || 0);
+      w.u8(e.k || 0);
+      w.u8(e.w || 0);
+      for (const v of [e.x, e.y, e.z]) w.i16(v * POS);
+      for (const v of [e.vx, e.vy, e.vz]) w.i16(v * V);
+    } else if (e.t === 'end') {
+      w.u8(2);
+      w.vu(e.n);
+      w.vu(e.id);
+      for (const v of [e.x, e.y, e.z]) w.i16(v * POS);
+      w.i8(e.h);
+    } else {
+      w.u8(3);
+      w.vu(e.n);
+      w.u8(e.v);
+      w.i8(e.by);
+      w.u16(e.d);
+      w.u8(Math.max(0, Math.min(255, e.hp)));
+      w.i16((e.kx || 0) * V);
+      w.i16((e.kz || 0) * V);
+      w.u8((e.bm ? 1 : 0) | (e.hs ? 2 : 0));
+    }
+  }
+}
+
+function readEvents(r) {
+  const n = r.u8();
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const ty = r.u8();
+    if (ty === 0) {
+      const len = r.u16();
+      const e = JSON.parse(dec8.decode(r.u.subarray(r.n, r.n + len)));
+      r.n += len;
+      if (e && typeof e === 'object') out.push(e);
+      continue;
+    }
+    const n = r.vu();
+    if (ty === 1) {
+      const id = r.vu();
+      const e = { t: 'shot', n, id, o: r.i8(), cid: r.vu(), k: r.u8(), w: r.u8() };
+      e.x = r.i16() / POS;
+      e.y = r.i16() / POS;
+      e.z = r.i16() / POS;
+      e.vx = r.i16() / V;
+      e.vy = r.i16() / V;
+      e.vz = r.i16() / V;
+      out.push(e);
+    } else if (ty === 2) {
+      const id = r.vu();
+      const e = { t: 'end', n, id, x: r.i16() / POS, y: r.i16() / POS, z: r.i16() / POS, h: r.i8() };
+      out.push(e);
+    } else if (ty === 3) {
+      const e = { t: 'hit', n, v: r.u8(), by: r.i8(), d: r.u16(), hp: r.u8(), kx: r.i16() / V, kz: r.i16() / V };
+      const fl = r.u8();
+      if (fl & 1) e.bm = 1;
+      if (fl & 2) e.hs = 1;
+      out.push(e);
+    } else throw new Error('event');
+  }
+  return out;
+}
+
 /** ホスト: 試合の要約をバイト列に。withRs: ラウンドごとの点も載せる。ev: 起きたこと（なければ載せない） */
 export function packBin(s, withRs = true, ev = null) {
   const w = new W();
-  const evs = ev && ev.length ? enc8.encode(evJson(ev)) : null;
+  const evs = ev && ev.length ? ev : null;
   w.u8(BIN_V);
   w.u8(s.round);
   w.u8(Math.max(0, PH.indexOf(s.phase)) | (withRs ? 8 : 0) | (evs ? 16 : 0));
@@ -331,10 +454,7 @@ export function packBin(s, withRs = true, ev = null) {
     w.i16(x.z * POS);
   }
   if (withRs) for (const p of s.players) for (let r = 0; r < 3; r++) w.u16(p.rs[r] || 0);
-  if (evs) {
-    w.u16(evs.length);
-    w.bytes(evs);
-  }
+  if (evs) writeEvents(w, evs);
   return w.out();
 }
 
@@ -408,11 +528,7 @@ export function unpackBin(u8, n, prevRs = null) {
     for (const p of all) p.rs = withRs ? [r.u16(), r.u16(), r.u16()] : prevRs?.[p.i] ? prevRs[p.i].slice() : [0, 0, 0];
     const players = all.slice(0, n);
     let ev = [];
-    if (f & 16) {
-      const len = r.u16();
-      ev = JSON.parse(dec8.decode(r.u.subarray(r.n, r.n + len)));
-      if (!Array.isArray(ev)) ev = [];
-    }
+    if (f & 16) ev = readEvents(r);
     return { st: { round, phase, t, players, boxes, heals, drop, wind, balloons, rain, wx, decoys, smokes, gums, mov, boss, bossWon }, ev };
   } catch {
     return null;
@@ -430,4 +546,46 @@ export function fromB64(str) {
   const u = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
   return u;
+}
+
+// ---- ゲスト → ホスト: 撃った・当たったのバイナリ（JSON の約 1/5）----
+//   1 撃った:   i16×3 目の位置（1/500 m）, i16×3 向き（1/30000）, u8 ゴムの種類, varint 端末での番号
+//   2 当たった: varint 輪ゴムの番号, u8 当てた犬, i16×3 当たった場所（1/500 m）
+const DIR = 30000;
+export function packFire(o, d, k, c) {
+  const w = new W();
+  w.u8(1);
+  for (const v of o) w.i16(v * POS);
+  for (const v of d) w.i16(v * DIR);
+  w.u8(k | 0);
+  w.vu(c);
+  return w.out();
+}
+export function packRemoteHit(c, v, p) {
+  const w = new W();
+  w.u8(2);
+  w.vu(c);
+  w.u8(v);
+  for (const x of p) w.i16(x * POS);
+  return w.out();
+}
+/** ゲストからのバイナリを、JSON のメッセージと同じ形 { t: 'f', o, d, k, c } / { t: 'h', c, v, p } に。壊れていれば null */
+export function unpackGameBin(u8) {
+  try {
+    const r = new R(u8);
+    const ty = r.u8();
+    if (ty === 1) {
+      const o = [r.i16() / POS, r.i16() / POS, r.i16() / POS];
+      const d = [r.i16() / DIR, r.i16() / DIR, r.i16() / DIR];
+      return { t: 'f', o, d, k: r.u8(), c: r.vu() };
+    }
+    if (ty === 2) {
+      const c = r.vu();
+      const v = r.u8();
+      return { t: 'h', c, v, p: [r.i16() / POS, r.i16() / POS, r.i16() / POS] };
+    }
+  } catch {
+    /* 壊れている */
+  }
+  return null;
 }
