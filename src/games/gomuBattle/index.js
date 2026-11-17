@@ -547,7 +547,7 @@ class GomuGame {
   /** ホスト: 計算で起きたことを、自分の画面に反映して、ゲストへ配る準備をする */
   _hostEvents(evs) {
     for (const e of evs) {
-      e.n = ++this.evSeq; // 知らせの通し番号（取りこぼし・重なりを見分ける）。e.id は輪ゴム・煙・ガムの番号のまま
+      e.sq = ++this.evSeq; // 知らせの通し番号（取りこぼし・重なりを見分ける）。e.id は輪ゴム・煙・ガムの番号、e.n は連続撃破の数・残りの発数のまま
       // 順番どおり確実に届く通信（中継）なら 1 回、取りこぼしのある P2P の高速チャンネルなら 3 回続けて載せる
       this.netEvents.push({ e, n: this.ctx.reliableInput ? 1 : 3 });
     }
@@ -1006,12 +1006,12 @@ class GomuGame {
     if (this.isHost) return;
     const evs = [];
     for (const e of events || []) {
-      if (!e || typeof e !== 'object' || !Number.isInteger(e.n) || this.seenEv.has(e.n)) continue;
-      this.seenEv.add(e.n);
+      if (!e || typeof e !== 'object' || !Number.isInteger(e.sq) || this.seenEv.has(e.sq)) continue;
+      this.seenEv.add(e.sq);
       evs.push(e);
     }
     if (this.seenEv.size > 800) this.seenEv = new Set([...this.seenEv].slice(-400));
-    evs.sort((a, b) => a.n - b.n);
+    evs.sort((a, b) => a.sq - b.sq);
     const prevRs = this.last?.players.map((p) => p.rs);
     const st = snap?.st || (typeof snap?.b === 'string' ? unpackBin(fromB64(snap.b), this.n, prevRs)?.st : unpackState(snap, this.n));
     if (st) {

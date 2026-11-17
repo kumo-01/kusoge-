@@ -266,19 +266,19 @@ const evJson = (ev) => JSON.stringify(ev, (k, v) => (typeof v === 'number' && !N
 
 // ---- 起きたこと（2026-11-17〜 バイナリ）----
 // いちばん多い「撃った」「輪ゴムが止まった」「当たった」は決まった形の数バイトで、ほかは JSON で送る（JSON の約 1/6）。
-//   [u8 数] のあと 1 つずつ [u8 種類] [varint 知らせの通し番号 n] [中身]
+//   [u8 数] のあと 1 つずつ [u8 種類] [varint 知らせの通し番号 sq] [中身]
 //   1 撃った:   varint 輪ゴム id, i8 撃った犬, varint 端末での番号, u8 ゴムの種類, u8 武器, i16×3 位置, i16×3 速さ（1/100）
 //   2 止まった: varint 輪ゴム id, i16×3 位置, i8 当たった犬（-1 なし・-2 猫）
 //   3 当たった: u8 当てられた犬, i8 当てた犬, u16 ダメージ, u8 体力, i16×2 押される速さ（1/100）, u8 印（1 爆弾・2 頭）
 //   0 そのほか: u16 長さ + JSON
 const EV_KEYS = {
-  shot: ['t', 'n', 'id', 'o', 'cid', 'k', 'w', 'x', 'y', 'z', 'vx', 'vy', 'vz'],
-  end: ['t', 'n', 'id', 'x', 'y', 'z', 'h'],
-  hit: ['t', 'n', 'v', 'by', 'd', 'hp', 'kx', 'kz', 'bm', 'hs'],
+  shot: ['t', 'sq', 'id', 'o', 'cid', 'k', 'w', 'x', 'y', 'z', 'vx', 'vy', 'vz'],
+  end: ['t', 'sq', 'id', 'x', 'y', 'z', 'h'],
+  hit: ['t', 'sq', 'v', 'by', 'd', 'hp', 'kx', 'kz', 'bm', 'hs'],
 };
 const fits = (e) => {
   const keys = EV_KEYS[e.t];
-  if (!keys || !Number.isInteger(e.n) || e.n < 0 || (e.t !== 'hit' && !(Number.isInteger(e.id) && e.id >= 0))) return false;
+  if (!keys || !Number.isInteger(e.sq) || e.sq < 0 || (e.t !== 'hit' && !(Number.isInteger(e.id) && e.id >= 0))) return false;
   for (const k of Object.keys(e)) if (!keys.includes(k)) return false;
   return true;
 };
@@ -297,7 +297,7 @@ function writeEvents(w, evs) {
     }
     if (e.t === 'shot') {
       w.u8(1);
-      w.vu(e.n);
+      w.vu(e.sq);
       w.vu(e.id);
       w.i8(e.o);
       w.vu(e.cid || 0);
@@ -307,13 +307,13 @@ function writeEvents(w, evs) {
       for (const v of [e.vx, e.vy, e.vz]) w.i16(v * V);
     } else if (e.t === 'end') {
       w.u8(2);
-      w.vu(e.n);
+      w.vu(e.sq);
       w.vu(e.id);
       for (const v of [e.x, e.y, e.z]) w.i16(v * POS);
       w.i8(e.h);
     } else {
       w.u8(3);
-      w.vu(e.n);
+      w.vu(e.sq);
       w.u8(e.v);
       w.i8(e.by);
       w.u16(e.d);
@@ -337,10 +337,10 @@ function readEvents(r) {
       if (e && typeof e === 'object') out.push(e);
       continue;
     }
-    const n = r.vu();
+    const sq = r.vu();
     if (ty === 1) {
       const id = r.vu();
-      const e = { t: 'shot', n, id, o: r.i8(), cid: r.vu(), k: r.u8(), w: r.u8() };
+      const e = { t: 'shot', sq, id, o: r.i8(), cid: r.vu(), k: r.u8(), w: r.u8() };
       e.x = r.i16() / POS;
       e.y = r.i16() / POS;
       e.z = r.i16() / POS;
@@ -350,10 +350,10 @@ function readEvents(r) {
       out.push(e);
     } else if (ty === 2) {
       const id = r.vu();
-      const e = { t: 'end', n, id, x: r.i16() / POS, y: r.i16() / POS, z: r.i16() / POS, h: r.i8() };
+      const e = { t: 'end', sq, id, x: r.i16() / POS, y: r.i16() / POS, z: r.i16() / POS, h: r.i8() };
       out.push(e);
     } else if (ty === 3) {
-      const e = { t: 'hit', n, v: r.u8(), by: r.i8(), d: r.u16(), hp: r.u8(), kx: r.i16() / V, kz: r.i16() / V };
+      const e = { t: 'hit', sq, v: r.u8(), by: r.i8(), d: r.u16(), hp: r.u8(), kx: r.i16() / V, kz: r.i16() / V };
       const fl = r.u8();
       if (fl & 1) e.bm = 1;
       if (fl & 2) e.hs = 1;
