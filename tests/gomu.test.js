@@ -1183,7 +1183,7 @@ test('通信: 起きたこと（撃った・止まった・当たった）はバ
   assert.equal(unpackGameBin(new Uint8Array([9, 9])), null);
 });
 
-test('マシンガン: 輪ゴムが強くなるアイテムも出て、使うと 30 発。補給箱の金の輪ゴムも 30 発', async () => {
+test('マシンガン: 輪ゴムが強くなるアイテムも出て、使うと 30 発。補給箱の金の輪ゴムは 20 発', async () => {
   const { BAND_ITEMS, FUN: F } = await import('../src/games/gomuBattle/constants.js');
   const sim = ready();
   const [a, b] = sim.s.players;
@@ -1215,7 +1215,7 @@ test('マシンガン: 輪ゴムが強くなるアイテムも出て、使うと
   run(sim, 0.2);
   assert.equal(sim.s.drop, null);
   assert.equal(a.sp, ITEM.GOLD);
-  assert.equal(a.spN, 30);
+  assert.equal(a.spN, 20);
 });
 
 test('炎の輪ゴム: 当たった相手は 5 秒燃えて 1 秒ごとに 5 ダメージ（撃った犬の点）。配信に燃えている印が載る', async () => {
@@ -1270,7 +1270,7 @@ test('通信: 知らせの通し番号 sq は、連続撃破の数・強化ゴ�
 test('マシンガンの輪ゴムはふだんから 5 回跳ね返る。見えない天井（雲より上）で輪ゴムが跳ね返り、犬も越えられない', () => {
   assert.equal(bandSpec(0, WEAPON.MG).bounce, 5);
   assert.equal(bandSpec(0, WEAPON.NORMAL).bounce, 1);
-  assert.equal(bandSpec(ITEM.BOUNCE, WEAPON.MG).bounce, 5, '跳ね返りゴムでも減らない');
+  assert.equal(bandSpec(ITEM.BOUNCE, WEAPON.MG).bounce, 10, '跳ね返りゴムなら 10 回');
   assert.ok(ROOM.CEIL > 34 && ROOM.CEIL < 45, '雲（高さ 24〜35 くらい）より少し上');
   const a = ARENAS[0];
   const out = {};

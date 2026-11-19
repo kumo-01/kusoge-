@@ -145,7 +145,8 @@ export const ITEMS = {
   BOX_RESPAWN: 10, // 箱を取ってから次が出るまで
   BOX_RADIUS: 0.8, // これより近づくと取れる
   SPECIAL_SHOTS: 5, // ゴムが変わるアイテムは次の 5 発
-  SPECIAL_SHOTS_MG: 30, // マシンガンで使うと次の 30 発（金の輪ゴムも）
+  SPECIAL_SHOTS_MG: 30, // マシンガンで使うと次の 30 発
+  GOLD_SHOTS_MG: 20, // マシンガンの金の輪ゴム（補給箱）は 20 発
   THICK_SPEED: 37.8,
   THICK_RADIUS: 0.22,
   THICK_DAMAGE: 2,
@@ -188,7 +189,7 @@ export const BOT = {
 export const ITEM_INFO = {
   [ITEM.THICK]: { name: '極太ゴム', icon: 'thick', desc: '次の5発（マシンガンは30発）が太くて当たりやすく、ダメージ1.6倍' },
   [ITEM.TRIPLE]: { name: '3方向ゴム', icon: 'triple', desc: '次の5発（マシンガンは30発）が、扇の形に3本ずつ飛ぶ' },
-  [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: 'bounce', desc: '次の5発（マシンガンは30発）が、壁や家具で3回まで跳ね返る' },
+  [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: 'bounce', desc: '次の5発（マシンガンは30発）が、壁や家具で3回（マシンガンは10回）まで跳ね返る' },
   [ITEM.HOMING]: { name: '追いかけゴム', icon: 'target', desc: '次の5発（マシンガンは30発）が、狙った近くの相手へゆるく曲がる' },
   [ITEM.SMOKE]: { name: '煙幕', icon: 'cloud', desc: '狙った所に煙を投げる。中は見えない' },
   [ITEM.SHAKE]: { name: '照準ぶれ', icon: 'spiral', desc: '自分以外の全員の狙いが3秒ゆらゆら' },
@@ -213,7 +214,7 @@ export const WEAPONS = {
   // ライフル: どんな距離でも当たれば一撃（体力 100 ぶん）。1 発しか込められず、補充はスナイパーより少し長い
   [WEAPON.RIFLE]: { name: 'ライフル', desc: '1発ずつ。どんな距離でも、当たれば一撃で倒す。1発ごとに3秒かけて補充。のぞくと拡大', ammo: 1, reload: 3.0, gap: 0.3, speed: 90, gravity: 0.2, dmg: [100, 100], fall: [0, 1], r: 0.05, life: 1.3, zoomFov: 20 },
   // マシンガン（人だけが選べる。CPU は選ばない）: 弾数は無限、撃つ間隔はほぼ 0。1 発は弱い（近いほど 3〜1、頭は 5）。ゴム切れも効かない
-  [WEAPON.MG]: { name: 'マシンガン', desc: '弾は無限・ほぼ休みなく連射。1発は弱い（3〜1、頭に当てると5）。ゴム切れも効かない', ammo: 99, inf: true, reload: 0, gap: 0.05, speed: 55, gravity: 2.5, dmg: [3, 1], fall: [6, 30], r: 0.06, life: 1.5, head: 5, noAmmoProof: true, bounces: 5 }, // ふだんから 5 回跳ね返る
+  [WEAPON.MG]: { name: 'マシンガン', desc: '弾は無限・ほぼ休みなく連射。1発は弱い（3〜1、頭に当てると5）。ゴム切れも効かない', ammo: 99, inf: true, reload: 0, gap: 0.05, speed: 55, gravity: 2.5, dmg: [3, 1], fall: [6, 30], r: 0.06, life: 1.5, head: 5, noAmmoProof: true, bounces: 5, bounceItem: 10 }, // ふだんから 5 回、跳ね返りゴムなら 10 回跳ね返る
   // 爆弾（全員が 1 ラウンドに BOMB_COUNT 回まで投げられる。G キー）
   [WEAPON.BOMB]: { name: '爆弾', desc: '山なりに投げて、何かに当たると爆発。まわりの相手まとめて（中心36〜はじ8）', gap: 0.9, speed: 19, gravity: 15, dmg: [36, 8], blast: 3.5, r: 0.2, life: 3.2 },
 };

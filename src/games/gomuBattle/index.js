@@ -745,7 +745,10 @@ class GomuGame {
           this.ctx.sound.play('itemReady');
           break;
         case 'dropget':
-          this.hud.pushFeed(`🪂 ${name(e.i)} が補給箱を取った！金の輪ゴム ×${FUN.GOLD_SHOTS}`, e.i === this.me ? 'mine' : '');
+          {
+            const gw = (this.isHost ? this.sim.s.players : this.last?.players)?.[e.i]?.weapon;
+            this.hud.pushFeed(`🪂 ${name(e.i)} が補給箱を取った！金の輪ゴム ×${gw === WEAPON.MG ? ITEMS.GOLD_SHOTS_MG : FUN.GOLD_SHOTS}`, e.i === this.me ? 'mine' : '');
+          }
           if (e.i === this.me) this.ctx.sound.play('chance');
           break;
         case 'wind':

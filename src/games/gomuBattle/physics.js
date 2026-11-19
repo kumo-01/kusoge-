@@ -306,7 +306,7 @@ export function bandSpec(kind, weapon = WEAPON.NORMAL) {
   const bomb = w === WEAPON.BOMB;
   const base = { speed: W.speed, r: W.r, mul: 1, bounce: bomb ? 0 : W.bounces ?? GUN.BOUNCES, life: W.life, g: W.gravity, w };
   if (kind === ITEM.THICK) return { ...base, speed: w === WEAPON.NORMAL ? ITEMS.THICK_SPEED : W.speed * (bomb ? 1 : 0.8), r: bomb ? W.r * 1.3 : ITEMS.THICK_RADIUS, mul: THICK_MUL };
-  if (kind === ITEM.BOUNCE) return { ...base, bounce: Math.max(base.bounce, ITEMS.BOUNCES), life: Math.max(W.life, ITEMS.BOUNCE_LIFE) };
+  if (kind === ITEM.BOUNCE) return { ...base, bounce: W.bounceItem ?? Math.max(base.bounce, ITEMS.BOUNCES), life: Math.max(W.life, ITEMS.BOUNCE_LIFE) };
   if (kind === ITEM.GOLD) return { ...base, mul: FUN.GOLD_MUL, r: W.r * 1.3 }; // 金の輪ゴム: ダメージ 2 倍
   return base;
 }

@@ -692,7 +692,7 @@ export class GomuSim {
         for (const p of s.players) {
           if (p.dead > 0 || Math.hypot(p.x - dp.x, p.z - dp.z) > FUN.DROP_RADIUS || Math.abs(p.y - dp.y) > 1.6) continue;
           p.sp = ITEM.GOLD;
-          p.spN = p.weapon === WEAPON.MG ? ITEMS.SPECIAL_SHOTS_MG : FUN.GOLD_SHOTS; // マシンガンは 30 発
+          p.spN = p.weapon === WEAPON.MG ? ITEMS.GOLD_SHOTS_MG : FUN.GOLD_SHOTS; // マシンガンは 20 発
           this.events.push({ t: 'sp', i: p.i, k: ITEM.GOLD, n: p.spN });
           this.events.push({ t: 'dropget', i: p.i });
           s.drop = null;
