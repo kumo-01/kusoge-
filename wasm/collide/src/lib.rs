@@ -123,8 +123,15 @@ pub fn hit_world(boxes: &[f64], room_w: f64, room_d: f64, floor: f64, ceil: f64,
     // 箱（太さ r だけ広げた箱と線分のスラブ法）
     let o = [ax, ay, az];
     let dv = [dx, dy, dz];
+    // 線分を囲む箱（太さ r こみ）。これに重ならない箱は、下の計算をしても当たらないので飛ばす（結果は同じで、速い）
+    let (sx0, sx1) = if ax < bx { (ax - r, bx + r) } else { (bx - r, ax + r) };
+    let (sy0, sy1) = if ay < by { (ay - r, by + r) } else { (by - r, ay + r) };
+    let (sz0, sz1) = if az < bz { (az - r, bz + r) } else { (bz - r, az + r) };
     for b in boxes.chunks_exact(6) {
         // b = [x0, x1, y0, y1, z0, z1]
+        if b[0] > sx1 || b[1] < sx0 || b[4] > sz1 || b[5] < sz0 || b[2] > sy1 || b[3] < sy0 {
+            continue;
+        }
         let mut t0 = 0.0_f64;
         let mut t1 = best;
         let mut hit_n: Option<[f64; 3]> = None;

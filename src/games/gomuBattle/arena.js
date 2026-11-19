@@ -204,6 +204,55 @@ function spread(a) {
 }
 
 /**
+ * 四角（x0, x1, z0, z1）の置き場所の索引（8 m のますに分けて、近くのものだけ調べる）。
+ * 会場づくりで「ここに置けるか」を何十万回も調べるので、全部の箱を毎回見ると 1 秒以上かかっていた
+ */
+class RectIndex {
+  constructor(cell = 8) {
+    this.cell = cell;
+    this.map = new Map();
+    this.n = 0;
+  }
+  add(b) {
+    const c = this.cell;
+    const tag = this.n++;
+    for (let i = Math.floor(b.x0 / c); i <= Math.floor(b.x1 / c); i++) {
+      for (let j = Math.floor(b.z0 / c); j <= Math.floor(b.z1 / c); j++) {
+        const k = i * 4096 + j;
+        let l = this.map.get(k);
+        if (!l) this.map.set(k, (l = []));
+        l.push(b);
+      }
+    }
+    return tag;
+  }
+  /** 範囲に重なる四角があるか（test があれば、それも満たすもの） */
+  any(x0, x1, z0, z1, test = null) {
+    const c = this.cell;
+    for (let i = Math.floor(x0 / c); i <= Math.floor(x1 / c); i++) {
+      for (let j = Math.floor(z0 / c); j <= Math.floor(z1 / c); j++) {
+        const l = this.map.get(i * 4096 + j);
+        if (!l) continue;
+        for (let n = 0; n < l.length; n++) {
+          const b = l[n];
+          if (x1 > b.x0 && x0 < b.x1 && z1 > b.z0 && z0 < b.z1 && (!test || test(b))) return true;
+        }
+      }
+    }
+    return false;
+  }
+}
+/** a.boxes の索引（箱が増えたら作り直す） */
+function boxIndex(a) {
+  if (a._bi && a._biN === a.boxes.length) return a._bi;
+  const ix = new RectIndex();
+  for (const b of a.boxes) ix.add(b);
+  a._bi = ix;
+  a._biN = a.boxes.length;
+  return ix;
+}
+
+/**
  * 障害物 10 種（2026-11-13）。{ k: 種類, w, d, h, n: 数, c: 色 }。置き場所は placeObstacles が決める（毎回同じ）
  */
 const OBSTACLES = [
@@ -227,7 +276,12 @@ export const OBSTACLE_KINDS = OBSTACLES.map((o) => o.k);
 function placeObstacles(a, list) {
   const placed = [];
   const out = [];
-  const rugs = (a.decor || []).filter((d) => d.type === 'rug' || d.type === 'water');
+  const rugs = (a.decor || []).filter((d) => d.type === 'rug' || d.type === 'water').map((r) => ({ type: r.type, x0: r.x - r.w / 2, x1: r.x + r.w / 2, z0: r.z - r.d / 2, z1: r.z + r.d / 2 }));
+  const movs = (a.movables || []).map((m) => ({ x0: m.x - m.w / 2 - 1, x1: m.x + m.w / 2 + 1, z0: m.z - m.d / 2 - 1, z1: m.z + m.d / 2 + 1 }));
+  const pts = [...a.spawns, ...a.items];
+  const bi = boxIndex(a);
+  const oi = new RectIndex();
+  const staticOk = new Map();
   let seq = 0;
   for (const o of list) {
     for (let i = 0; i < o.n; i++) {
@@ -235,26 +289,58 @@ function placeObstacles(a, list) {
       const w = turn ? o.d : o.w;
       const d = turn ? o.w : o.d;
       const M = o.k === 'lamp' ? 0.6 : 1.4; // まわりに空ける幅
+      // 動かないもの（家具・押せるもの・道・水・出発地点・箱）に重ならない場所は、大きさごとに 1 回だけ調べて覚えておく
+      const key = `${w}|${d}|${M}|${o.k === 'lamp' ? 1 : 0}`;
+      let cands = staticOk.get(key);
+      if (!cands) {
+        cands = [];
+        for (let x = -ROOM.W / 2 + w / 2 + 2.5; x <= ROOM.W / 2 - w / 2 - 2.5; x += 1.5) {
+          for (let z = -ROOM.D / 2 + d / 2 + 2.5; z <= ROOM.D / 2 - d / 2 - 2.5; z += 1.5) {
+            if (Math.hypot(x, z) < 12) continue; // 真ん中の広場は空けておく
+            const x0 = x - w / 2 - M;
+            const x1 = x + w / 2 + M;
+            const z0 = z - d / 2 - M;
+            const z1 = z + d / 2 + M;
+            if (bi.any(x0, x1, z0, z1)) continue;
+            let bad = false;
+            for (let n = 0; n < movs.length && !bad; n++) {
+              const b = movs[n];
+              bad = x1 > b.x0 && x0 < b.x1 && z1 > b.z0 && z0 < b.z1;
+            }
+            for (let n = 0; n < rugs.length && !bad; n++) {
+              const b = rugs[n];
+              if (o.k === 'lamp' && b.type !== 'water') continue; // 街灯は道の上にも立てる（水の中はだめ）
+              bad = x1 > b.x0 && x0 < b.x1 && z1 > b.z0 && z0 < b.z1;
+            }
+            for (let n = 0; n < pts.length && !bad; n++) {
+              const px = pts[n][0];
+              const pz = pts[n][1];
+              bad = px > x0 - 1.6 && px < x1 + 1.6 && pz > z0 - 1.6 && pz < z1 + 1.6;
+            }
+            if (!bad) cands.push(x, z);
+          }
+        }
+        staticOk.set(key, cands);
+      }
       let best = null;
       let bd = -1;
-      for (let x = -ROOM.W / 2 + w / 2 + 2.5; x <= ROOM.W / 2 - w / 2 - 2.5; x += 1.5) {
-        for (let z = -ROOM.D / 2 + d / 2 + 2.5; z <= ROOM.D / 2 - d / 2 - 2.5; z += 1.5) {
-          if (Math.hypot(x, z) < 12) continue; // 真ん中の広場は空けておく
-          const x0 = x - w / 2 - M;
-          const x1 = x + w / 2 + M;
-          const z0 = z - d / 2 - M;
-          const z1 = z + d / 2 + M;
-          const hitRect = (b) => x1 > b.x0 && x0 < b.x1 && z1 > b.z0 && z0 < b.z1;
-          if (a.boxes.some(hitRect) || out.some(hitRect)) continue;
-          if ((a.movables || []).some((m) => hitRect({ x0: m.x - m.w / 2 - 1, x1: m.x + m.w / 2 + 1, z0: m.z - m.d / 2 - 1, z1: m.z + m.d / 2 + 1 }))) continue;
-          if (o.k !== 'lamp' && rugs.some((r) => hitRect({ x0: r.x - r.w / 2, x1: r.x + r.w / 2, z0: r.z - r.d / 2, z1: r.z + r.d / 2 }))) continue;
-          if (o.k === 'lamp' && rugs.some((r) => r.type === 'water' && hitRect({ x0: r.x - r.w / 2, x1: r.x + r.w / 2, z0: r.z - r.d / 2, z1: r.z + r.d / 2 }))) continue;
-          const pts = [...a.spawns, ...a.items];
-          if (pts.some(([px, pz]) => px > x0 - 1.6 && px < x1 + 1.6 && pz > z0 - 1.6 && pz < z1 + 1.6)) continue;
+      for (let c = 0; c < cands.length; c += 2) {
+        {
+          const x = cands[c];
+          const z = cands[c + 1];
+          if (oi.any(x - w / 2 - M, x + w / 2 + M, z - d / 2 - M, z + d / 2 + M)) continue;
           // 同じ種類からは遠く、ほかの障害物からもなるべく遠く
-          const same = placed.filter((p) => p.k === o.k);
-          const dSame = same.length ? Math.min(...same.map((p) => Math.hypot(p.x - x, p.z - z))) : 200 - Math.hypot(x, z) * 0.5;
-          const dAll = placed.length ? Math.min(...placed.map((p) => Math.hypot(p.x - x, p.z - z))) : 100;
+          // （距離は 2 乗のまま比べて、最後に平方根。Math.hypot は遅く、ブラウザによって最後のけたが違うことがある）
+          let sSame = Infinity;
+          let sAll = Infinity;
+          for (let n = 0; n < placed.length; n++) {
+            const q = placed[n];
+            const dd = (q.x - x) * (q.x - x) + (q.z - z) * (q.z - z);
+            if (dd < sAll) sAll = dd;
+            if (q.k === o.k && dd < sSame) sSame = dd;
+          }
+          const dAll = placed.length ? Math.sqrt(sAll) : 100;
+          const dSame = sSame === Infinity ? 200 - Math.sqrt(x * x + z * z) * 0.5 : Math.sqrt(sSame);
           const score = dSame + Math.min(dAll, 12) * 0.8;
           if (score > bd) {
             bd = score;
@@ -265,7 +351,9 @@ function placeObstacles(a, list) {
       if (!best) continue;
       const [x, z] = best;
       placed.push({ k: o.k, x, z });
-      out.push({ x0: x - w / 2, x1: x + w / 2, z0: z - d / 2, z1: z + d / 2, y0: 0, y1: o.h, c: o.c, k: o.k });
+      const nb = { x0: x - w / 2, x1: x + w / 2, z0: z - d / 2, z1: z + d / 2, y0: 0, y1: o.h, c: o.c, k: o.k };
+      out.push(nb);
+      oi.add(nb);
     }
   }
   return out;
@@ -277,11 +365,20 @@ function placeObstacles(a, list) {
  * R: 空けておく半径、inner: 会場の真ん中寄りだけ（幅・奥行きのこの割合の中）
  */
 function freeSpots(a, n, { R = 1.1, inner = 1, avoid = [], gap = 3, minR = 0 } = {}) {
+  const bi = boxIndex(a);
+  const low = (b) => b.y0 < 1.6;
   const blocked = (x, z) =>
-    a.boxes.some((b) => b.y0 < 1.6 && x + R > b.x0 && x - R < b.x1 && z + R > b.z0 && z - R < b.z1) ||
+    bi.any(x - R, x + R, z - R, z + R, low) ||
     (a.movables || []).some((m) => Math.abs(x - m.x) < m.w / 2 + R + 0.5 && Math.abs(z - m.z) < m.d / 2 + R + 0.5) ||
     (a.decor || []).some((d) => d.type === 'water' && Math.abs(x - d.x) < d.w / 2 + R && Math.abs(z - d.z) < d.d / 2 + R); // 水の上には置かない
-  const near = (x, z, list, d) => list.some(([px, pz]) => Math.hypot(px - x, pz - z) < d);
+  const near = (x, z, list, d) => {
+    for (let k = 0; k < list.length; k++) {
+      const dx = list[k][0] - x;
+      const dz = list[k][1] - z;
+      if (dx * dx + dz * dz < d * d) return true;
+    }
+    return false;
+  };
   const cand = [];
   for (let x = -ROOM.W / 2 + 3; x <= ROOM.W / 2 - 3; x += 2) {
     for (let z = -ROOM.D / 2 + 3; z <= ROOM.D / 2 - 3; z += 2) {
@@ -293,16 +390,27 @@ function freeSpots(a, n, { R = 1.1, inner = 1, avoid = [], gap = 3, minR = 0 } =
   let first = cand[0];
   for (const c of cand) if (Math.hypot(c[0], c[1]) < Math.hypot(first[0], first[1])) first = c;
   if (first) out.push(first);
+  // いちばん近い選んだ所までの距離を、候補ごとに覚えておく（選ぶたびに全部計算し直さない）
+  const near1 = new Float64Array(cand.length).fill(Infinity);
+  const upd = (p) => {
+    for (let k = 0; k < cand.length; k++) {
+      const dx = p[0] - cand[k][0];
+      const dz = p[1] - cand[k][1];
+      const d = dx * dx + dz * dz; // 2 乗のまま比べる
+      if (d < near1[k]) near1[k] = d;
+    }
+  };
+  if (first) upd(first);
   while (out.length < n && out.length < cand.length) {
     let best = null;
     let bd = -1;
-    for (const c of cand) {
-      const d = Math.min(...out.map(([x, z]) => Math.hypot(x - c[0], z - c[1])));
-      if (d > bd) {
-        bd = d;
-        best = c;
+    for (let k = 0; k < cand.length; k++) {
+      if (near1[k] > bd) {
+        bd = near1[k];
+        best = cand[k];
       }
     }
+    upd(best);
     out.push(best);
   }
   return out.map(([x, z]) => [x, z, 0]);
@@ -324,13 +432,15 @@ function terrainSpots(a) {
     [8, 1.8],
   ];
   const boxDist = (b, x, z) => Math.hypot(Math.max(b.x0 - x, 0, x - b.x1), Math.max(b.z0 - z, 0, z - b.z1));
+  const bi = boxIndex(a);
   const out = [];
   for (const [r, h] of KINDS) {
     let best = null;
     let bd = -1;
     for (let x = -ROOM.W / 2 + r + 2; x <= ROOM.W / 2 - r - 2; x += 1.5) {
       for (let z = -ROOM.D / 2 + r + 2; z <= ROOM.D / 2 - r - 2; z += 1.5) {
-        if (a.boxes.some((b) => boxDist(b, x, z) < r + 0.8)) continue;
+        const rr = r + 0.8;
+        if (bi.any(x - rr, x + rr, z - rr, z + rr, (b) => boxDist(b, x, z) < rr)) continue;
         if ((a.movables || []).some((m) => Math.hypot(m.x - x, m.z - z) < r + Math.max(m.w, m.d) / 2 + 1)) continue;
         if ((a.decor || []).some((d) => (d.type === 'rug' || d.type === 'water') && Math.hypot(Math.max(Math.abs(x - d.x) - d.w / 2, 0), Math.max(Math.abs(z - d.z) - d.d / 2, 0)) < r + 0.5)) continue;
         if (out.some((f) => Math.hypot(f.x - x, f.z - z) < f.r + r + 3)) continue;
@@ -515,7 +625,7 @@ export function hitParts(b) {
 
 // ---- 公園 ----
 const PARK_TREES = [[-20, -14], [-8, -16.5], [6, -16], [20, -12], [-22, 6], [22, 10], [-7, 15], [13, 16]];
-const PARK = spread({
+const PARK = () => spread({
   id: 'park',
   name: '公園',
   outdoor: true,
@@ -580,7 +690,7 @@ const PARK = spread({
 });
 
 // ---- 砂浜 ----
-const BEACH = spread({
+const BEACH = () => spread({
   id: 'beach',
   name: '砂浜',
   outdoor: true,
@@ -648,7 +758,7 @@ const BEACH = spread({
 
 // ---- キャンプ場 ----
 const CAMP_TREES = [[-22, -16], [-12, -17.5], [10, -17.5], [22, -15], [-23.5, 4], [23.5, 7], [-18, 17], [17, 17.5]];
-const CAMP = spread({
+const CAMP = () => spread({
   id: 'camp',
   name: 'キャンプ場',
   outdoor: true,
@@ -719,7 +829,14 @@ const CAMP = spread({
   ],
 });
 
-export const ARENAS = [PARK, BEACH, CAMP];
+/**
+ * 会場（公園・砂浜・キャンプ場）。作るのに少し時間がかかるので、はじめて使うときに作る（ゲームの始まりに 3 つ分まとめて固まらないように）
+ */
+export const ARENAS = [];
+[PARK, BEACH, CAMP].forEach((make, i) => {
+  let v = null;
+  Object.defineProperty(ARENAS, i, { get: () => (v ||= make()), enumerable: true, configurable: true });
+});
 
 
 /** 点 (x, z) が箱の水平の範囲に、太さ r で重なるか */
@@ -770,7 +887,15 @@ export function segmentHitJs(arena, ax, ay, az, bx, by, bz, r = 0, out = null) {
     }
   }
   // 箱（太さ r だけ広げた箱と線分のスラブ法）
+  // 線分を囲む箱（太さ r こみ）。これに重ならない箱は、下の計算をしても当たらないので飛ばす（Rust 版と同じ）
+  const sx0 = (ax < bx ? ax : bx) - r;
+  const sx1 = (ax < bx ? bx : ax) + r;
+  const sy0 = (ay < by ? ay : by) - r;
+  const sy1 = (ay < by ? by : ay) + r;
+  const sz0 = (az < bz ? az : bz) - r;
+  const sz1 = (az < bz ? bz : az) + r;
   for (const b of arena.boxes) {
+    if (b.x0 > sx1 || b.x1 < sx0 || b.z0 > sz1 || b.z1 < sz0 || b.y0 > sy1 || b.y1 < sy0) continue;
     let t0 = 0;
     let t1 = best;
     let hitN = null;

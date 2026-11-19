@@ -51,7 +51,12 @@ export class GomuSim {
   }
 
   get arena() {
-    return ARENAS[this.s.round % ARENAS.length];
+    const r = this.s.round;
+    if (this._arenaR !== r) {
+      this._arenaR = r;
+      this._arena = ARENAS[r % ARENAS.length];
+    }
+    return this._arena;
   }
 
   /** ぶつかる物すべて（家具 + 押せるもの）。押せるものは試合の状態 s.mov の箱そのもの */
@@ -461,7 +466,14 @@ export class GomuSim {
       // 当たり（撃った本人には当たらない。撃った人の端末で決める輪ゴムは、ここでは当てない）
       let hit = null;
       let ht = 2;
+      // この tick に輪ゴムが動いた範囲（太さこみ）。ここから遠い犬・風船は、細かい計算をしないで飛ばす（結果は同じ）
+      const R = PLAYER.HIT_RADIUS + b.r + 0.01;
+      const bx0 = (ax < b.x ? ax : b.x) - R;
+      const bx1 = (ax < b.x ? b.x : ax) + R;
+      const bz0 = (az < b.z ? az : b.z) - R;
+      const bz1 = (az < b.z ? b.z : az) + R;
       if (!b.cj || b.o < 0) for (const q of s.players) {
+        if (q.x < bx0 || q.x > bx1 || q.z < bz0 || q.z > bz1) continue;
         if (!this.foes(b.o, q.i) || q.dead > 0) continue;
         const t = segCylinder(ax, ay, az, b.x, b.y, b.z, q, heightOf(q), PLAYER.HIT_RADIUS + b.r);
         if (t >= 0 && t < ht) {
@@ -491,16 +503,20 @@ export class GomuSim {
       }
       let pop = -1;
       if (b.o >= 0) {
-        (this.arena.balloons || []).forEach(([x, z, y], k) => {
-          if (s.balloons[k] > 0) return;
-          const t = segSphere(ax, ay, az, b.x, b.y, b.z, x, y, z, EXTRA.BALLOON_R + b.r);
+        const bl = this.arena.balloons || [];
+        const RB = EXTRA.BALLOON_R + b.r + 0.01 - R;
+        for (let k = 0; k < bl.length; k++) {
+          const x = bl[k][0];
+          const z = bl[k][1];
+          if (x < bx0 - RB || x > bx1 + RB || z < bz0 - RB || z > bz1 + RB || s.balloons[k] > 0) continue;
+          const t = segSphere(ax, ay, az, b.x, b.y, b.z, x, bl[k][2], z, EXTRA.BALLOON_R + b.r);
           if (t >= 0 && t < ht) {
             ht = t;
             hit = null;
             hitDecoy = null;
             pop = k;
           }
-        });
+        }
       }
       if (hitDecoy || pop >= 0) {
         const hx = ax + (b.x - ax) * ht;

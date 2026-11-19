@@ -12,10 +12,50 @@ export function createBody(x = 0, z = 0, yaw = 0) {
 export const heightOf = (m) => (m.crouch ? PLAYER.CROUCH_HEIGHT : PLAYER.HEIGHT);
 export const eyeOf = (m) => (m.crouch ? PLAYER.CROUCH_EYE : PLAYER.EYE);
 
+// ---- 近くの箱だけ調べるための索引 ----
+// 動かない箱は 4 m のますに分けて覚えておき、犬のいる（行こうとしている）ますの箱だけ調べる。押せるもの（動く箱）は数が少ないので毎回全部。
+// 順番は元の並び（動かない箱 → 押せるもの）のままなので、全部調べるのと同じ結果になる
+const CELL = 4;
+const PAD = 1; // これより太い体は索引を使わない（全部調べる）
+function indexOf(world) {
+  const boxes = world.boxes;
+  if (world._gx && world._gxB === boxes && world._gxN === boxes.length) return world._gx;
+  const nx = Math.ceil(ROOM.W / CELL) + 2;
+  const nz = Math.ceil(ROOM.D / CELL) + 2;
+  const cells = Array.from({ length: nx * nz }, () => []);
+  const mv = [];
+  const ci = (v, half, n) => Math.max(0, Math.min(n - 1, Math.floor((v + half) / CELL) + 1));
+  for (const b of boxes) {
+    if (b.mv) {
+      mv.push(b);
+      continue;
+    }
+    for (let i = ci(b.x0 - PAD, ROOM.W / 2, nx); i <= ci(b.x1 + PAD, ROOM.W / 2, nx); i++) for (let j = ci(b.z0 - PAD, ROOM.D / 2, nz); j <= ci(b.z1 + PAD, ROOM.D / 2, nz); j++) cells[i * nz + j].push(b);
+  }
+  // world に覚えておく（数えられない持ち物にして、{ ...world } で写しても古い索引がついていかないように）
+  Object.defineProperty(world, '_gx', { value: { cells, mv, nx, nz, ci }, writable: true, configurable: true, enumerable: false });
+  Object.defineProperty(world, '_gxB', { value: boxes, writable: true, configurable: true, enumerable: false });
+  Object.defineProperty(world, '_gxN', { value: boxes.length, writable: true, configurable: true, enumerable: false });
+  return world._gx;
+}
+/** (x, z) の近く（太さ r）の箱を out に入れて返す */
+function nearBoxes(world, x, z, r, out) {
+  if (r > PAD) return world.boxes;
+  const g = indexOf(world);
+  const cell = g.cells[g.ci(x, ROOM.W / 2, g.nx) * g.nz + g.ci(z, ROOM.D / 2, g.nz)];
+  let n = 0;
+  for (let k = 0; k < cell.length; k++) out[n++] = cell[k];
+  for (let k = 0; k < g.mv.length; k++) out[n++] = g.mv[k];
+  out.length = n;
+  return out;
+}
+const nearA = [];
+const nearB = [];
+
 /** 体 m が、高さ h のまま (x, y, z) にいられるか（家具・壁にめりこまないか） */
 export function fits(arena, x, y, z, h, r = PLAYER.RADIUS) {
   if (x - r < -ROOM.W / 2 || x + r > ROOM.W / 2 || z - r < -ROOM.D / 2 || z + r > ROOM.D / 2) return false;
-  for (const b of arena.boxes) if (overlapXZ(b, x, z, r) && y < b.y1 - 1e-4 && y + h > b.y0 + 1e-4) return false;
+  for (const b of nearBoxes(arena, x, z, r, nearA)) if (overlapXZ(b, x, z, r) && y < b.y1 - 1e-4 && y + h > b.y0 + 1e-4) return false;
   return true;
 }
 
@@ -143,7 +183,7 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
     }
     // 段差: 少しだけ上なら乗る
     let top = -1;
-    for (const b of arena.boxes) if (overlapXZ(b, nx, nz, r) && m.y < b.y1 && m.y + h > b.y0) top = Math.max(top, b.y1);
+    for (const b of nearBoxes(arena, nx, nz, r, nearB)) if (overlapXZ(b, nx, nz, r) && m.y < b.y1 && m.y + h > b.y0) top = Math.max(top, b.y1);
     if (m.ground && top > m.y && top - m.y <= PLAYER.STEP && fits(arena, nx, top, nz, h)) {
       m.x = nx;
       m.z = nz;
@@ -176,7 +216,7 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
     // 下: 地面（丘・くぼみ）か、箱の上に着く
     let floor = groundY(arena, m.x, m.z);
     let floorBox = null;
-    for (const b of arena.boxes) {
+    for (const b of nearBoxes(arena, m.x, m.z, r, nearB)) {
       if (overlapXZ(b, m.x, m.z, r) && b.y1 <= m.y + 1e-3 && b.y1 > floor) {
         floor = b.y1;
         floorBox = b;
@@ -209,7 +249,7 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
   } else {
     // 上: 頭が天板にぶつかる
     let ceil = ROOM.CEIL; // 見えない天井
-    for (const b of arena.boxes) if (overlapXZ(b, m.x, m.z, r) && b.y0 >= m.y + h - 1e-3 && b.y0 < ceil) ceil = b.y0;
+    for (const b of nearBoxes(arena, m.x, m.z, r, nearB)) if (overlapXZ(b, m.x, m.z, r) && b.y0 >= m.y + h - 1e-3 && b.y0 < ceil) ceil = b.y0;
     if (ny + h >= ceil) {
       m.y = ceil - h;
       m.vy = 0;
@@ -241,7 +281,7 @@ export function pushMovables(world, m, h, dx, dz) {
   const nx = m.x + dx;
   const nz = m.z + dz;
   const hits = [];
-  for (const b of world.boxes) {
+  for (const b of nearBoxes(world, nx, nz, r, nearB)) {
     if (overlapXZ(b, nx, nz, r) && m.y < b.y1 - 1e-4 && m.y + h > b.y0 + 1e-4) {
       if (!b.mv) return false; // 動かないものにもぶつかる
       hits.push(b);
