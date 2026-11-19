@@ -457,12 +457,50 @@ function terrainSpots(a) {
   return out;
 }
 
+const TG = 4; // 地形の升目の大きさ（m）
+const tGrids = new WeakMap();
+/** 丘・くぼみの升目の索引（地形ごとに 1 回だけ作る） */
+function terrainGrid(T) {
+  let G = tGrids.get(T);
+  if (G) return G;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let z0 = Infinity;
+  let z1 = -Infinity;
+  for (const f of T) {
+    x0 = Math.min(x0, f.x - f.r);
+    x1 = Math.max(x1, f.x + f.r);
+    z0 = Math.min(z0, f.z - f.r);
+    z1 = Math.max(z1, f.z + f.r);
+  }
+  const nx = Math.max(1, Math.ceil((x1 - x0) / TG));
+  const nz = Math.max(1, Math.ceil((z1 - z0) / TG));
+  const cells = Array.from({ length: nx * nz }, () => []);
+  for (const f of T) {
+    const i0 = Math.max(0, Math.floor((f.x - f.r - x0) / TG));
+    const i1 = Math.min(nx - 1, Math.floor((f.x + f.r - x0) / TG));
+    const j0 = Math.max(0, Math.floor((f.z - f.r - z0) / TG));
+    const j1 = Math.min(nz - 1, Math.floor((f.z + f.r - z0) / TG));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) cells[j * nx + i].push(f);
+  }
+  G = { x0, z0, nx, nz, cells };
+  tGrids.set(T, G);
+  return G;
+}
+
 /** 地面の高さ（丘・くぼみ。何もない所は 0） */
 export function groundY(a, x, z) {
   const T = a.terrain;
   if (!T || !T.length) return 0;
+  // その場所の升目にかかる丘・くぼみだけを見る（並びは元のまま。かからないものは足しても 0 なので、結果は同じ）
+  const G = terrainGrid(T);
+  const cx = Math.floor((x - G.x0) / TG);
+  const cz = Math.floor((z - G.z0) / TG);
+  if (cx < 0 || cz < 0 || cx >= G.nx || cz >= G.nz) return 0;
+  const L = G.cells[cz * G.nx + cx];
   let y = 0;
-  for (const f of T) {
+  for (let k = 0; k < L.length; k++) {
+    const f = L[k];
     const dx = x - f.x;
     const dz = z - f.z;
     const d2 = dx * dx + dz * dz;
@@ -488,6 +526,8 @@ export function groundSlope(a, x, z) {
   return [gx, gz];
 }
 
+const nearT = [];
+
 /**
  * 線分 a → b（太さ r）が、地形（丘・くぼみ・平らな地面）に最初に当たる割合（tmax まで。当たらなければ 1）。
  * 細かく区切って地面の下に入る所を探し、そこから半分ずつ詰める。out に当たった面の向き
@@ -499,7 +539,32 @@ export function terrainHit(a, ax, ay, az, bx, by, bz, r, tmax = 1, out = null) {
   const dz = bz - az;
   // 地形のいちばん高い所より上を通るだけなら当たらない
   if (Math.min(ay, ay + dy * tmax) - r > a.terrainTop + 1e-6) return 1;
-  const f = (t) => ay + dy * t - r - groundY(a, ax + dx * t, az + dz * t);
+  // この線分の通る範囲にかかる丘・くぼみだけを先に選んでおく（全部の丘を毎回見ない。結果は同じ）
+  const T = a.terrain;
+  const x0 = Math.min(ax, ax + dx * tmax);
+  const x1 = Math.max(ax, ax + dx * tmax);
+  const z0 = Math.min(az, az + dz * tmax);
+  const z1 = Math.max(az, az + dz * tmax);
+  let nf = 0;
+  for (let k = 0; k < T.length; k++) {
+    const g = T[k];
+    if (g.x + g.r <= x0 || g.x - g.r >= x1 || g.z + g.r <= z0 || g.z - g.r >= z1) continue;
+    nearT[nf++] = g;
+  }
+  if (nf === 0 && Math.min(ay, ay + dy * tmax) - r > 1e-6) return 1; // 近くは平らな地面（高さ 0）で、その上を通るだけ
+  const gy = (x, z) => {
+    let y = 0;
+    for (let k = 0; k < nf; k++) {
+      const g = nearT[k];
+      const ex = x - g.x;
+      const ez = z - g.z;
+      const d2 = ex * ex + ez * ez;
+      if (d2 >= g.r * g.r) continue;
+      y += (g.h * (1 + Math.cos((Math.PI * Math.sqrt(d2)) / g.r))) / 2;
+    }
+    return y;
+  };
+  const f = (t) => ay + dy * t - r - gy(ax + dx * t, az + dz * t);
   if (f(0) < 0) return 1; // 地面の中から出発（ありえないが、出られなくならないように）
   const len = Math.hypot(dx, dy, dz) * tmax;
   const n = Math.max(1, Math.ceil(len / 0.35));

@@ -425,6 +425,12 @@ export class GameManager extends Emitter {
   }
 
   _sendSnapshot() {
+    // つながっているゲストがいない（ひとり用・全員待ち）なら、送る相手も巻き戻す理由もない。
+    // 状態のコピー・差分づくりを丸ごと省いて、たまった「起きたこと」だけ捨てる
+    if (!this.net.guestConnected) {
+      if (this.game.netEvents) this.game.netEvents.length = 0;
+      return;
+    }
     // 巻き戻し用の完全な状態は 8 回に 1 回（約 0.2 秒おき）だけ残す。毎回コピーすると重い
     const keep = !this.game.encodeNetSnapshot || (this._histN = (this._histN | 0) + 1) % 8 === 0;
     const snap = keep ? this.game.getSnapshot() : null;

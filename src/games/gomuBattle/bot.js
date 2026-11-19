@@ -3,7 +3,9 @@
 
 import { BOT, PLAYER, ITEM, ITEMS, BAND_ITEMS, GUN, WEAPON, WEAPONS, BOSS, EXTRA } from './constants.js';
 import { canSee, ROOM } from './arena.js';
-import { aimDir, eyeOf, heightOf } from './physics.js';
+import { aimDir, eyeOf, heightOf, nearBoxes } from './physics.js';
+
+const nearL = [];
 
 const rnd = Math.random;
 /** のぞいて遠くを狙う武器（スナイパー・ライフル） */
@@ -81,12 +83,19 @@ export function botThink(sim, p, dt) {
   b.jumpCd = Math.max(0, b.jumpCd - dt);
   if (q && q.dead <= 0) {
     b.see += dt;
-    b.seenAt = { x: q.x, z: q.z };
+    // 見た場所・前の位置は、入れ物を使い回す（毎 tick 新しく作らない）
+    if (b.seenAt) {
+      b.seenAt.x = q.x;
+      b.seenAt.z = q.z;
+    } else b.seenAt = { x: q.x, z: q.z };
     // 相手の動きを見て、少し先を狙う
     const pv = b.prevT[q.i];
     const vx = pv ? (q.x - pv.x) / dt : 0;
     const vz = pv ? (q.z - pv.z) / dt : 0;
-    b.prevT[q.i] = { x: q.x, z: q.z };
+    if (pv) {
+      pv.x = q.x;
+      pv.z = q.z;
+    } else b.prevT[q.i] = { x: q.x, z: q.z };
     const qy = q.y + (q.h ?? heightOf(q)) * 0.55;
     const dist = Math.hypot(q.x - ex, qy - ey, q.z - ez);
     const lead = Math.min(0.6, dist / W.speed) * BOT.LEAD;
@@ -110,7 +119,13 @@ export function botThink(sim, p, dt) {
     }
     inp.fx = b.strafe;
     // スナイパー: 近くに高台があれば、狙いながらそこへ上る（上に着いたらじっと狙う）
-    const perch = scoped(p) ? nearPerch(sim.arena, p, 20) : null;
+    // （近くの高台探しは 0.25 秒に 1 回。高台は動かないので、そのあいだ同じものを目指せばよい）
+    b.perchT = (b.perchT || 0) - dt;
+    if (!(b.perchT > 0)) {
+      b.perchT = 0.25;
+      b.perch = scoped(p) ? nearPerch(sim.arena, p, 20) : null;
+    }
+    const perch = scoped(p) ? b.perch : null;
     if (perch) {
       const dxw = perch.x - p.x;
       const dzw = perch.z - p.z;
@@ -172,7 +187,7 @@ export function botThink(sim, p, dt) {
     // 前が低い天板（テーブルの下）なら伏せ、そうでなければジャンプ
     const fx = p.x + Math.sin(p.yaw) * 0.8;
     const fz = p.z + Math.cos(p.yaw) * 0.8;
-    const low = arena.boxes.some((bx) => fx > bx.x0 && fx < bx.x1 && fz > bx.z0 && fz < bx.z1 && bx.y0 > p.y + PLAYER.CROUCH_HEIGHT && bx.y0 < p.y + PLAYER.HEIGHT);
+    const low = nearBoxes(arena, fx, fz, 0, nearL).some((bx) => fx > bx.x0 && fx < bx.x1 && fz > bx.z0 && fz < bx.z1 && bx.y0 > p.y + PLAYER.CROUCH_HEIGHT && bx.y0 < p.y + PLAYER.HEIGHT);
     if (low) b.crouchT = 1.2;
     else if (b.jumpCd <= 0) {
       inp.jump = true;

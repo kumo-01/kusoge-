@@ -247,7 +247,16 @@ export class GomuSim {
   }
 
   _stepPlayer(p, dt) {
-    for (const f of ['inv', 'star', 'stun', 'stuck', 'shake', 'noAmmo', 'fireCd', 'bombCd', 'barkCd']) p[f] = Math.max(0, (p[f] || 0) - dt);
+    // 減っていく時間（0 のものは触らない。配列と文字の名前で回すより速い）
+    if (p.inv > 0) p.inv = p.inv > dt ? p.inv - dt : 0;
+    if (p.star > 0) p.star = p.star > dt ? p.star - dt : 0;
+    if (p.stun > 0) p.stun = p.stun > dt ? p.stun - dt : 0;
+    if (p.stuck > 0) p.stuck = p.stuck > dt ? p.stuck - dt : 0;
+    if (p.shake > 0) p.shake = p.shake > dt ? p.shake - dt : 0;
+    if (p.noAmmo > 0) p.noAmmo = p.noAmmo > dt ? p.noAmmo - dt : 0;
+    if (p.fireCd > 0) p.fireCd = p.fireCd > dt ? p.fireCd - dt : 0;
+    if (p.bombCd > 0) p.bombCd = p.bombCd > dt ? p.bombCd - dt : 0;
+    if (p.barkCd > 0) p.barkCd = p.barkCd > dt ? p.barkCd - dt : 0;
     this._stepBurn(p, dt);
     if (p.dead > 0) {
       p.dead = Math.max(0, p.dead - dt);
@@ -296,13 +305,19 @@ export class GomuSim {
     const others = this.s.players.filter((q) => q !== p && q.dead <= 0);
     let best = this.arena.spawns[0];
     let bd = -1;
+    // 敵からはできるだけ遠く。チーム戦では味方の近くを少し優先する（敵・味方の分け方は出発地点ごとに変わらないので、先に 1 回だけ）
+    const foes = others.filter((q) => this.foes(p.i, q.i));
+    const allies = this.mode === MODE.TEAM ? others.filter((q) => !this.foes(p.i, q.i)) : [];
+    const nearest = (list, x, z) => {
+      let m = Infinity;
+      for (let k = 0; k < list.length; k++) m = Math.min(m, Math.hypot(list[k].x - x, list[k].z - z));
+      return list.length ? m : 0;
+    };
+    const cw = this.cw;
     for (const sp of this.arena.spawns) {
-      if (!fits(this.cw, sp[0], 0, sp[1], PLAYER.HEIGHT)) continue; // 押せるものが置かれている
-      // 敵からはできるだけ遠く。チーム戦では味方の近くを少し優先する
-      const foes = others.filter((q) => this.foes(p.i, q.i));
-      const allies = this.mode === MODE.TEAM ? others.filter((q) => !this.foes(p.i, q.i)) : [];
-      const fd = foes.length ? Math.min(...foes.map((q) => Math.hypot(q.x - sp[0], q.z - sp[1]))) : 0;
-      const ad = allies.length ? Math.min(...allies.map((q) => Math.hypot(q.x - sp[0], q.z - sp[1]))) : 0;
+      if (!fits(cw, sp[0], 0, sp[1], PLAYER.HEIGHT)) continue; // 押せるものが置かれている
+      const fd = nearest(foes, sp[0], sp[1]);
+      const ad = nearest(allies, sp[0], sp[1]);
       const d = Math.min(fd, 40) - ad * 0.6;
       if (d > bd) {
         bd = d;
@@ -457,6 +472,7 @@ export class GomuSim {
     const s = this.s;
     const arena = this.cw;
     const tgt = (b) => this._target(b);
+    const balloons = this.arena.balloons || []; // 会場の読み出しは 1 tick に 1 回
     for (let n = s.bands.length - 1; n >= 0; n--) {
       const b = s.bands[n];
       const ax = b.x;
@@ -503,7 +519,7 @@ export class GomuSim {
       }
       let pop = -1;
       if (b.o >= 0) {
-        const bl = this.arena.balloons || [];
+        const bl = balloons;
         const RB = EXTRA.BALLOON_R + b.r + 0.01 - R;
         for (let k = 0; k < bl.length; k++) {
           const x = bl[k][0];
@@ -798,42 +814,66 @@ export class GomuSim {
   _stepItems(dt) {
     const s = this.s;
     const arena = this.arena;
-    // 箱
-    s.boxes.forEach((tm, k) => {
+    const P = s.players;
+    // 箱（だれも拾えない犬ばかりなら、近さの計算は飛ばす）
+    let anyFree = false;
+    for (let j = 0; j < P.length; j++) if (!(P[j].dead > 0) && !P[j].item) anyFree = true;
+    const BR2 = ITEMS.BOX_RADIUS * ITEMS.BOX_RADIUS;
+    for (let k = 0; k < s.boxes.length; k++) {
+      const tm = s.boxes[k];
       if (tm > 0) {
         s.boxes[k] = Math.max(0, tm - dt);
         if (s.boxes[k] === 0) this.events.push({ t: 'box', b: k, on: 1 });
-        return;
+        continue;
       }
-      const [bx, bz, by] = arena.items[k];
-      for (const p of s.players) {
+      if (!anyFree) continue;
+      const it = arena.items[k];
+      const bx = it[0];
+      const bz = it[1];
+      const by = it[2];
+      for (let j = 0; j < P.length; j++) {
+        const p = P[j];
         if (p.dead > 0 || p.item) continue;
-        if (Math.hypot(p.x - bx, p.z - bz) < ITEMS.BOX_RADIUS && Math.abs(p.y - by) < 0.9) {
+        const dx = p.x - bx;
+        const dz = p.z - bz;
+        if (dx * dx + dz * dz < BR2 && Math.abs(p.y - by) < 0.9) {
           p.item = this._boxItem(p);
           s.boxes[k] = ITEMS.BOX_RESPAWN;
           this.events.push({ t: 'pick', i: p.i, b: k, item: p.item });
           break;
         }
       }
-    });
+    }
     // 回復のおやつ（体力が減っている犬が近づくと拾う）
-    (s.heals || []).forEach((tm, k) => {
+    const H = s.heals || [];
+    let anyHurt = false;
+    for (let j = 0; j < P.length; j++) if (!(P[j].dead > 0) && P[j].hp < PLAYER.HP) anyHurt = true;
+    const TR2 = TREAT.RADIUS * TREAT.RADIUS;
+    for (let k = 0; k < H.length; k++) {
+      const tm = H[k];
       if (tm > 0) {
-        s.heals[k] = Math.max(0, tm - dt);
-        return;
+        H[k] = Math.max(0, tm - dt);
+        continue;
       }
-      const [hx, hz, hy] = arena.heals[k];
-      for (const p of s.players) {
+      if (!anyHurt) continue;
+      const hl = arena.heals[k];
+      const hx = hl[0];
+      const hz = hl[1];
+      const hy = hl[2];
+      for (let j = 0; j < P.length; j++) {
+        const p = P[j];
         if (p.dead > 0 || p.hp >= PLAYER.HP) continue;
-        if (Math.hypot(p.x - hx, p.z - hz) < TREAT.RADIUS && Math.abs(p.y - hy) < 1) {
+        const dx = p.x - hx;
+        const dz = p.z - hz;
+        if (dx * dx + dz * dz < TR2 && Math.abs(p.y - hy) < 1) {
           p.hp = Math.min(PLAYER.HP, p.hp + TREAT.HEAL);
           p.treats = (p.treats || 0) + 1;
-          s.heals[k] = TREAT.RESPAWN;
+          H[k] = TREAT.RESPAWN;
           this.events.push({ t: 'heal', i: p.i, hp: p.hp, k });
           break;
         }
       }
-    });
+    }
     // ガム（踏むと動けない。置いた本人は平気）
     for (let n = s.gums.length - 1; n >= 0; n--) {
       const g = s.gums[n];

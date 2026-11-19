@@ -39,7 +39,7 @@ function indexOf(world) {
   return world._gx;
 }
 /** (x, z) の近く（太さ r）の箱を out に入れて返す */
-function nearBoxes(world, x, z, r, out) {
+export function nearBoxes(world, x, z, r, out) {
   if (r > PAD) return world.boxes;
   const g = indexOf(world);
   const cell = g.cells[g.ci(x, ROOM.W / 2, g.nx) * g.nz + g.ci(z, ROOM.D / 2, g.nz)];
@@ -51,6 +51,10 @@ function nearBoxes(world, x, z, r, out) {
 }
 const nearA = [];
 const nearB = [];
+
+const AXES = ['x', 'z'];
+/** 速さ v を、目標 t へ 1 tick に acc まで近づける */
+const ease = (v, t, acc) => (Math.abs(t - v) <= acc ? t : v + Math.sign(t - v) * acc);
 
 /** 体 m が、高さ h のまま (x, y, z) にいられるか（家具・壁にめりこまないか） */
 export function fits(arena, x, y, z, h, r = PLAYER.RADIUS) {
@@ -113,7 +117,15 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
     if (m.stamWait <= 0) m.stam = Math.min(PLAYER.STAMINA, m.stam + PLAYER.STAMINA_REGEN * dt);
   }
   // 水の中は遅い
-  m.inWater = !!arena.water?.some((w) => m.x > w.x0 && m.x < w.x1 && m.z > w.z0 && m.z < w.z1) && m.y < 0.3;
+  let inW = false;
+  if (m.y < 0.3 && arena.water) for (let k = 0; k < arena.water.length; k++) {
+    const w = arena.water[k];
+    if (m.x > w.x0 && m.x < w.x1 && m.z > w.z0 && m.z < w.z1) {
+      inW = true;
+      break;
+    }
+  }
+  m.inWater = inW;
   // 加速パネル: 地面にいて上を通ると、しばらく速い
   m.padT = Math.max(0, (m.padT || 0) - dt);
   if (m.ground && arena.pads) {
@@ -129,15 +141,14 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
   const tx = wx * sp;
   const tz = wz * sp;
   const acc = (m.ground ? PLAYER.ACCEL : PLAYER.AIR_ACCEL) * dt;
-  const ease = (v, t) => (Math.abs(t - v) <= acc ? t : v + Math.sign(t - v) * acc);
   if (m.slideT > 0) {
     // 滑っている間は、向きはそのまま、だんだん遅く
     const ss = FUN.SLIDE_SPEED * (0.45 + (0.55 * m.slideT) / FUN.SLIDE_TIME) * slow;
     m.vx = m.slideX * ss;
     m.vz = m.slideZ * ss;
   } else {
-    m.vx = ease(m.vx, tx);
-    m.vz = ease(m.vz, tz);
+    m.vx = ease(m.vx, tx, acc);
+    m.vz = ease(m.vz, tz, acc);
   }
   if (inp.jump && m.ground && slow > 0) {
     m.vy = PLAYER.JUMP;
@@ -146,19 +157,20 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
   }
   // 間欠泉: ふき出している間、上にいる犬は高く飛ばされる（時刻は arena.clock = ラウンドの時刻）
   if (arena.geysers && arena.clock != null) {
-    arena.geysers.forEach((g, k) => {
-      if (!geyserOn(k, arena.clock)) return;
-      if ((m.x - g.x) ** 2 + (m.z - g.z) ** 2 < GIMMICK.GEYSER_R ** 2 && m.y < groundY(arena, g.x, g.z) + 1.5 && m.vy < GIMMICK.GEYSER_V * 0.5) {
+    for (let k = 0; k < arena.geysers.length; k++) {
+      const g = arena.geysers[k];
+      if ((m.x - g.x) ** 2 + (m.z - g.z) ** 2 >= GIMMICK.GEYSER_R ** 2 || !geyserOn(k, arena.clock)) continue; // 近くにないものは時刻の計算もしない
+      if (m.y < groundY(arena, g.x, g.z) + 1.5 && m.vy < GIMMICK.GEYSER_V * 0.5) {
         m.vy = GIMMICK.GEYSER_V;
         m.ground = false;
         res.geyser = true;
       }
-    });
+    }
   }
   m.vy -= PLAYER.GRAVITY * dt;
   const h = heightOf(m);
   // 横（x → z の順に動かして、ぶつかったら止める。低い段差は上がる）
-  for (const axis of ['x', 'z']) {
+  for (const axis of AXES) {
     const v = axis === 'x' ? m.vx : m.vz;
     if (!v) continue;
     const nx = axis === 'x' ? m.x + v * dt : m.x;
@@ -303,7 +315,8 @@ export function pushMovables(world, m, h, dx, dz) {
 export function shoveMovables(world, m) {
   const r = PLAYER.RADIUS;
   const h = heightOf(m);
-  for (const b of world.boxes) {
+  // 押せるものだけ見る（家具を含む全部の箱は何百もある）
+  for (const b of world.mov || world.boxes) {
     if (!b.mv || !overlapXZ(b, m.x, m.z, r) || !(m.y < b.y1 - 1e-4 && m.y + h > b.y0 + 1e-4)) continue;
     // いちばん浅い向きへ押し出す
     const cand = [

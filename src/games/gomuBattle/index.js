@@ -180,7 +180,13 @@ class GomuGame {
   }
 
   get arena() {
-    return ARENAS[Math.max(0, this.round) % ARENAS.length];
+    // 会場の配列は「はじめて使うときに作る」仕組みで、読むたびに少し重い。ラウンドが変わったときだけ読み直す
+    const r = Math.max(0, this.round);
+    if (this._arenaR !== r) {
+      this._arenaR = r;
+      this._arena = ARENAS[r % ARENAS.length];
+    }
+    return this._arena;
   }
 
   /** ぶつかる物すべて（家具 + 押せるもの）。ホストは計算の正本、ゲストは自分の手元の写し */
@@ -290,14 +296,14 @@ class GomuGame {
     const wantItem = i.consume('KeyE') || tk.item || this._wantItem;
     this._wantItem = false;
     const slow = !act ? 0 : rec?.stuck > 0 ? 0 : rec?.stun > 0 ? PLAYER.STUN_SPEED : 1;
-    this.prevPos = { x: p.x, y: p.y, z: p.z, crouch: p.crouch };
+    this._keepPrev(p);
     this.cw.clock = this._clock(); // 間欠泉の時刻
     const mv = stepMove(p, act ? { fx, fz, jump, dash, crouch } : { crouch: false }, dt, this.cw, slow);
     if (mv.dashed) this.ctx.sound.play('boost');
     if (mv.pad) this.ctx.sound.play('pad'); // 加速パネル
     if (mv.warped) {
       this.ctx.sound.play('warp'); // ワープ土管
-      this.prevPos = { x: p.x, y: p.y, z: p.z, crouch: p.crouch };
+      this._keepPrev(p);
       this.world?.warpFx?.(p.x, p.y, p.z);
     }
     if (mv.geyser) this.ctx.sound.play('geyser'); // 間欠泉
@@ -341,7 +347,18 @@ class GomuGame {
     this.shakeT += dt;
     // 自分の位置をホストへ
     if (this.isHost) {
-      this.sim.setPilot(this.me, { ...p, g: this.sim.s.players[this.me].g });
+      // 自分の犬の位置をそのまま渡す（毎 tick 写しを作らない。読むのは位置・向き・姿勢だけ）
+      const pr = (this._pilotRep ||= {});
+      pr.x = p.x;
+      pr.y = p.y;
+      pr.z = p.z;
+      pr.yaw = p.yaw;
+      pr.pitch = p.pitch;
+      pr.crouch = p.crouch;
+      pr.moving = p.moving;
+      pr.ground = p.ground;
+      pr.g = this.sim.s.players[this.me].g;
+      this.sim.setPilot(this.me, pr);
       this.sim.step(dt);
       this._hostEvents(this.sim.drainEvents());
       if (this.sim.s.phase === 'done' && !this._finished) {
@@ -374,6 +391,16 @@ class GomuGame {
       }
       this._stepGuestBands(dt);
     }
+  }
+
+  /** 前の tick の自分の位置（描画で間をつなぐ）。入れ物は使い回す */
+  _keepPrev(p) {
+    const q = (this._prevBuf ||= {});
+    q.x = p.x;
+    q.y = p.y;
+    q.z = p.z;
+    q.crouch = p.crouch;
+    this.prevPos = q;
   }
 
   /** 照準ぶれの揺れ（ラジアン） */

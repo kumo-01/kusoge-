@@ -82,7 +82,13 @@ function sync(boxes, W, D) {
     ex.set_world(n, W, D);
     return;
   }
-  for (const k of movIdx) write(k, boxes[k]);
+  // 動く箱も、前と同じ場所なら書き直さない（ほとんどの時間は止まっている）
+  for (let i = 0; i < movIdx.length; i++) {
+    const k = movIdx[i];
+    const b = boxes[k];
+    const o = k * STRIDE;
+    if (boxesF[o] !== b.x0 || boxesF[o + 4] !== b.z0 || boxesF[o + 2] !== b.y0) write(k, b);
+  }
 }
 
 /**

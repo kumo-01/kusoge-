@@ -143,6 +143,11 @@ class Sound {
     if (this.muted) return;
     const ctx = this._ensure();
     if (!ctx || ctx.state !== 'running') return;
+    // 同じ音が 0.06 秒以内に何度も鳴る（マシンガン・まわりの撃ち合い）ときは 1 回にまとめる。
+    // 音の部品（発振器・フィルタ）を毎秒何十個も作らずに済み、聞こえ方もほとんど変わらない
+    const last = (this._lastAt ||= {})[name];
+    if (last != null && ctx.currentTime - last < (name === 'throw' ? 0.1 : 0.06)) return; // 撃つ音は毎秒 10 回まで
+    this._lastAt[name] = ctx.currentTime;
     try {
       switch (name) {
         case 'click':
