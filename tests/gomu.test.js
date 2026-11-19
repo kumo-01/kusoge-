@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GomuSim } from '../src/games/gomuBattle/sim.js';
 import { ARENAS, ROOM, SCALE } from '../src/games/gomuBattle/arena.js';
-import { createBody, stepMove, fits, aimDir, heightOf, movableBox, shoveMovables, bandSpec, weaponDamage, hitDamage } from '../src/games/gomuBattle/physics.js';
+import { createBody, stepMove, fits, aimDir, heightOf, movableBox, shoveMovables, bandSpec, weaponDamage, hitDamage, stepBand } from '../src/games/gomuBattle/physics.js';
 import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE } from '../src/games/gomuBattle/constants.js';
 
 const DT = 1 / 60;
@@ -1223,4 +1223,28 @@ test('通信: 知らせの通し番号 sq は、連続撃破の数・強化ゴ�
   ];
   const d = unpackBin(packBin(sim.s, true, ev), 2);
   assert.deepEqual(d.ev.map((e) => [e.t, e.sq, e.n]), [['streak', 9001, 3], ['sp', 9002, 5]]);
+});
+
+test('マシンガンの輪ゴムはふだんから 5 回跳ね返る。見えない天井（雲より上）で輪ゴムが跳ね返り、犬も越えられない', () => {
+  assert.equal(bandSpec(0, WEAPON.MG).bounce, 5);
+  assert.equal(bandSpec(0, WEAPON.NORMAL).bounce, 1);
+  assert.equal(bandSpec(ITEM.BOUNCE, WEAPON.MG).bounce, 5, '跳ね返りゴムでも減らない');
+  assert.ok(ROOM.CEIL > 34 && ROOM.CEIL < 45, '雲（高さ 24〜35 くらい）より少し上');
+  const a = ARENAS[0];
+  const out = {};
+  // 真上へ: 天井で止まる（Rust 版と JavaScript 版が同じ）
+  const t = segHit(a, 0, 30, 0, 0, 50, 0, 0.05, out);
+  assert.ok(Math.abs(30 + 20 * t - (ROOM.CEIL - 0.05)) < 1e-6 && out.ny === -1, `天井 ${30 + 20 * t}`);
+  assert.equal(t, segmentHitJs(a, 0, 30, 0, 0, 50, 0, 0.05));
+  // 輪ゴムは天井で跳ね返って下へ
+  const b = { x: 0, y: ROOM.CEIL - 1, z: 0, vx: 0, vy: 30, vz: 0, r: 0.05, bounce: 2, life: 5, age: 0, g: 0 };
+  stepBand(b, 1 / 20, a);
+  assert.ok(b.vy < 0 && b.y < ROOM.CEIL, '跳ね返った');
+  // 犬は天井より上へ行けない
+  const m = createBody(0, 0, 0);
+  m.y = ROOM.CEIL - 3;
+  m.vy = 40;
+  m.ground = false;
+  for (let i = 0; i < 30; i++) stepMove(m, {}, DT, { boxes: [] });
+  assert.ok(m.y + PLAYER.HEIGHT <= ROOM.CEIL + 1e-9);
 });

@@ -53,3 +53,18 @@ test('Rust を切ると JavaScript の計算に戻る', () => {
     useWasm(true);
   }
 });
+
+test('見えない天井: Rust 版と JavaScript 版が同じ所で当たる', () => {
+  useWasm(true);
+  assert.equal(wasmActive(), true);
+  const a = ARENAS[1];
+  for (const [ay, by, r] of [[30, 50, 0.05], [37.9, 60, 0], [10, 39, 0.2]]) {
+    const o1 = {};
+    const o2 = {};
+    const t1 = segmentHit(a, 3, ay, -4, 5, by, -3, r, o1);
+    const t2 = segmentHitJs(a, 3, ay, -4, 5, by, -3, r, o2);
+    assert.equal(t1, t2);
+    assert.deepEqual([o1.nx, o1.ny, o1.nz], [o2.nx, o2.ny, o2.nz]);
+    assert.ok(t1 < 1 && o1.ny === -1);
+  }
+});

@@ -23,6 +23,7 @@ static mut N: usize = 0;
 static mut ROOM_W: f64 = 0.0;
 static mut ROOM_D: f64 = 0.0;
 static mut FLOOR: f64 = 0.0;
+static mut CEIL: f64 = f64::INFINITY;
 static mut OUT: [f64; 3] = [0.0; 3];
 
 /// 箱を書きこむ場所（f64 が 6 × max_boxes() 個）
@@ -60,12 +61,20 @@ pub extern "C" fn set_floor(y: f64) {
     }
 }
 
+/// 見えない天井の高さ（なければ無限）
+#[no_mangle]
+pub extern "C" fn set_ceil(y: f64) {
+    unsafe {
+        CEIL = y;
+    }
+}
+
 /// 線分 a → b（太さ r）が最初に何かに当たる割合 t（0〜1）。当たらなければ 1
 #[no_mangle]
 pub extern "C" fn segment_hit(ax: f64, ay: f64, az: f64, bx: f64, by: f64, bz: f64, r: f64) -> f64 {
-    let (n, w, d, f) = unsafe { (N, ROOM_W, ROOM_D, FLOOR) };
+    let (n, w, d, f, c) = unsafe { (N, ROOM_W, ROOM_D, FLOOR, CEIL) };
     let boxes = unsafe { &*core::ptr::addr_of!(BOXES) };
-    let (t, nrm) = hit_floor(&boxes[..n * 6], w, d, f, ax, ay, az, bx, by, bz, r);
+    let (t, nrm) = hit_world(&boxes[..n * 6], w, d, f, c, ax, ay, az, bx, by, bz, r);
     unsafe {
         OUT = nrm;
     }
@@ -81,18 +90,25 @@ pub fn hit(boxes: &[f64], room_w: f64, room_d: f64, ax: f64, ay: f64, az: f64, b
 /// 床の高さ floor つき
 #[allow(clippy::too_many_arguments)]
 pub fn hit_floor(boxes: &[f64], room_w: f64, room_d: f64, floor: f64, ax: f64, ay: f64, az: f64, bx: f64, by: f64, bz: f64, r: f64) -> (f64, [f64; 3]) {
+    hit_world(boxes, room_w, room_d, floor, f64::INFINITY, ax, ay, az, bx, by, bz, r)
+}
+
+/// 床の高さ floor と、見えない天井の高さ ceil つき
+#[allow(clippy::too_many_arguments)]
+pub fn hit_world(boxes: &[f64], room_w: f64, room_d: f64, floor: f64, ceil: f64, ax: f64, ay: f64, az: f64, bx: f64, by: f64, bz: f64, r: f64) -> (f64, [f64; 3]) {
     let mut best = 1.0_f64;
     let mut n = [0.0_f64; 3];
     let dx = bx - ax;
     let dy = by - ay;
     let dz = bz - az;
     // 床・壁: (向きの成分, 距離, 面の向き, 越える向き)
-    let planes: [(f64, f64, [f64; 3], f64); 5] = [
+    let planes: [(f64, f64, [f64; 3], f64); 6] = [
         (dy, floor + r - ay, [0.0, 1.0, 0.0], -1.0), // 床 y = floor + r（下向きに越える）
         (dx, -room_w / 2.0 + r - ax, [1.0, 0.0, 0.0], -1.0),
         (dx, room_w / 2.0 - r - ax, [-1.0, 0.0, 0.0], 1.0),
         (dz, -room_d / 2.0 + r - az, [0.0, 0.0, 1.0], -1.0),
         (dz, room_d / 2.0 - r - az, [0.0, 0.0, -1.0], 1.0),
+        (dy, ceil - r - ay, [0.0, -1.0, 0.0], 1.0), // 見えない天井（上向きに越える）
     ];
     for (dd, dist, nn, sign) in planes {
         if dd * sign <= 0.0 {

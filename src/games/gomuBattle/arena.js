@@ -13,7 +13,8 @@ import { GIMMICK } from './constants.js';
 export const SCALE = 1.5 * Math.SQRT2;
 
 /** 部屋の広さ（x: -W/2〜W/2、z: -D/2〜D/2） */
-export const ROOM = { W: 52 * SCALE, D: 40 * SCALE, WALL: 9 };
+/** CEIL: 見えない天井の高さ（雲より少し上。まわりの見えない壁と同じく、輪ゴム・爆弾・犬は越えられない） */
+export const ROOM = { W: 52 * SCALE, D: 40 * SCALE, WALL: 9, CEIL: 38 };
 
 
 let sc = SCALE; // いま作っている家具の置き場所の倍率（grp の中では 1 = 家具の中の位置）
@@ -730,7 +731,7 @@ export const overlapXZ = (b, x, z, r) => x + r > b.x0 && x - r < b.x1 && z + r >
  */
 export function segmentHit(arena, ax, ay, az, bx, by, bz, r = 0, out = null) {
   // Rust（WebAssembly）が使えればそちらで（collide.js）。結果は下の JavaScript と同じ
-  let t = wasmSegmentHit(arena.boxes, ROOM.W, ROOM.D, ax, ay, az, bx, by, bz, r, out, arena.floorY || 0);
+  let t = wasmSegmentHit(arena.boxes, ROOM.W, ROOM.D, ax, ay, az, bx, by, bz, r, out, arena.floorY || 0, ROOM.CEIL);
   if (t === null) t = segmentHitJs(arena, ax, ay, az, bx, by, bz, r, out);
   // 丘・くぼみ（箱・柵より手前で当たれば、そちら）
   if (arena.terrain?.length) {
@@ -758,6 +759,7 @@ export function segmentHitJs(arena, ax, ay, az, bx, by, bz, r = 0, out = null) {
     [dx, ROOM.W / 2 - r - ax, -1, 0, 0, 1],
     [dz, -ROOM.D / 2 + r - az, 0, 0, 1, -1],
     [dz, ROOM.D / 2 - r - az, 0, 0, -1, 1],
+    [dy, ROOM.CEIL - r - ay, 0, -1, 0, 1], // 見えない天井（上向きに越える）
   ];
   for (const [d, dist, nx, ny, nz, sign] of planes) {
     if (d * sign <= 0) continue; // 離れる向き

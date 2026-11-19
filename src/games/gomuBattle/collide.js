@@ -15,6 +15,7 @@ let curN = -1;
 let curW = 0;
 let curD = 0;
 let curF = 0;
+let curC = Infinity;
 let movIdx = []; // 押せるもの（動く箱）の番号。毎回書き直す
 let enabled = true;
 
@@ -44,6 +45,7 @@ function setInstance(inst) {
   outF = new Float64Array(ex.memory.buffer, ex.out_ptr(), 3);
   cur = null;
   curF = 0;
+  curC = Infinity;
 }
 
 /** Rust の計算を使うか（比べるテスト用） */
@@ -86,8 +88,13 @@ function sync(boxes, W, D) {
 /**
  * Rust で segmentHit。使えないとき（読みこみ前・箱が多すぎる・切ってある）は null を返す（呼んだ側が JavaScript で計算する）
  */
-export function wasmSegmentHit(boxes, W, D, ax, ay, az, bx, by, bz, r, out, floor = 0) {
+export function wasmSegmentHit(boxes, W, D, ax, ay, az, bx, by, bz, r, out, floor = 0, ceil = Infinity) {
   if (!ex || !enabled || boxes.length > maxBoxes) return null;
+  if (ceil !== curC) {
+    if (!ex.set_ceil) return null; // 古い collide.wasm（天井がない）
+    ex.set_ceil(ceil);
+    curC = ceil;
+  }
   if (floor !== curF) {
     if (!ex.set_floor) return null; // 古い collide.wasm（床の高さを変えられない）
     ex.set_floor(floor);

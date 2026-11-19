@@ -208,7 +208,7 @@ export function stepMove(m, inp, dt, arena, slow = 1) {
     }
   } else {
     // 上: 頭が天板にぶつかる
-    let ceil = Infinity;
+    let ceil = ROOM.CEIL; // 見えない天井
     for (const b of arena.boxes) if (overlapXZ(b, m.x, m.z, r) && b.y0 >= m.y + h - 1e-3 && b.y0 < ceil) ceil = b.y0;
     if (ny + h >= ceil) {
       m.y = ceil - h;
@@ -304,9 +304,9 @@ export function bandSpec(kind, weapon = WEAPON.NORMAL) {
   const w = WEAPONS[weapon] ? weapon : WEAPON.NORMAL;
   const W = WEAPONS[w];
   const bomb = w === WEAPON.BOMB;
-  const base = { speed: W.speed, r: W.r, mul: 1, bounce: bomb ? 0 : GUN.BOUNCES, life: W.life, g: W.gravity, w };
+  const base = { speed: W.speed, r: W.r, mul: 1, bounce: bomb ? 0 : W.bounces ?? GUN.BOUNCES, life: W.life, g: W.gravity, w };
   if (kind === ITEM.THICK) return { ...base, speed: w === WEAPON.NORMAL ? ITEMS.THICK_SPEED : W.speed * (bomb ? 1 : 0.8), r: bomb ? W.r * 1.3 : ITEMS.THICK_RADIUS, mul: THICK_MUL };
-  if (kind === ITEM.BOUNCE) return { ...base, bounce: ITEMS.BOUNCES, life: Math.max(W.life, ITEMS.BOUNCE_LIFE) };
+  if (kind === ITEM.BOUNCE) return { ...base, bounce: Math.max(base.bounce, ITEMS.BOUNCES), life: Math.max(W.life, ITEMS.BOUNCE_LIFE) };
   if (kind === ITEM.GOLD) return { ...base, mul: FUN.GOLD_MUL, r: W.r * 1.3 }; // 金の輪ゴム: ダメージ 2 倍
   return base;
 }
