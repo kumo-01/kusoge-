@@ -1290,3 +1290,56 @@ test('マシンガンの輪ゴムはふだんから 5 回跳ね返る。見え�
   for (let i = 0; i < 30; i++) stepMove(m, {}, DT, { boxes: [] });
   assert.ok(m.y + PLAYER.HEIGHT <= ROOM.CEIL + 1e-9);
 });
+
+import { packInts, unpackInts, packEvents, unpackEvents } from '../src/games/gomuBattle/net.js';
+import { intDeltaEncode, intDeltaDecode, checkInts } from '../src/core/netcodec.js';
+
+test('通信（整数の差分）: 状態が元に戻り、前の状態との差分はとても小さい。取りこぼしても、持っている元からなら戻せる', () => {
+  const sim = new GomuSim({ humans: 2, bots: 5, seed: 3 });
+  run(sim, ROUND.INTRO + 10);
+  sim.s.gums.push({ id: 70000, o: 1, x: 1.234, y: 0, z: -2.5, age: 0 });
+  sim.s.players[1].burn = 2;
+  const a = packInts(sim.s);
+  const st = unpackInts(a.ints, a.tail, 7);
+  assert.equal(st.phase, sim.s.phase);
+  assert.ok(Math.abs(st.t - sim.s.t) < 0.001);
+  sim.s.players.forEach((p, i) => {
+    const q = st.players[i];
+    assert.ok(Math.abs(q.x - p.x) <= 0.005 && Math.abs(q.y - p.y) <= 0.005 && Math.abs(q.z - p.z) <= 0.005, '位置は 1 cm きざみ');
+    assert.ok(Math.abs(Math.atan2(Math.sin(q.yaw - p.yaw), Math.cos(q.yaw - p.yaw))) < 0.004);
+    assert.deepEqual([q.hp, q.item, q.g, q.score, q.kills, q.deaths, q.weapon, q.bombs, q.rs], [p.hp, p.item, p.g, p.score, p.kills, p.deaths, p.weapon, p.bombs, p.rs]);
+    assert.equal(q.burning, p.burn > 0);
+    assert.equal(q.crouch, p.crouch);
+  });
+  assert.equal(st.gums[0].id, 70000);
+  assert.equal(st.mov.length, sim.s.mov.length);
+  sim.s.gums = [];
+  // 毎秒 20 回の配信をまねる: 差分の大きさと、元に戻ること。3 回に 1 回は届かなかったことにする（届いた最新を元にする）
+  let base = packInts(sim.s).ints;
+  let total = 0;
+  let raw = 0;
+  let n = 0;
+  for (let k = 0; k < 100; k++) {
+    for (let j = 0; j < 3; j++) sim.step(1 / 60);
+    const cur = packInts(sim.s);
+    assert.equal(cur.tail.length, 0);
+    const d = intDeltaEncode(base, cur.ints);
+    const back = intDeltaDecode(base, d, cur.ints.length);
+    assert.deepEqual([...back], [...cur.ints]);
+    assert.equal(checkInts(back), checkInts(cur.ints));
+    total += d.length;
+    raw += packBin(sim.s, true, null).length;
+    n++;
+    if (k % 3 !== 0) base = cur.ints;
+  }
+  assert.ok(total / n < 45, `差分は平均 ${(total / n).toFixed(1)} バイト（前の形は ${(raw / n).toFixed(0)} バイト）`);
+  // 元なし（最初の 1 回）でも戻る。壊れた差分は null
+  const first = packInts(sim.s).ints;
+  const d0 = intDeltaEncode(null, first);
+  assert.deepEqual([...intDeltaDecode(null, d0, first.length)], [...first]);
+  assert.equal(intDeltaDecode(null, new Uint8Array([1, 200]), 4), null);
+  // 起きたことだけのバイト列
+  assert.equal(packEvents([]).length, 0);
+  const ev = [{ t: 'hit', sq: 5, v: 0, by: 1, d: 3, hp: 97, kx: 0, kz: 0 }];
+  assert.deepEqual(unpackEvents(packEvents(ev)), ev);
+});

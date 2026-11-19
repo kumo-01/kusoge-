@@ -148,5 +148,90 @@ export function check16(u8) {
   return ((h >>> 16) ^ h) & 0xffff;
 }
 
+// ---- 整数の列の差分（2026-11-19〜）----
+// ゲームの状態を「整数の列」（位置は cm、向きは 1/2048 周…）にして、相手が持っている前の列との「引き算」を送る。
+// 少しずつ変わる値（位置・時刻）は差が小さいので 1 バイト、変わらない値は 0 の連続としてまとめて 1〜2 バイトになる。
+// バイトの XOR（上の deltaEncode）より小さい（XOR は 255 → 256 のようなけた上がりで 2 バイト変わり、変わった所ごとに区切りの 2 バイトがいる）。
+// 形: [0 の数 varint][0 でない数の個数 varint][その数ぶん zigzag varint] をくり返す
+
+/** base（なければ全部 0 とみなす）から cur への差分を out（Uint8Array。足りなければ伸ばす）に書いて、バイト列を返す */
+export function intDeltaEncode(base, cur) {
+  const n = cur.length;
+  let out = new Uint8Array(n * 2 + 16);
+  let o = 0;
+  const put = (v) => {
+    if (o + 6 > out.length) {
+      const nb = new Uint8Array(out.length * 2);
+      nb.set(out);
+      out = nb;
+    }
+    v >>>= 0;
+    while (v >= 128) {
+      out[o++] = (v & 127) | 128;
+      v >>>= 7;
+    }
+    out[o++] = v;
+  };
+  const diff = (i) => (cur[i] - (base && i < base.length ? base[i] : 0)) | 0;
+  let i = 0;
+  while (i < n) {
+    const z0 = i;
+    while (i < n && diff(i) === 0) i++;
+    if (i >= n) break; // 残りは全部 0（書かない）
+    const l0 = i;
+    // 0 が 1 つだけはさまっているときは、区切らずに続ける（区切ると 2 バイト、続ければ 1 バイト）
+    while (i < n && (diff(i) !== 0 || (i + 1 < n && diff(i + 1) !== 0))) i++;
+    put(l0 - z0);
+    put(i - l0);
+    for (let k = l0; k < i; k++) {
+      const d = diff(k);
+      put((d << 1) ^ (d >> 31));
+    }
+  }
+  return out.slice(0, o);
+}
+
+/** 差分から元の整数の列（長さ n）に戻す。壊れていれば null */
+export function intDeltaDecode(base, data, n) {
+  if (!(n >= 0 && n <= 65536)) return null;
+  const out = new Int32Array(n);
+  for (let k = 0; k < n; k++) out[k] = base && k < base.length ? base[k] : 0;
+  let o = 0;
+  const get = () => {
+    let v = 0;
+    let sh = 0;
+    for (;;) {
+      if (o >= data.length || sh > 28) return -1;
+      const b = data[o++];
+      v |= (b & 127) << sh;
+      if (!(b & 128)) return v >>> 0;
+      sh += 7;
+    }
+  };
+  let i = 0;
+  while (o < data.length) {
+    const z = get();
+    const l = get();
+    if (z < 0 || l <= 0 || i + z + l > n) return null;
+    i += z;
+    for (let k = 0; k < l; k++, i++) {
+      const u = get();
+      if (u < 0) return null;
+      out[i] = (out[i] + ((u >>> 1) ^ -(u & 1))) | 0;
+    }
+  }
+  return out;
+}
+
+/** 整数の列の 16 ビットの確かめ用の値 */
+export function checkInts(a) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < a.length; i++) {
+    h ^= a[i];
+    h = Math.imul(h, 0x01000193);
+  }
+  return ((h >>> 16) ^ h) & 0xffff;
+}
+
 if (typeof window !== 'undefined' && typeof fetch === 'function') initNetcodec();
 if (typeof window !== 'undefined' && import.meta.env?.VITE_TEST_HOOKS === '1') window.__netcodec = { active: codecWasmActive };

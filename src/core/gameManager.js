@@ -16,8 +16,10 @@
 // 画面遷移や勝敗の確定はホストの部屋管理（room.js）が行い、ゲームは context.finish(result) で結果を返す。
 
 import { Emitter, h, now } from './util.js';
-import { encodeInputFrame, encodeSnapshotFrame, encodeDeltaFrame, encodeGameFrame, decodeFrame, matchHash, FRAME_INPUT, FRAME_SNAPSHOT, FRAME_DELTA, FRAME_GAME, NO_BASE } from './binframe.js';
-import { deltaEncode, deltaDecode, check16 } from './netcodec.js';
+import { encodeInputFrame, encodeSnapshotFrame, encodeDeltaFrame, encodeGameFrame, encodeStateFrame, decodeFrame, matchHash, FRAME_INPUT, FRAME_SNAPSHOT, FRAME_DELTA, FRAME_GAME, FRAME_STATE, NO_BASE } from './binframe.js';
+import { deltaEncode, deltaDecode, check16, intDeltaEncode, intDeltaDecode, checkInts } from './netcodec.js';
+
+const EMPTY = new Uint8Array(0);
 import { EngineClient } from './engineClient.js';
 
 export const LOOP_CONFIG = {
@@ -104,7 +106,7 @@ export class GameManager extends Emitter {
         if (this.isHost) return;
         // 連続入力は順不同の高速チャンネルで送る（重複・欠落は seq と重ね送りで吸収）。
         // P2P は、読めた最新の配信の番号（受け取り確認）も一緒に送る。ホストはそれを元に差分の配信を作る
-        this.net.sendFast(this.net.binary ? encodeInputFrame(matchId, this.gen, seq, inputs, this._rx?.gen === this.gen && this._rx.last != null ? this._rx.last & 0xffff : game.netAck ?? null) : { type: 'player_input', matchId, gen: this.gen, seq, inputs });
+        this.net.sendFast(this.net.binary ? encodeInputFrame(matchId, this.gen, seq, inputs, this._rs?.gen === this.gen && this._rs.last != null ? { seq: this._rs.last & 0xffff, mask: this._rs.mask } : this._rx?.gen === this.gen && this._rx.last != null ? this._rx.last & 0xffff : game.netAck ?? null) : { type: 'player_input', matchId, gen: this.gen, seq, inputs });
       },
       // ゲーム固有メッセージ（双方向）
       sendGameMessage: (data) => {
@@ -306,13 +308,31 @@ export class GameManager extends Emitter {
     const game = this.game;
     if (!game) return;
     const f = decodeFrame(buf);
-    if (!f || f.hash !== matchHash(this.matchId) || f.gen !== (this.gen & 0xffff)) return; // 別の試合・古い世代
+    if (!f) return;
+    if (f.kind === FRAME_STATE) {
+      // 小さい頭の配信（世代とハッシュは下 8 ビットで見分ける）
+      if (f.gen8 === (this.gen & 255) && f.hash8 === (matchHash(this.matchId) & 255) && !this.isHost && this.running && game.decodeNetInts) {
+        try {
+          this._recvState(game, f);
+        } catch (err) {
+          console.warn('[game] 配信の処理でエラー', err);
+        }
+      }
+      return;
+    }
+    if (f.hash !== matchHash(this.matchId) || f.gen !== (this.gen & 0xffff)) return; // 別の試合・古い世代
     try {
       if (f.kind === FRAME_INPUT && this.isHost && !this.serverSim) {
         const player = this.players.indexOf(slot);
         if (this.running && player > 0) game.onMessage({ type: 'player_input', player, seq: f.seq, inputs: f.inputs });
         if (player > 0 && f.ack !== undefined) game.netAckFrom?.(slot, f.ack);
         if (player > 0 && f.ack >= 0) this._deltaState().acks.set(slot, f.ack); // 共通の差分の配信の元
+        if (player > 0 && game.encodeNetInts) {
+          // 整数の差分の配信: どの配信が届いたか（最新と、その前 16 回ぶん）。確認がついていなければ、読み込み直したなどで何も持っていない
+          if (f.ack2) this._gotAck(slot, f.ack2);
+          else this._sxState().got.delete(slot);
+        }
+
       } else if (f.kind === FRAME_GAME && this.isHost && !this.serverSim) {
         const player = this.players.indexOf(slot);
         if (player > 0) game.onMessage({ type: 'game_bin', data: f.payload, player });
@@ -410,12 +430,17 @@ export class GameManager extends Emitter {
     const snap = keep ? this.game.getSnapshot() : null;
     // 起きたこと: 共通の差分の配信を使うゲームには、次の配信の番号と、全員が受け取りを確認した配信の番号も渡す
     // （確認されるまで載せ続けられる。取りこぼしても必ず届き、届いたらすぐやめられる）。順番どおり確実に届く中継では 1 回だけ
-    const ev = this.game.drainNetEvents ? this.game.drainNetEvents(this.game.netDelta && this.net.binary && !this.net.reliable ? this._ackInfo() : null) : [];
+    const intsPath = this.net.binary && this.game.encodeNetInts && this.net.sendFastTo && this.net.isConnected;
+    const ev = intsPath ? [] : this.game.drainNetEvents ? this.game.drainNetEvents(this.game.netDelta && this.net.binary && !this.net.reliable ? this._ackInfo() : null) : [];
     const t = now();
     if (snap) {
       this._history.push({ t, snap });
       const keepAfter = t - LOOP_CONFIG.HISTORY_SEC * 1000;
       while (this._history.length && this._history[0].t < keepAfter) this._history.shift();
+    }
+    if (intsPath) {
+      this._sendState();
+      return;
     }
     if (this.net.congested && ev.length === 0) return; // 送信が詰まっているときは位置更新を間引く
     // P2P はバイナリの枠で送る（JSON の約 1/3.5）。部屋の中継は文字だけなので JSON
@@ -467,6 +492,173 @@ export class GameManager extends Emitter {
     return this._dx;
   }
 
+  // ---- 整数の差分の配信（2026-11-19〜。encodeNetInts を持つゲーム）----
+  // 状態は「整数の列」の引き算で送る（netcodec.js の intDelta）。元にするのは、そのゲストが受け取ったと確認できた状態。
+  // 状態は netStateEvery 回に 1 回（ゴム鉄砲は毎秒 20 回）。起きたことは起きた tick にすぐ送る（毎秒 40 回の刻み）。
+  // 何も起きていない tick は何も送らない。受け取り確認は「最新の番号 + その前 16 回ぶん」なので、どの配信が届いたかが正確に分かる
+
+  /** ホスト: 送った状態（番号 → 整数の列）と、ゲストごとの受け取った番号 */
+  _sxState() {
+    if (this._sx?.gen !== this.gen || this._sx.match !== this.matchId) this._sx = { gen: this.gen, match: this.matchId, sent: new Map(), got: new Map(), tick: 0 };
+    return this._sx;
+  }
+
+  /** ゲスト: 受け取った状態（番号 → 整数の列）と、受け取れた番号の記録 */
+  _rsState() {
+    if (this._rs?.gen !== this.gen || this._rs.match !== this.matchId) this._rs = { gen: this.gen, match: this.matchId, states: new Map(), last: null, mask: 0 };
+    return this._rs;
+  }
+
+  _gotAck(slot, a) {
+    const sx = this._sxState();
+    let g = sx.got.get(slot);
+    if (!g) sx.got.set(slot, (g = { set: new Set(), lastState: -1, at: 0 }));
+    let s = (this._netSeq & ~0xffff) | a.seq;
+    if (s > this._netSeq) s -= 65536;
+    if (s < 0) return;
+    g.at = now();
+    const add = (q) => {
+      if (q < 0 || g.set.has(q)) return;
+      g.set.add(q);
+      if (q > g.lastState && sx.sent.has(q)) g.lastState = q;
+    };
+    add(s);
+    for (let k = 0; k < 16; k++) if (a.mask & (1 << k)) add(s - 1 - k);
+    if (g.set.size > 600) for (const q of g.set) if (q < this._netSeq - 300) g.set.delete(q);
+  }
+
+  _sendState() {
+    const game = this.game;
+    const sx = this._sxState();
+    const seq = this._netSeq + 1;
+    const slots = this.players.filter((slot) => slot > 0 && this.net.isConnected(slot));
+    const ack = {
+      seq,
+      reliable: !!this.net.reliable, // 順番どおり確実に届く通信（中継）なら、送り直しはいらない
+      // seqs のどれかを、つながっているゲスト全員が受け取ったか
+      delivered: (seqs) => slots.every((slot) => {
+        const g = sx.got.get(slot);
+        return !!g && seqs.some((q) => g.set.has(q));
+      }),
+    };
+    const ev = game.drainNetEvents ? game.drainNetEvents(ack) : [];
+    sx.tick++;
+    const withState = sx.tick % (game.netStateEvery || 1) === 0 && !(this.net.congested && !ev.length);
+    if ((!withState && !ev.length) || !slots.length) return;
+    this._netSeq = seq;
+    let ints = null;
+    let tail = EMPTY;
+    let check = 0;
+    if (withState) {
+      const st = game.encodeNetInts();
+      ints = st.ints;
+      tail = st.tail || EMPTY;
+      check = checkInts(ints) & 255;
+      sx.sent.set(seq, ints);
+      if (sx.sent.size > 64) sx.sent.delete(sx.sent.keys().next().value);
+    }
+    const cache = new Map();
+    const t = now();
+    for (const slot of slots) {
+      const g = sx.got.get(slot);
+      // 元にする状態: そのゲストが受け取ったと確認できた最新のもの（1 秒以上確認が来ていなければ、元なしで送り直す）
+      const bseq = g && t - g.at < 1000 && sx.sent.has(g.lastState) && seq - g.lastState <= 255 && g.lastState < seq ? g.lastState : -1;
+      // 起きたことは、ゲストごとに（自分の撃った知らせなど、その人にいらないものを省ける）
+      const evBytes = ev.length ? game.encodeNetEventBytes(ev, slot) : EMPTY;
+      if (!withState && !evBytes.length) continue;
+      // 中身: [印: 1 = 状態あり, 2 = 元あり] [元あり: seq - 元の seq] [状態あり: 確かめ用 1 バイト, 整数の数, 差分の長さ, tail の長さ（varint）, 差分, tail] [起きたこと]
+      let head = cache.get(bseq);
+      if (!head) {
+        if (!withState) head = new Uint8Array([0]);
+        else {
+          const d = intDeltaEncode(bseq >= 0 ? sx.sent.get(bseq) : null, ints);
+          const hb = bseq >= 0 ? 1 : 0;
+          const h = [1 | (hb ? 2 : 0)];
+          if (hb) h.push(seq - bseq);
+          h.push(check);
+          for (let v of [ints.length, d.length, tail.length]) {
+            while (v >= 128) {
+              h.push((v & 127) | 128);
+              v >>>= 7;
+            }
+            h.push(v);
+          }
+          head = new Uint8Array(h.length + d.length + tail.length);
+          head.set(h);
+          head.set(d, h.length);
+          head.set(tail, h.length + d.length);
+        }
+        cache.set(bseq, head);
+      }
+      const p = new Uint8Array(head.length + evBytes.length);
+      p.set(head);
+      p.set(evBytes, head.length);
+      const frame = encodeStateFrame(this.matchId, this.gen, seq, p);
+      this.stats.txBytes += frame.byteLength;
+      this.stats.txFrames = (this.stats.txFrames | 0) + 1;
+      this.net.sendFastTo(slot, frame);
+    }
+  }
+
+  /** ゲスト: 状態と起きたことの配信を読む */
+  _recvState(game, f) {
+    const rs = this._rsState();
+    const p = f.payload;
+    if (p.length < 1) return;
+    // seq は下 16 ビットだけ届く。最後に受け取った番号にいちばん近い値に戻す
+    let seq = f.seq16;
+    if (rs.last != null) {
+      seq |= rs.last & ~0xffff;
+      if (seq < rs.last - 32768) seq += 65536;
+      else if (seq > rs.last + 32768) seq -= 65536;
+    }
+    const flags = p[0];
+    let o = 1;
+    let ints = null;
+    let tail = null;
+    if (flags & 1) {
+      let base = null;
+      if (flags & 2) {
+        base = rs.states.get(seq - p[o++]);
+        if (!base) return; // 元を持っていない。受け取っていないことにする（確認を返さないので、ホストは持っている元で送り直す）
+      }
+      const check = p[o++];
+      const vu = () => {
+        let v = 0;
+        let sh = 0;
+        for (;;) {
+          const b = p[o++];
+          if (b === undefined || sh > 21) return -1;
+          v |= (b & 127) << sh;
+          if (!(b & 128)) return v;
+          sh += 7;
+        }
+      };
+      const n = vu();
+      const dl = vu();
+      const tl = vu();
+      if (n < 0 || dl < 0 || tl < 0 || p.length < o + dl + tl) return;
+      ints = intDeltaDecode(base, p.subarray(o, o + dl), n);
+      if (!ints || (checkInts(ints) & 255) !== check) return;
+      tail = p.subarray(o + dl, o + dl + tl);
+      o += dl + tl;
+      rs.states.set(seq, ints);
+      if (rs.states.size > 64) rs.states.delete(rs.states.keys().next().value);
+    }
+    // 受け取った番号の記録（最新と、その前 16 回ぶん）
+    if (rs.last == null || seq > rs.last) {
+      const d = rs.last == null ? 17 : seq - rs.last;
+      rs.mask = d > 16 ? 0 : ((rs.mask << d) | (1 << (d - 1))) & 0xffff;
+      rs.last = seq;
+    } else {
+      const d = rs.last - seq;
+      if (d >= 1 && d <= 16) rs.mask |= 1 << (d - 1);
+    }
+    this.stats.rxBytes += f.payload.length + 6;
+    const dec = game.decodeNetInts(ints, tail, p.subarray(o));
+    if (dec) game.applyNetSnapshot(dec.snap, dec.ev, seq);
+  }
+
   /** 次に送る配信の番号 seq と、つながっているゲスト全員が受け取りを確認した配信の番号 minAck（だれかが未確認なら -1） */
   _ackInfo() {
     const dx = this._deltaState();
@@ -490,6 +682,8 @@ export class GameManager extends Emitter {
     this._token++;
     this._dx = null;
     this._rx = null;
+    this._sx = null;
+    this._rs = null;
     this._resolveFirstFrame?.();
     this._resolveFirstFrame = null;
     clearTimeout(this._runTimer);

@@ -11,7 +11,7 @@ import { ARENAS, segmentHit, groundY } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, aimDir, eyeOf, heightOf, movableBox, segCylinder, rayCylinder, hitDamage, isHead } from './physics.js';
 import { GomuWorld } from './world.js';
 import { GomuHud } from './hud.js';
-import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64, packFire, packRemoteHit, unpackGameBin } from './net.js';
+import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64, packFire, packRemoteHit, unpackGameBin, packInts, unpackInts, packEvents, unpackEvents } from './net.js';
 import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, noAmmoProof, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT, TREAT, FUN, EXTRA } from './constants.js';
 import { getSens } from './prefs.js';
 import { ROOM } from './arena.js';
@@ -206,6 +206,9 @@ class GomuGame {
     this._bombAim = false;
     this.mov = (this.arena.movables || []).map(movableBox);
     this._gcw = null;
+// 次の会場は、手があいたときに先に作っておく（ラウンドの変わり目で固まらないように）
+    const idle = globalThis.requestIdleCallback || ((f) => setTimeout(f, 3000));
+    idle(() => void ARENAS[(r + 1) % ARENAS.length], { timeout: 8000 });
     this.world?.setArena(ARENAS[r % ARENAS.length], r % 3); // 1 ラウンド目は朝、2 は昼、3 は夜（街灯がつく）
     // 暗視ゴーグルは夜だけ使い方を出す（ラウンドが変わったら外す）
     this.nv = false;
@@ -348,7 +351,7 @@ class GomuGame {
     } else {
       // 自分の位置は、変わった tick は毎回（毎秒 60 回。ホストの計算・ほかの人の画面への遅れを減らす）、
       // 止まっている間は 4 tick に 1 回だけ送る（受け取り確認は続けて届けたいので、止めはしない）
-      // 動いている間は毎秒 40 回（ホストの配信と同じ。1 tick と 2 tick の間隔を交互に）。
+      // 動いている間は毎秒 20 回。
       // 伏せ・ジャンプ・着地・復活のように、状態が変わった tick はすぐに送る。止まっている間は 4 tick に 1 回
       const pk = packPilot(p);
       const key = pk.join(',');
@@ -357,15 +360,16 @@ class GomuGame {
       let send;
       if (key === this._pilotKey) {
         this._pilotIdle = (this._pilotIdle | 0) + 1;
-        send = this._pilotIdle % 4 === 0;
+        send = this._pilotIdle % 6 === 0 || (this._gotEv && this._pilotIdle % 3 === 0); // 止まっている間は毎秒 10 回（知らせが届いたら、確認を早く返す）
       } else {
         this._pilotIdle = 0;
-        send = flags !== this._pilotFlags || this._pilotAcc >= 1.5;
+        send = flags !== this._pilotFlags || this._pilotAcc >= 3; // 毎秒 20 回（ホストの配信と同じ）
       }
       this._pilotKey = key;
       this._pilotFlags = flags;
       if (send) {
-        this._pilotAcc = Math.max(0, this._pilotAcc - 1.5);
+        this._pilotAcc = Math.max(0, this._pilotAcc - 3);
+        this._gotEv = false;
         this.ctx.sendInput(++this._seq, pk);
       }
       this._stepGuestBands(dt);
@@ -511,7 +515,10 @@ class GomuGame {
         continue;
       }
       if (res === 'end' || b.age > b.life + 0.5) {
-        if (b.age < b.life) this.world?.burst(b.x, b.y, b.z, 0xffffff, 4, 1.5, 0.04);
+        if (b.age < b.life) {
+          this.world?.burst(b.x, b.y, b.z, 0xffffff, 4, 1.5, 0.04);
+          if (b.w !== WEAPON.BOMB) this._impactMark(b.x, b.y, b.z);
+        }
         this.bands.splice(n, 1);
       }
     }
@@ -547,6 +554,8 @@ class GomuGame {
   /** ホスト: 計算で起きたことを、自分の画面に反映して、ゲストへ配る準備をする */
   _hostEvents(evs) {
     for (const e of evs) {
+      // 壁・地面で止まった輪ゴムは、ゲストも自分の画面で同じ計算をして消すので、知らせない（爆弾は知らせる）
+      if (e.t === 'end' && e.wl) continue;
       e.sq = ++this.evSeq; // 知らせの通し番号（取りこぼし・重なりを見分ける）。e.id は輪ゴム・煙・ガムの番号、e.n は連続撃破の数・残りの発数のまま
       // 順番どおり確実に届く通信（中継）なら 1 回、取りこぼしのある P2P の高速チャンネルなら 3 回続けて載せる
       this.netEvents.push({ e, n: this.ctx.reliableInput ? 1 : 3 });
@@ -955,7 +964,7 @@ class GomuGame {
   }
 
   get netEvery() {
-    return 1.5; // 毎秒 40 回
+    return 3; // 毎秒 20 回（状態と起きたことを 1 つにまとめて送る。送る回数が少ないほど、回線の負担が小さい）
   }
 
   /** ラウンドごとの点は 10 回に 1 回だけ載せる（めったに変わらない） */
@@ -984,26 +993,47 @@ class GomuGame {
     return d ? { snap: { st: d.st }, ev: d.ev } : null;
   }
 
+  // ---- 整数の差分の配信（P2P・新しい中継。src/core/gameManager.js）----
+  encodeNetInts() {
+    return packInts(this.sim.s);
+  }
+  /** 席 slot のゲストへ送る起きたこと。その人が撃った輪ゴムの「撃った」は送り返さない（自分の画面ではもう飛んでいる） */
+  encodeNetEventBytes(ev, slot) {
+    const me = this.ctx.players.indexOf(slot);
+    return packEvents(ev.filter((e) => !(e.t === 'shot' && e.o === me && e.w !== WEAPON.BOMB)));
+  }
+  decodeNetInts(ints, tail, evBytes) {
+    const st = ints ? unpackInts(ints, tail, this.n) : null;
+    return { snap: st ? { st } : null, ev: unpackEvents(evBytes) };
+  }
+
   /**
-   * 配信に載せる起きたこと。ack（P2P の共通の差分の配信）があれば、ゲスト全員が受け取りを確認するまで（最長 ACK_KEEP 回の配信のあいだ）
-   * 載せ直す。ack がなければ、決まった回数（中継は順番どおり確実に届くので 1 回）
+   * 配信に載せる起きたこと。
+   * ack（整数の差分の配信）があれば: 1 回送って、ゲスト全員に届いたと確認できるまで 2 回（0.1 秒）おきに送り直す（最長 1 秒）。
+   * 順番どおり確実に届く通信（中継）なら 1 回だけ。ack がなければ（古い中継の JSON）、決まった回数
    */
   drainNetEvents(ack = null) {
     const out = [];
-    const ACK_KEEP = 40; // 1 秒ぶん
-    for (const x of this.netEvents) {
-      if (out.length >= 120) break;
-      if (ack) {
-        if (x.sent == null) x.sent = ack.seq;
-        const k = ack.seq - x.sent;
-        if (x.sent <= ack.minAck || k >= ACK_KEEP) {
+    if (ack) {
+      this._evTick = (this._evTick | 0) + 1;
+      for (const x of this.netEvents) {
+        if (x.seqs && (ack.reliable || ack.delivered(x.seqs) || this._evTick - x.t0 >= 20)) {
           x.n = 0;
           continue;
         }
-        // 最初の 3 回は続けて、そのあとは確認されるまで 4 回に 1 回だけ（取りこぼしても必ず届き、量はほとんど増えない）
-        if (k < 3 || k % 4 === 0) out.push(x.e);
-        continue;
+        if (out.length >= 100) continue;
+        if (!x.seqs) {
+          x.seqs = [];
+          x.t0 = this._evTick;
+        } else if ((this._evTick - x.t0) % 2 !== 0) continue;
+        x.seqs.push(ack.seq);
+        out.push(x.e);
       }
+      this.netEvents = this.netEvents.filter((x) => x.n > 0);
+      return out;
+    }
+    for (const x of this.netEvents) {
+      if (out.length >= 120) break;
       out.push(x.e);
       x.n--;
     }
@@ -1021,6 +1051,7 @@ class GomuGame {
     }
     if (this.seenEv.size > 800) this.seenEv = new Set([...this.seenEv].slice(-400));
     evs.sort((a, b) => a.sq - b.sq);
+    if (evs.length) this._gotEv = true;
     const prevRs = this.last?.players.map((p) => p.rs);
     const st = snap?.st || (typeof snap?.b === 'string' ? unpackBin(fromB64(snap.b), this.n, prevRs)?.st : unpackState(snap, this.n));
     if (st) {
@@ -1098,7 +1129,7 @@ class GomuGame {
     const buf = this.buffer;
     if (!buf.length) return this.last?.players || [];
     // 描く時刻: 最新の要約より「届く間隔 + ゆれ」だけ前（ふつうは 0.03〜0.06 秒。回線がゆれるときだけ長く）
-    const delay = Math.max(0.03, Math.min(0.15, (this._ivl ?? 0.025) * 1.2 + (this._jit ?? 0.01) * 2.5));
+    const delay = Math.max(0.03, Math.min(0.15, (this._ivl ?? 0.05) * 1.0 + (this._jit ?? 0.01) * 2)); // 配信 1 回ぶん + ゆれの 2 倍だけ遅らせて、間をなめらかに
     const rt = this.roundT - delay;
     let a = buf[0];
     let b = buf[buf.length - 1];

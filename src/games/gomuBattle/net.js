@@ -593,3 +593,192 @@ export function unpackGameBin(u8) {
   }
   return null;
 }
+
+// ---- 整数の列の配信（2026-11-19〜。src/core/gameManager.js の「整数の差分の配信」で送る）----
+// 状態を整数の列にする: 位置は cm、向きは 1/2048 周、時刻はミリ秒。前の列との引き算で送るので、動いていない値は 0 バイト、
+// 歩いている犬は 1 匹 3〜5 バイトになる。数が変わるもの（おとり人形・煙・ガム）は後ろのバイト列（tail）に入れる
+const INT_V = 2;
+const CM = 100;
+const YAW = 2048;
+const PF = 21; // 犬 1 匹の整数の数
+const HEAD = 5;
+
+export function packInts(s) {
+  const np = s.players.length;
+  const mov = s.mov || [];
+  const a = new Int32Array(HEAD + np * PF + 22 + mov.length * 2);
+  let o = 0;
+  a[o++] = INT_V;
+  a[o++] = s.round;
+  a[o++] = Math.max(0, PH.indexOf(s.phase));
+  a[o++] = Math.round(s.t * 1000);
+  a[o++] = np;
+  // よく変わるもの（位置・向き）は、全員ぶんを続けて並べる（歩いている犬が何匹いても、変わった所が 1 つながりになって小さくなる）
+  for (const p of s.players) a[o++] = Math.round(p.x * CM);
+  for (const p of s.players) a[o++] = Math.round(p.z * CM);
+  for (const p of s.players) a[o++] = Math.round((((p.yaw % TAU) + TAU) % TAU) * (YAW / TAU)) % YAW;
+  for (const p of s.players) a[o++] = Math.round(p.y * CM);
+  for (const p of s.players) a[o++] = clampInt((p.pitch / 1.5) * 31, -31, 31);
+  for (const p of s.players) {
+    a[o++] = (p.crouch ? FL.CROUCH : 0) | (p.moving ? FL.MOVING : 0) | (p.inv > 0 ? FL.INV : 0) | (p.stun > 0 ? FL.STUN : 0) | (p.stuck > 0 ? FL.STUCK : 0) | (p.shake > 0 ? FL.SHAKE : 0) | (p.noAmmo > 0 ? FL.NOAMMO : 0) | (p.reload > 0 ? FL.RELOAD : 0) | (p.burn > 0 ? 256 : 0) | (p.picked ? 512 : 0);
+    a[o++] = Math.max(0, Math.min(255, p.hp));
+    a[o++] = p.item | 0;
+    a[o++] = p.g | 0;
+    a[o++] = Math.ceil(p.dead * 4); // 復活までの残り（1/4 秒きざみ）
+    a[o++] = p.score | 0;
+    a[o++] = p.kills | 0;
+    a[o++] = p.deaths | 0;
+    a[o++] = Math.ceil(Math.max(p.shake, p.noAmmo, p.stuck) * 4);
+    a[o++] = p.weapon | 0;
+    a[o++] = (s.teams?.[p.i] ?? -1) + 1;
+    a[o++] = p.bombs | 0;
+    a[o++] = p.hs | 0;
+    a[o++] = p.shots ? Math.round((p.landed / p.shots) * 100) : 0;
+    a[o++] = (p.rs[0] | 0) + (p.rs[1] | 0) * 4096; // ラウンド 1・2 の点
+    a[o++] = p.rs[2] | 0;
+  }
+  a[o++] = s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0);
+  a[o++] = (s.heals || []).reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0);
+  a[o++] = s.drop ? 1 : 0;
+  a[o++] = s.drop ? Math.round(s.drop.x * CM) : 0;
+  a[o++] = s.drop ? Math.round(s.drop.z * CM) : 0;
+  a[o++] = s.drop ? Math.round(s.drop.y * 20) : 0;
+  const wd = s.wind || { x: 0, z: 0, t: 0 };
+  a[o++] = Math.round(wd.x * 10);
+  a[o++] = Math.round(wd.z * 10);
+  a[o++] = Math.ceil(wd.t * 2);
+  a[o++] = (s.balloons || []).reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0);
+  a[o++] = Math.ceil(s.rain || 0) > 0 ? 1 : 0;
+  a[o++] = s.wx | 0;
+  const b = s.boss;
+  a[o++] = (b ? 1 : 0) | (s.bossWon || []).reduce((m, x, k) => (x ? m | (2 << k) : m), 0);
+  a[o++] = b ? Math.round(b.x * CM) : 0;
+  a[o++] = b ? Math.round(b.y * CM) : 0;
+  a[o++] = b ? Math.round(b.z * CM) : 0;
+  a[o++] = b ? Math.round((((b.yaw % TAU) + TAU) % TAU) * (YAW / TAU)) % YAW : 0;
+  a[o++] = b ? b.hp | 0 : 0;
+  a[o++] = b ? b.max | 0 : 0;
+  a[o++] = b ? Math.max(0, BOSS_ST.indexOf(b.st)) : 0;
+  a[o++] = b ? Math.round(Math.min(12, b.t) * 20) : 0;
+  a[o++] = b ? Math.ceil(Math.max(b.dizzy, b.stuck) * 4) : 0;
+  for (const m of mov) {
+    a[o++] = Math.round(((m.x0 + m.x1) / 2) * CM);
+    a[o++] = Math.round(((m.z0 + m.z1) / 2) * CM);
+  }
+  // 数が変わるもの
+  const w = new W();
+  const dcs = (s.decoys || []).slice(0, 8);
+  w.u8(dcs.length);
+  for (const d of dcs) {
+    w.i32(d.id);
+    w.u8(d.o);
+    w.i16(d.x * CM);
+    w.i16(d.y * CM);
+    w.i16(d.z * CM);
+    w.u16((((d.yaw % TAU) + TAU) % TAU) * (65536 / TAU));
+  }
+  w.u8(s.smokes.length);
+  for (const x of s.smokes) {
+    w.i32(x.id);
+    w.i16(x.x * CM);
+    w.i16(x.y * CM);
+    w.i16(x.z * CM);
+    w.u8(x.age * 4);
+  }
+  w.u8(s.gums.length);
+  for (const x of s.gums) {
+    w.i32(x.id);
+    w.i16(x.x * CM);
+    w.i16(x.y * CM);
+    w.i16(x.z * CM);
+  }
+  // 何もないとき（ほとんどいつも）は tail を空にする
+  return { ints: a, tail: dcs.length || s.smokes.length || s.gums.length ? w.out() : new Uint8Array(0) };
+}
+
+/** 整数の列から、unpackBin と同じ形の状態に。壊れていれば null */
+export function unpackInts(a, tail, n) {
+  try {
+    if (!a || a[0] !== INT_V) return null;
+    let o = 1;
+    const round = Math.max(0, Math.min(2, a[o++]));
+    const phase = PH[a[o++]] || 'play';
+    const t = a[o++] / 1000;
+    const np = Math.min(a[o++], 16);
+    if (a.length < HEAD + np * PF + 22) return null;
+    const players = [];
+    const X = o;
+    const Z = o + np;
+    const Y = o + np * 3;
+    o += np * 5;
+    for (let i = 0; i < np; i++) {
+      const p = { i, x: a[X + i] / CM, y: a[Y + i] / CM, z: a[Z + i] / CM };
+      let yaw = (a[X + np * 2 + i] * TAU) / YAW;
+      if (yaw > Math.PI) yaw -= TAU;
+      p.yaw = yaw;
+      p.pitch = (a[X + np * 4 + i] / 31) * 1.5;
+      const fl = a[o++];
+      Object.assign(p, { crouch: !!(fl & FL.CROUCH), moving: !!(fl & FL.MOVING), inv: fl & FL.INV ? 1 : 0, stun: fl & FL.STUN ? 1 : 0, stuck: fl & FL.STUCK ? 1 : 0, shake: fl & FL.SHAKE ? 1 : 0, noAmmo: fl & FL.NOAMMO ? 1 : 0, reloading: !!(fl & FL.RELOAD), burning: !!(fl & 256), picked: !!(fl & 512) });
+      p.hp = a[o++];
+      p.item = a[o++];
+      p.g = a[o++];
+      p.dead = a[o++] / 4;
+      p.score = a[o++];
+      p.kills = a[o++];
+      p.deaths = a[o++];
+      p.fxT = a[o++] / 4;
+      p.weapon = a[o++];
+      p.team = a[o++] - 1;
+      p.bombs = a[o++];
+      p.hs = a[o++];
+      p.acc = a[o++];
+      const r01 = a[o++];
+      p.rs = [r01 % 4096, Math.floor(r01 / 4096), a[o++]];
+      if (i < n) players.push(p);
+    }
+    const boxes = a[o++];
+    const heals = a[o++];
+    const hasDrop = a[o++];
+    const drop = { x: a[o++] / CM, z: a[o++] / CM, y: a[o++] / 20 };
+    const wind = { x: a[o++] / 10, z: a[o++] / 10, t: a[o++] / 2 };
+    const balloons = a[o++];
+    const rain = a[o++];
+    const wx = a[o++];
+    const bf = a[o++];
+    const bossWon = [0, 1, 2].map((k) => !!(bf & (2 << k)));
+    let yawB = (a[o + 3] * TAU) / YAW;
+    if (yawB > Math.PI) yawB -= TAU;
+    const boss = bf & 1 ? { x: a[o] / CM, y: a[o + 1] / CM, z: a[o + 2] / CM, yaw: yawB, hp: a[o + 4], max: Math.max(1, a[o + 5]), st: BOSS_ST[a[o + 6]] || 'walk', t: a[o + 7] / 20, fx: a[o + 8] / 4 } : null;
+    o += 9;
+    const mov = [];
+    for (; o + 1 < a.length && mov.length < 32; o += 2) mov.push([a[o] / CM, a[o + 1] / CM]);
+    let decoys = [];
+    let smokes = [];
+    let gums = [];
+    if (tail && tail.length) {
+      const r = new R(tail);
+      decoys = Array.from({ length: Math.min(r.u8(), 8) }, () => ({ id: r.i32(), o: r.u8(), x: r.i16() / CM, y: r.i16() / CM, z: r.i16() / CM, yaw: (r.u16() * TAU) / 65536 }));
+      smokes = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / CM, y: r.i16() / CM, z: r.i16() / CM, age: r.u8() / 4 }));
+      gums = Array.from({ length: Math.min(r.u8(), 16) }, () => ({ id: r.i32(), x: r.i16() / CM, y: r.i16() / CM, z: r.i16() / CM }));
+    }
+    return { round, phase, t, players, boxes, heals, drop: hasDrop ? drop : null, wind, balloons, rain, wx, decoys, smokes, gums, mov, boss, bossWon };
+  } catch {
+    return null;
+  }
+}
+
+/** 起きたことだけのバイト列（状態とは別に送る） */
+export function packEvents(evs) {
+  if (!evs.length) return new Uint8Array(0);
+  const w = new W();
+  writeEvents(w, evs);
+  return w.out();
+}
+export function unpackEvents(u8) {
+  if (!u8 || !u8.length) return [];
+  try {
+    return readEvents(new R(u8));
+  } catch {
+    return [];
+  }
+}

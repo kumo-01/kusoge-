@@ -15,6 +15,7 @@ export const FRAME_INPUT = 2;
 export const FRAME_DELTA = 3;
 export const NO_BASE = 0xffff;
 export const FRAME_GAME = 4;
+export const FRAME_STATE = 5;
 
 /** 試合 ID の 32bit ハッシュ（FNV-1a）。前の試合の配信を取り違えないため */
 export function matchHash(id) {
@@ -56,6 +57,23 @@ export function encodeDeltaFrame(matchId, gen, seq, base, check, data) {
   return buf;
 }
 
+/**
+ * 状態と起きたことの配信（2026-11-19〜。整数の列の差分）。[8..11] seq、[12..] 中身（gameManager が詰める）
+ */
+export function encodeStateFrame(matchId, gen, seq, payload) {
+  // 小さい頭（6 バイト）: [0xB7][5][世代の下 8 ビット][試合 ID のハッシュの下 8 ビット][seq の下 16 ビット]
+  const buf = new ArrayBuffer(6 + payload.length);
+  const u8 = new Uint8Array(buf);
+  u8[0] = MAGIC;
+  u8[1] = FRAME_STATE;
+  u8[2] = gen & 255;
+  u8[3] = matchHash(matchId) & 255;
+  u8[4] = seq & 255;
+  u8[5] = (seq >> 8) & 255;
+  u8.set(payload, 6);
+  return buf;
+}
+
 /** ゲームのメッセージ（バイナリ）。payload: Uint8Array */
 export function encodeGameFrame(matchId, gen, payload) {
   const buf = new ArrayBuffer(12 + payload.length);
@@ -68,8 +86,10 @@ export function encodeGameFrame(matchId, gen, payload) {
 export function encodeInputFrame(matchId, gen, seq, inputs, ack = null) {
   const n = Math.min(255, inputs.length);
   const list = inputs.slice(inputs.length - n);
-  const withAck = Number.isInteger(ack) && ack >= 0;
-  const buf = new ArrayBuffer(13 + n + (withAck ? 3 : 0));
+  // 受け取り確認: 数なら「読めた最新の配信の番号」、{ seq, mask } なら「最新の番号と、その前 16 回ぶんの受け取れたかどうか」
+  const ext = ack && typeof ack === 'object' && Number.isInteger(ack.seq) && ack.seq >= 0;
+  const withAck = !ext && Number.isInteger(ack) && ack >= 0;
+  const buf = new ArrayBuffer(13 + n + (ext ? 5 : withAck ? 3 : 0));
   const dv = header(buf, FRAME_INPUT, matchId, gen);
   dv.setUint32(8, seq >>> 0, true);
   dv.setUint8(12, n);
@@ -78,12 +98,17 @@ export function encodeInputFrame(matchId, gen, seq, inputs, ack = null) {
     dv.setUint8(13 + n, 1);
     dv.setUint16(14 + n, ack & 0xffff, true);
   }
+  if (ext) {
+    dv.setUint8(13 + n, 2);
+    dv.setUint16(14 + n, ack.seq & 0xffff, true);
+    dv.setUint16(16 + n, ack.mask & 0xffff, true);
+  }
   return buf;
 }
 
 /** 受け取ったバイナリが、このアプリの枠か */
 export function isFrame(data) {
-  return (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) && data.byteLength >= 12 && new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer, data.byteOffset || 0, 1)[0] === MAGIC;
+  return (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) && data.byteLength >= 6 && new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer, data.byteOffset || 0, 1)[0] === MAGIC;
 }
 
 /**
@@ -93,6 +118,7 @@ export function isFrame(data) {
 export function decodeFrame(data) {
   try {
     const u8 = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    if (u8.length >= 6 && u8[0] === MAGIC && u8[1] === FRAME_STATE) return { kind: FRAME_STATE, gen8: u8[2], hash8: u8[3], seq16: u8[4] | (u8[5] << 8), payload: u8.subarray(6) };
     if (u8.length < 12 || u8[0] !== MAGIC) return null;
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
     const f = { kind: u8[1], gen: dv.getUint16(2, true), hash: dv.getUint32(4, true), seq: dv.getUint32(8, true) };
@@ -116,6 +142,7 @@ export function decodeFrame(data) {
       if (u8.length < 13 + n) return null;
       f.inputs = Array.from(u8.subarray(13, 13 + n));
       f.ack = u8.length >= 16 + n && u8[13 + n] === 1 ? dv.getUint16(14 + n, true) : -1;
+      if (u8.length >= 18 + n && u8[13 + n] === 2) f.ack2 = { seq: dv.getUint16(14 + n, true), mask: dv.getUint16(16 + n, true) };
       return f;
     }
     return null;

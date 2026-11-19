@@ -554,7 +554,7 @@ export class GomuSim {
       }
       if (res === 'end') {
         s.bands.splice(n, 1);
-        this.events.push({ t: 'end', id: b.id, x: b.x, y: b.y, z: b.z, h: -1 });
+        this.events.push({ t: 'end', id: b.id, x: b.x, y: b.y, z: b.z, h: -1, ...(b.w !== WEAPON.BOMB ? { wl: 1 } : {}) }); // wl: 壁・地面・時間切れで止まった
         if (b.w === WEAPON.BOMB) {
           this._explode(b, b.x, b.y, b.z);
           if (s.phase !== 'play') return;
