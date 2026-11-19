@@ -36,6 +36,7 @@ export class GomuHud {
     this.vignette = h('div.gm-vignette');
     // 体力が少ないとき（ドクドク赤く）・走っているとき（集中線）・暗視ゴーグル（緑の画面）
     this.lowHp = h('div.gm-lowhp');
+    this.burnFx = h('div.gm-burnfx'); // 燃えているとき（画面のふちがオレンジにゆらめく）
     this.speed = h('div.gm-speed');
     this.nvFx = h('div.gm-nvfx', null, h('span.gm-nv-tag', null, '暗視'));
     this.nvHint = h('div.gm-nvhint', { hidden: true }, h('span', { html: iconSvg('eye', 16) }), h('span', null, touch ? '暗視ボタン' : 'N キーで暗視ゴーグル'));
@@ -70,7 +71,7 @@ export class GomuHud {
     this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.RIFLE, 'crosshair'), card(WEAPON.MG, 'zap')];
     this.pickInfo = h('p.gm-pick-info');
     this.pick = h('div.gm-pick', { hidden: true }, h('h2', null, '武器をえらぶ'), h('div.gm-pick-row', null, ...this.pickCards), this.pickInfo);
-    this.root.append(this.scope, this.nvFx, this.speed, this.lowHp, this.smoke, this.vignette, this.nvHint, this.names, this.hurtDirs, this.cross, this.dmg, this.mapCv, this.scoreboard, h('div.gm-top', null, this.round, this.timer), h('div.gm-alerts', null, this.spurt, this.wind), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
+    this.root.append(this.scope, this.nvFx, this.speed, this.lowHp, this.burnFx, this.smoke, this.vignette, this.nvHint, this.names, this.hurtDirs, this.cross, this.dmg, this.mapCv, this.scoreboard, h('div.gm-top', null, this.round, this.timer), h('div.gm-alerts', null, this.spurt, this.wind), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
     this.touch = touch ? new GomuTouch(this.root) : null;
     this.root.classList.add(`mode-${mode}`);
     this.root.classList.toggle('is-touch', !!touch);
@@ -168,7 +169,7 @@ export class GomuHud {
     this._set(this.itemName, 'itn', it ? it.name : 'アイテムなし');
     this.itemBox.classList.toggle('has', !!it);
     // 状態（照準ぶれ・ゴム切れ・ネバネバ）
-    const st = [v.me.shake > 0 ? 'spiral:照準ぶれ' : '', v.me.noAmmo > 0 ? 'scissors:ゴム切れ' : '', v.me.stuck > 0 ? 'candy:ネバネバ' : '', v.me.star > 0 ? `star:無敵 ${Math.ceil(v.me.star)}` : v.me.inv > 0 ? 'star:無敵' : ''].filter(Boolean);
+    const st = [v.me.burning ? 'flame:燃えている' : '', v.me.shake > 0 ? 'spiral:照準ぶれ' : '', v.me.noAmmo > 0 ? 'scissors:ゴム切れ' : '', v.me.stuck > 0 ? 'candy:ネバネバ' : '', v.me.star > 0 ? `star:無敵 ${Math.ceil(v.me.star)}` : v.me.inv > 0 ? 'star:無敵' : ''].filter(Boolean);
     this._setHtml(this.status, 'st', st.join('|'), () => st.map((x) => { const [ic, t] = x.split(':'); return `<span class="gm-st">${iconSvg(ic, 18)}${t}</span>`; }).join(''));
     // 点数表（点の順）
     const rows = [...v.players].sort((a, b) => b.score - a.score || a.i - b.i);
@@ -208,6 +209,7 @@ export class GomuHud {
       }
     }
     this.cross.classList.toggle('is-shake', v.me.shake > 0);
+    this.burnFx.classList.toggle('on', !!v.me.burning && !v.me.dead);
     this.cross.classList.toggle('is-off', v.me.noAmmo > 0 || v.me.reload > 0);
     this.smoke.classList.toggle('on', !!v.inSmoke);
     // フィードの期限切れ

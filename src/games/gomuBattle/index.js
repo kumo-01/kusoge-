@@ -587,7 +587,7 @@ class GomuGame {
         case 'hit':
           if (e.v === this.me) {
             this.hud.hurt();
-            this._addHurtDir(e);
+            if (!e.bn) this._addHurtDir(e); // 燃えているダメージは向きを出さない
             this.ctx.sound.play('hit');
             this.pilot.vx += e.kx; // 押される
             this.pilot.vz += e.kz;
@@ -634,6 +634,12 @@ class GomuGame {
             this.pilot.sp = e.k;
             this.pilot.spN = e.n;
           }
+          break;
+        case 'burn':
+          if (e.i === this.me) {
+            this.ctx.sound.play('boom');
+            this.hud.pushFeed(`🔥 ${e.by >= 0 ? `${name(e.by)} の` : ''}炎の輪ゴムで燃えた！5秒間ダメージ（水に入ると消える）`, 'bad');
+          } else if (e.by === this.me) this.hud.pushFeed(`🔥 ${name(e.i)} が燃えている！`, 'mine');
           break;
         case 'smoke':
           this.world?.addSmoke(e.id, e.x, e.y, e.z);
@@ -1213,7 +1219,7 @@ class GomuGame {
       for (let k = 0; k < this._starT.length; k++) if (this._starT[k] > 0) this._starT[k] = Math.max(0, this._starT[k] - dt);
       this._views = views;
       this._dogFx(views, dt);
-      w.updateDogs(views.map((q, i) => (i === this.me ? { hide: true } : { x: q.x, y: q.y, z: q.z, yaw: q.yaw, pitch: q.pitch, crouch: q.crouch, moving: q.moving, dead: q.dead > 0, inv: q.inv > 0, star: this._starT[i] > 0 && q.inv > 0, stuck: q.stuck > 0, stun: q.stun > 0, weapon: q.weapon })), dt);
+      w.updateDogs(views.map((q, i) => (i === this.me ? { hide: true } : { x: q.x, y: q.y, z: q.z, yaw: q.yaw, pitch: q.pitch, crouch: q.crouch, moving: q.moving, dead: q.dead > 0, inv: q.inv > 0, star: this._starT[i] > 0 && q.inv > 0, stuck: q.stuck > 0, stun: q.stun > 0, weapon: q.weapon, burning: !!q.burning || q.burn > 0 })), dt);
       const bands = this.isHost ? this.sim.s.bands : this.bands;
       w.updateBands(bands, dt);
       const boxes = this.isHost ? this.sim.s.boxes.map((x) => x <= 0) : this.arena.items.map((_, k) => !!((this.last?.boxes ?? 0) & (1 << k)));
@@ -1344,7 +1350,7 @@ class GomuGame {
       inSmoke: w ? w.inSmoke(cx, cy + this._eye, cz) : false,
       wind: this._windNow(),
       yaw: this.pilot.yaw,
-      me: { hp: rec.hp, dead: rec.dead, item: rec.item, ammo: p.ammo, maxAmmo: WEAPONS[p.weapon].ammo, reloadT: WEAPONS[p.weapon].reload, weapon: p.weapon, reload: p.reload, bombs: this._bombsLeft(rec), bombAim: this._bombAim, stam: p.stam ?? PLAYER.STAMINA, sprint: !!p.sprint, sp: p.sp && p.spN > 0 ? p.sp : 0, spN: p.spN, shake: rec.shake, noAmmo: noAmmoProof(p.weapon) ? 0 : rec.noAmmo, inf: !!WEAPONS[p.weapon].inf, stuck: rec.stuck, inv: rec.inv, star: rec.inv > 0 ? this._starT[this.me] || 0 : 0 },
+      me: { hp: rec.hp, dead: rec.dead, item: rec.item, ammo: p.ammo, maxAmmo: WEAPONS[p.weapon].ammo, reloadT: WEAPONS[p.weapon].reload, weapon: p.weapon, reload: p.reload, bombs: this._bombsLeft(rec), bombAim: this._bombAim, stam: p.stam ?? PLAYER.STAMINA, sprint: !!p.sprint, sp: p.sp && p.spN > 0 ? p.sp : 0, spN: p.spN, shake: rec.shake, burning: !!rec.burning || rec.burn > 0, noAmmo: noAmmoProof(p.weapon) ? 0 : rec.noAmmo, inf: !!WEAPONS[p.weapon].inf, stuck: rec.stuck, inv: rec.inv, star: rec.inv > 0 ? this._starT[this.me] || 0 : 0 },
     });
     // 3・2・1 の音
     if (this.phase === 'intro') {

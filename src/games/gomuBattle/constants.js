@@ -69,14 +69,17 @@ export const ITEM = {
   COUNT: 11, // プレゼント箱から出る種類の数（ここまで）
   GOLD: 11, // 金の輪ゴム（空からの補給箱の中身。箱からは出ない）
   DECOY: 12, // おとり人形（自分そっくりの人形を置く）
+  FIRE: 13, // 炎の輪ゴム（当たった相手が燃える）
 };
 
 /** ゴムが変わるアイテム → 撃つ輪ゴムの種類 */
-export const BAND_ITEMS = [ITEM.THICK, ITEM.TRIPLE, ITEM.BOUNCE, ITEM.HOMING];
+export const BAND_ITEMS = [ITEM.THICK, ITEM.TRIPLE, ITEM.BOUNCE, ITEM.HOMING, ITEM.FIRE];
 /** プレゼント箱から出るアイテム（回復は箱からは出ない。会場に落ちているおやつを拾う） */
-export const BOX_ITEMS = [...Array.from({ length: ITEM.COUNT - 1 }, (_, k) => k + 1).filter((it) => it !== ITEM.HEAL), ITEM.DECOY];
-/** マシンガンを持っている犬の箱から出るアイテム（輪ゴムが強くなるもの: 極太・3方向・跳ね返り・追いかけ は出ない） */
-export const BOX_ITEMS_MG = BOX_ITEMS.filter((it) => !BAND_ITEMS.includes(it));
+export const BOX_ITEMS = [...Array.from({ length: ITEM.COUNT - 1 }, (_, k) => k + 1).filter((it) => it !== ITEM.HEAL), ITEM.DECOY, ITEM.FIRE];
+/**
+ * 炎の輪ゴム: 当たった相手は TIME 秒燃えて、TICK 秒ごとに DMG ダメージ（撃った犬の点。燃えている間にまた当たると、燃える時間がのび直す）
+ */
+export const BURN = { TIME: 5, TICK: 1, DMG: 5 };
 
 /**
  * さらに足した仕組み（2026-11-13 その 3）
@@ -142,6 +145,7 @@ export const ITEMS = {
   BOX_RESPAWN: 10, // 箱を取ってから次が出るまで
   BOX_RADIUS: 0.8, // これより近づくと取れる
   SPECIAL_SHOTS: 5, // ゴムが変わるアイテムは次の 5 発
+  SPECIAL_SHOTS_MG: 30, // マシンガンで使うと次の 30 発（金の輪ゴムも）
   THICK_SPEED: 37.8,
   THICK_RADIUS: 0.22,
   THICK_DAMAGE: 2,
@@ -182,10 +186,10 @@ export const BOT = {
 };
 
 export const ITEM_INFO = {
-  [ITEM.THICK]: { name: '極太ゴム', icon: 'thick', desc: '次の5発が太くて当たりやすく、ダメージ1.6倍' },
-  [ITEM.TRIPLE]: { name: '3方向ゴム', icon: 'triple', desc: '次の5発が、扇の形に3本ずつ飛ぶ' },
-  [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: 'bounce', desc: '次の5発が、壁や家具で3回まで跳ね返る' },
-  [ITEM.HOMING]: { name: '追いかけゴム', icon: 'target', desc: '次の5発が、狙った近くの相手へゆるく曲がる' },
+  [ITEM.THICK]: { name: '極太ゴム', icon: 'thick', desc: '次の5発（マシンガンは30発）が太くて当たりやすく、ダメージ1.6倍' },
+  [ITEM.TRIPLE]: { name: '3方向ゴム', icon: 'triple', desc: '次の5発（マシンガンは30発）が、扇の形に3本ずつ飛ぶ' },
+  [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: 'bounce', desc: '次の5発（マシンガンは30発）が、壁や家具で3回まで跳ね返る' },
+  [ITEM.HOMING]: { name: '追いかけゴム', icon: 'target', desc: '次の5発（マシンガンは30発）が、狙った近くの相手へゆるく曲がる' },
   [ITEM.SMOKE]: { name: '煙幕', icon: 'cloud', desc: '狙った所に煙を投げる。中は見えない' },
   [ITEM.SHAKE]: { name: '照準ぶれ', icon: 'spiral', desc: '自分以外の全員の狙いが3秒ゆらゆら' },
   [ITEM.NOAMMO]: { name: 'ゴム切れ', icon: 'scissors', desc: '自分以外の全員が3秒撃てない' },
@@ -193,6 +197,7 @@ export const ITEM_INFO = {
   [ITEM.HEAL]: { name: '回復おやつ', icon: 'heal', desc: '体力が40回復する' },
   [ITEM.STAR]: { name: '無敵スター', icon: 'star', desc: '10秒間、輪ゴムもガムも効かない' },
   [ITEM.GOLD]: { name: '金の輪ゴム', icon: 'crown', desc: '空からの補給箱の中身。次の3発がダメージ2倍' },
+  [ITEM.FIRE]: { name: '炎の輪ゴム', icon: 'flame', desc: '次の5発（マシンガンは30発）に火がつく。当たった相手は5秒燃えて、1秒ごとに5ダメージ' },
   [ITEM.DECOY]: { name: 'おとり人形', icon: 'person', desc: '足もとに自分そっくりの人形を置く。CPUはそれを狙う。輪ゴムを受け止める（15秒）' },
 };
 

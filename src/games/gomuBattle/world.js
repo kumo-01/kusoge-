@@ -10,7 +10,7 @@ import { ITEM, ITEMS, PLAYER, HAIRBALL, BOSS, WEAPON, GIMMICK, geyserLevel } fro
 import { mat as stdMat, kindMat as kindMat0, weaponRack } from './look.js';
 
 /** 輪ゴムの色（種類ごと） */
-export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]: 0x2a9d8f, [ITEM.BOUNCE]: 0x3a86ff, [ITEM.HOMING]: 0x9b5de5, [ITEM.GOLD]: 0xffc300 };
+export const BAND_COLORS = { 0: 0xf4a261, [ITEM.THICK]: 0xe63946, [ITEM.TRIPLE]: 0x2a9d8f, [ITEM.BOUNCE]: 0x3a86ff, [ITEM.HOMING]: 0x9b5de5, [ITEM.GOLD]: 0xffc300, [ITEM.FIRE]: 0xff4500 };
 
 /**
  * 背中の旗（見た目だけ）: 細い棒と、はためく布。犬の後ろ（-z）の上に立てる。color: 布の色
@@ -1692,6 +1692,15 @@ export class GomuWorld {
       d.bubble.visible = d.barkT > 0 && !v.dead;
       if (d.bubble.visible) d.bubble.material.opacity = Math.min(1, d.barkT * 3);
       d.gum.visible = !!v.stuck;
+      // 燃えている犬: 体から炎が立ちのぼる
+      if (v.burning && !v.dead) {
+        for (let k = 0; k < 2; k++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 0.3;
+          this.gfx.spawn({ x: v.x + Math.cos(a) * r, y: v.y + 0.2 + Math.random() * 0.8, z: v.z + Math.sin(a) * r, vx: (Math.random() - 0.5) * 0.4, vy: 1.4 + Math.random() * 1.2, vz: (Math.random() - 0.5) * 0.4, life: 0.45 + Math.random() * 0.3, size: 0.32, grow: -0.7, color: k ? 0xff5a1f : 0xffb347 });
+        }
+        if (Math.random() < 0.15) this.pfx.spawn({ x: v.x, y: v.y + 1.2, z: v.z, vy: 1.2, drag: 0.5, life: 1.2, size: 0.35, grow: 2, color: 0x555555, a0: 0.35 });
+      }
       // 無敵の間は点滅（無敵スターは点滅しないで金色に光る）
       d.star.visible = !!v.star && !v.dead;
       if (d.star.visible) {
@@ -1843,6 +1852,8 @@ export class GomuWorld {
       const isHair = !!b && b.kind === HAIRBALL;
       const isBomb = !!b && b.w === WEAPON.BOMB;
       const trail = m.userData.trail;
+      // 炎の輪ゴム: 飛んでいる間、うしろに火の粉
+      if (b && b.kind === ITEM.FIRE && Math.random() < 0.8) this.gfx.spawn({ x: b.x + (Math.random() - 0.5) * 0.08, y: b.y + (Math.random() - 0.5) * 0.08, z: b.z + (Math.random() - 0.5) * 0.08, vx: -b.vx * 0.02, vy: 0.8 + Math.random(), vz: -b.vz * 0.02, life: 0.3 + Math.random() * 0.2, size: 0.16, grow: -0.6, color: Math.random() < 0.5 ? 0xff7a1a : 0xffd23f });
       // 跳ねたら火花（跳ねた回数が増えたとき）
       if (b && !isHair) {
         const nb = b.bounced || 0;

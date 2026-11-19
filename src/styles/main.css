@@ -3091,3 +3091,26 @@ body[data-screen='game'] {
     padding: 10px 8px;
   }
 }
+
+/* ゴム鉄砲: 燃えているとき（炎の輪ゴム） */
+.gm-burnfx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: inset 0 0 110px 36px rgba(255, 110, 20, 0.7);
+  transition: opacity 0.3s;
+}
+.gm-burnfx.on {
+  opacity: 1;
+  animation: gm-flicker 0.35s ease-in-out infinite alternate;
+}
+@keyframes gm-flicker {
+  from { opacity: 0.65; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gm-burnfx.on {
+    animation: none;
+  }
+}

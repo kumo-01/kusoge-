@@ -2,7 +2,7 @@
 // 人の犬の位置は、その人の端末が計算して送ってくる（setPilot）。CPU の犬はここで動かす。
 // 起きたこと（撃った・当たった・倒れた・拾った…）は events に積み、ゲストへ配る。
 
-import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, BOX_ITEMS_MG, TREAT, FUN, EXTRA, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL, noAmmoProof } from './constants.js';
+import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, BURN, TREAT, FUN, EXTRA, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL, noAmmoProof } from './constants.js';
 import { ARENAS, segmentHit, ROOM, groundY } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage, hitDamage, isHead } from './physics.js';
 import { botThink } from './bot.js';
@@ -146,7 +146,7 @@ export class GomuSim {
         p.weapon = r < 0.55 ? WEAPON.NORMAL : r < 0.85 ? WEAPON.SNIPER : WEAPON.RIFLE;
       }
       p.picked = p.bot || !this.usePick;
-      Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, star: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bombs: BOMB_COUNT, bombCd: 0, stam: PLAYER.STAMINA, sprint: false, streak: 0, nemesis: -1, barkCd: 0, bot2: null });
+      Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, star: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, burn: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bombs: BOMB_COUNT, bombCd: 0, stam: PLAYER.STAMINA, sprint: false, streak: 0, nemesis: -1, barkCd: 0, bot2: null });
       this._place(p, this.arena.spawns[spots[k % spots.length]]);
     });
     s.boss = this.mode === MODE.BOSS ? this._newBoss(r) : null;
@@ -243,6 +243,7 @@ export class GomuSim {
 
   _stepPlayer(p, dt) {
     for (const f of ['inv', 'star', 'stun', 'stuck', 'shake', 'noAmmo', 'fireCd', 'bombCd', 'barkCd']) p[f] = Math.max(0, (p[f] || 0) - dt);
+    this._stepBurn(p, dt);
     if (p.dead > 0) {
       p.dead = Math.max(0, p.dead - dt);
       if (p.dead === 0) this._respawn(p);
@@ -269,6 +270,23 @@ export class GomuSim {
   }
 
   /** 復活: 生きている相手からいちばん遠い出発地点へ */
+  /** 燃えている犬: TICK 秒ごとに DMG ダメージ（撃った犬の点）。水に入ると消える */
+  _stepBurn(p, dt) {
+    if (!(p.burn > 0)) return;
+    const wet = p.y < 0.3 && !!this.arena.water?.some((w) => p.x > w.x0 && p.x < w.x1 && p.z > w.z0 && p.z < w.z1);
+    if (p.dead > 0 || wet || this.s.phase !== 'play') {
+      p.burn = 0;
+      return;
+    }
+    p.burn = Math.max(0, p.burn - dt);
+    p.burnT = (p.burnT ?? BURN.TICK) - dt;
+    if (p.burnT <= 1e-9) {
+      p.burnT += BURN.TICK;
+      const by = this.s.players[p.burnBy] ? p.burnBy : -1;
+      this._hit(p, { o: by, dmg: BURN.DMG, vx: 0, vz: 0, burn: true });
+    }
+  }
+
   _respawn(p) {
     const others = this.s.players.filter((q) => q !== p && q.dead <= 0);
     let best = this.arena.spawns[0];
@@ -286,7 +304,7 @@ export class GomuSim {
         best = sp;
       }
     }
-    Object.assign(p, { hp: PLAYER.HP, inv: PLAYER.INVINCIBLE, stun: 0, stuck: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0 });
+    Object.assign(p, { hp: PLAYER.HP, inv: PLAYER.INVINCIBLE, stun: 0, stuck: 0, burn: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0 });
     this._place(p, best);
   }
 
@@ -367,8 +385,8 @@ export class GomuSim {
       this.events.push({ t: 'shot', id: b.id, o: i, cid: b.cid, k, w: p.weapon, x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz });
       if (cj && b.cid) {
         const log = (this.shotLog[i] ||= new Map());
-        log.set(b.cid, { w: b.w, mul: b.mul, ox: b.ox, oy: b.oy, oz: b.oz, vx: b.vx, vz: b.vz, id: b.id, t: s.t, used: false });
-        if (log.size > 40) log.delete(log.keys().next().value);
+        log.set(b.cid, { w: b.w, k: b.kind, mul: b.mul, ox: b.ox, oy: b.oy, oz: b.oz, vx: b.vx, vz: b.vz, id: b.id, t: s.t, used: false });
+        if (log.size > 200) log.delete(log.keys().next().value); // マシンガン（3 方向なら毎秒 60 本）でも数秒ぶん覚える
       }
     });
     if (s.bands.length > 120) s.bands.splice(0, s.bands.length - 120);
@@ -392,7 +410,7 @@ export class GomuSim {
     this.events.push({ t: 'end', id: rec.id, x: pos[0], y: pos[1], z: pos[2], h: v });
     const head = isHead(q, pos[1]);
     const dist = Math.hypot(pos[0] - rec.ox, pos[1] - rec.oy, pos[2] - rec.oz);
-    this._hit(q, { o: i, dmg: hitDamage(rec.w, dist, rec.mul, head), vx: rec.vx, vz: rec.vz, head, dist });
+    this._hit(q, { o: i, dmg: hitDamage(rec.w, dist, rec.mul, head), vx: rec.vx, vz: rec.vz, head, dist, fire: rec.k === ITEM.FIRE });
     return true;
   }
 
@@ -513,7 +531,7 @@ export class GomuSim {
         } else {
           this.events.push({ t: 'end', id: b.id, x: hx, y: hy, z: hz, h: hit.i });
           const head = b.kind !== HAIRBALL && isHead(hit, hy);
-          this._hit(hit, { o: b.o, dmg: this._dmgOf(b, hx, hy, hz, head), vx: b.vx, vz: b.vz, head, dist: b.kind === HAIRBALL ? 0 : Math.hypot(hx - b.ox, hy - b.oy, hz - b.oz) });
+          this._hit(hit, { o: b.o, dmg: this._dmgOf(b, hx, hy, hz, head), vx: b.vx, vz: b.vz, head, dist: b.kind === HAIRBALL ? 0 : Math.hypot(hx - b.ox, hy - b.oy, hz - b.oz), fire: b.kind === ITEM.FIRE });
         }
         if (s.phase !== 'play') return; // 猫を倒した（ラウンドおわり）
         continue;
@@ -576,7 +594,15 @@ export class GomuSim {
     }
     const dmg = Math.min(q.hp, b.dmg);
     q.hp -= dmg;
-    q.stun = PLAYER.STUN;
+    if (!b.burn) q.stun = PLAYER.STUN; // 燃えているダメージではよろけない
+    // 炎の輪ゴム: 燃えはじめる（燃えている間にまた当たると、時間がのび直す）
+    if (b.fire && q.hp > 0) {
+      const was = q.burn > 0;
+      if (!was) q.burnT = BURN.TICK;
+      q.burn = BURN.TIME;
+      q.burnBy = b.o;
+      if (!was) this.events.push({ t: 'burn', i: q.i, by: b.o }); // 燃えはじめたときだけ知らせる（のび直しは知らせない）
+    }
     const hl = Math.hypot(b.vx, b.vz) || 1;
     const kx = (b.vx / hl) * PLAYER.KNOCK;
     const kz = (b.vz / hl) * PLAYER.KNOCK;
@@ -585,14 +611,17 @@ export class GomuSim {
       q.vz += kz;
     }
     if (by) {
-      by.hits++;
-      by.landed++;
+      if (!b.burn) {
+        by.hits++;
+        by.landed++;
+      }
       this._dealt(by, dmg);
       if (b.head) by.hs = (by.hs || 0) + 1;
       if (b.dist) by.longest = Math.max(by.longest || 0, b.dist);
     }
-    this.events.push({ t: 'hit', v: q.i, by: b.o, d: dmg, hp: q.hp, kx, kz, ...(b.bomb ? { bm: 1 } : {}), ...(b.head ? { hs: 1 } : {}) });
+    this.events.push({ t: 'hit', v: q.i, by: b.o, d: dmg, hp: q.hp, kx, kz, ...(b.bomb ? { bm: 1 } : {}), ...(b.head ? { hs: 1 } : {}), ...(b.burn ? { bn: 1 } : {}) });
     if (q.hp <= 0) {
+      q.burn = 0;
       q.dead = PLAYER.RESPAWN;
       q.deaths++;
       q.vx = q.vz = 0;
@@ -661,9 +690,9 @@ export class GomuSim {
       dp.y = Math.max(gy, dp.y - FUN.DROP_FALL * dt);
       if (dp.y < gy + 1.4) {
         for (const p of s.players) {
-          if (p.dead > 0 || p.weapon === WEAPON.MG || Math.hypot(p.x - dp.x, p.z - dp.z) > FUN.DROP_RADIUS || Math.abs(p.y - dp.y) > 1.6) continue; // マシンガンは金の輪ゴムを取れない
+          if (p.dead > 0 || Math.hypot(p.x - dp.x, p.z - dp.z) > FUN.DROP_RADIUS || Math.abs(p.y - dp.y) > 1.6) continue;
           p.sp = ITEM.GOLD;
-          p.spN = FUN.GOLD_SHOTS;
+          p.spN = p.weapon === WEAPON.MG ? ITEMS.SPECIAL_SHOTS_MG : FUN.GOLD_SHOTS; // マシンガンは 30 発
           this.events.push({ t: 'sp', i: p.i, k: ITEM.GOLD, n: p.spN });
           this.events.push({ t: 'dropget', i: p.i });
           s.drop = null;
@@ -736,10 +765,9 @@ export class GomuSim {
     this.events.push({ t: 'pop', k, i: by, x, y, z, item });
   }
 
-  /** 箱・風船から出るアイテム（マシンガンには、輪ゴムが強くなるものは出ない） */
+  /** 箱・風船から出るアイテム */
   _boxItem(p) {
-    const list = p.weapon === WEAPON.MG ? BOX_ITEMS_MG : BOX_ITEMS;
-    return list[Math.floor(nextRandom(this.s) * list.length)];
+    return BOX_ITEMS[Math.floor(nextRandom(this.s) * BOX_ITEMS.length)];
   }
 
   /** 遠吠え（「ワン！」）。BARK_CD 秒に 1 回 */
@@ -830,12 +858,11 @@ export class GomuSim {
     const p = s.players[i];
     if (!p || !p.item || p.dead > 0 || s.phase !== 'play') return false;
     const it = p.item;
-    if (p.weapon === WEAPON.MG && (BAND_ITEMS.includes(it) || it === ITEM.GOLD)) return false; // マシンガンでは輪ゴムを強くできない
     p.item = 0;
     this.events.push({ t: 'use', i, item: it });
     if (BAND_ITEMS.includes(it)) {
       p.sp = it;
-      p.spN = ITEMS.SPECIAL_SHOTS;
+      p.spN = p.weapon === WEAPON.MG ? ITEMS.SPECIAL_SHOTS_MG : ITEMS.SPECIAL_SHOTS; // マシンガンは 30 発
       this.events.push({ t: 'sp', i, k: it, n: p.spN });
     } else if (it === ITEM.SMOKE) {
       // 狙った所（家具・壁・床に当たる所。遠すぎれば手前）に煙

@@ -1183,14 +1183,13 @@ test('通信: 起きたこと（撃った・止まった・当たった）はバ
   assert.equal(unpackGameBin(new Uint8Array([9, 9])), null);
 });
 
-test('マシンガン: 箱・風船から輪ゴムが強くなるアイテムは出ない・補給箱（金の輪ゴム）は取れない', async () => {
-  const { BAND_ITEMS, BOX_ITEMS_MG, FUN: F } = await import('../src/games/gomuBattle/constants.js');
-  assert.ok(BOX_ITEMS_MG.length > 0 && BOX_ITEMS_MG.every((it) => !BAND_ITEMS.includes(it)));
+test('マシンガン: 輪ゴムが強くなるアイテムも出て、使うと 30 発。補給箱の金の輪ゴムも 30 発', async () => {
+  const { BAND_ITEMS, FUN: F } = await import('../src/games/gomuBattle/constants.js');
   const sim = ready();
   const [a, b] = sim.s.players;
   a.weapon = WEAPON.MG;
   const got = new Set();
-  for (let k = 0; k < 200; k++) {
+  for (let k = 0; k < 300; k++) {
     a.item = 0;
     sim.s.boxes = sim.s.boxes.map(() => 0);
     const [bx, bz, by] = sim.arena.items[0];
@@ -1198,20 +1197,63 @@ test('マシンガン: 箱・風船から輪ゴムが強くなるアイテムは
     sim.step(DT);
     if (a.item) got.add(a.item);
   }
-  assert.ok(got.size >= 3);
-  for (const it of got) assert.ok(!BAND_ITEMS.includes(it), `出たアイテム ${it}`);
-  // 補給箱: マシンガンの犬は取れない（ふつうの鉄砲の犬は取れる）
+  assert.ok([...got].some((it) => BAND_ITEMS.includes(it)), '強くなるアイテムも出る');
+  a.item = ITEM.TRIPLE;
+  assert.ok(sim.useItem(0, eye(a), [1, 0, 0]));
+  assert.equal(a.spN, ITEMS.SPECIAL_SHOTS_MG);
+  assert.equal(ITEMS.SPECIAL_SHOTS_MG, 30);
+  b.item = ITEM.TRIPLE;
+  assert.ok(sim.useItem(1, eye(b), [1, 0, 0]));
+  assert.equal(b.spN, ITEMS.SPECIAL_SHOTS, 'ふつうの鉄砲は 5 発のまま');
+  // 補給箱: マシンガンでも取れて、金の輪ゴム 30 発
+  a.sp = 0;
   sim.s.nextDrop = sim.s.t;
   run(sim, 0.05);
   const dp = sim.s.drop;
   run(sim, F.DROP_HEIGHT / F.DROP_FALL + 0.5);
   Object.assign(a, { x: dp.x, z: dp.z, y: dp.y });
   run(sim, 0.2);
-  assert.ok(sim.s.drop, 'マシンガンは取れない');
-  Object.assign(b, { x: dp.x, z: dp.z, y: dp.y });
-  run(sim, 0.2);
   assert.equal(sim.s.drop, null);
-  assert.equal(b.sp, ITEM.GOLD);
+  assert.equal(a.sp, ITEM.GOLD);
+  assert.equal(a.spN, 30);
+});
+
+test('炎の輪ゴム: 当たった相手は 5 秒燃えて 1 秒ごとに 5 ダメージ（撃った犬の点）。配信に燃えている印が載る', async () => {
+  const { BURN, BOX_ITEMS, BAND_ITEMS } = await import('../src/games/gomuBattle/constants.js');
+  assert.ok(BOX_ITEMS.includes(ITEM.FIRE) && BAND_ITEMS.includes(ITEM.FIRE));
+  assert.deepEqual([BURN.TIME, BURN.TICK, BURN.DMG], [5, 1, 5]);
+  const sim = ready();
+  const [a, b] = sim.s.players;
+  Object.assign(a, { x: -4, z: 1, y: 0 });
+  Object.assign(b, { x: 4, z: 1, y: 0 });
+  a.item = ITEM.FIRE;
+  assert.ok(sim.useItem(0, eye(a), [1, 0, 0]));
+  assert.equal(a.sp, ITEM.FIRE);
+  sim.drainEvents();
+  sim.fire(0, eye(a), chestDir(a, b), ITEM.FIRE);
+  run(sim, 0.4);
+  const hp0 = b.hp;
+  assert.equal(hp0, PLAYER.HP - 14, 'ふつうのダメージ');
+  assert.ok(b.burn > 4, '燃えている');
+  assert.ok(sim.drainEvents().some((e) => e.t === 'burn' && e.i === 1 && e.by === 0));
+  const d = unpackBin(packBin(sim.s), 2);
+  assert.equal(d.st.players[1].burning, true, '配信に載る');
+  const score0 = a.score;
+  run(sim, 5.2);
+  assert.equal(b.hp, hp0 - 5 * BURN.DMG, '5 秒で 5 回 × 5');
+  assert.equal(b.burn, 0, '消えた');
+  assert.ok(a.score > score0, '撃った犬の点');
+  const ev = sim.drainEvents().filter((e) => e.t === 'hit' && e.v === 1);
+  assert.equal(ev.length, 5);
+  assert.ok(ev.every((e) => e.bn === 1 && e.by === 0));
+  // 燃えて倒れたら、撃った犬が倒したことになる
+  b.hp = 3;
+  b.burn = 2;
+  b.burnT = 0.01;
+  b.burnBy = 0;
+  run(sim, 0.1);
+  assert.ok(b.dead > 0);
+  assert.ok(sim.drainEvents().some((e) => e.t === 'kill' && e.v === 1 && e.by === 0));
 });
 
 test('通信: 知らせの通し番号 sq は、連続撃破の数・強化ゴムの残りの発数（n）とぶつからない', () => {
