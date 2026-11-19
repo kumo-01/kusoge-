@@ -907,11 +907,91 @@ export const ARENAS = [];
 /** 点 (x, z) が箱の水平の範囲に、太さ r で重なるか */
 export const overlapXZ = (b, x, z, r) => x + r > b.x0 && x - r < b.x1 && z + r > b.z0 && z - r < b.z1;
 
+// ---- 高さの地図 ----
+// 会場を 2 m のますに分けて、ますごとに「ここより上には何もない」高さを覚えておく
+// （動かない箱の上の面と、丘の高さの上限。箱は輪ゴムの太さの分だけ広げて数える）。
+// 線分がその高さより上だけを通り、壁・天井・押せるものにも届かないなら、当たらないと決まる。
+const SKY = 2;
+const SKY_R = 0.6; // これより太い線分は地図を使わない
+const skyMaps = new WeakMap();
+function skyMap(world) {
+  const boxes = world.boxes;
+  let m = skyMaps.get(boxes);
+  if (m && m.n === boxes.length && m.T === world.terrain) return m;
+  const nx = Math.ceil(ROOM.W / SKY);
+  const nz = Math.ceil(ROOM.D / SKY);
+  const h = new Float64Array(nx * nz);
+  const mv = [];
+  const ci = (v, half, n) => Math.max(0, Math.min(n - 1, Math.floor((v + half) / SKY)));
+  for (const b of boxes) {
+    if (b.mv) {
+      mv.push(b);
+      continue;
+    }
+    const i0 = ci(b.x0 - SKY_R, ROOM.W / 2, nx);
+    const i1 = ci(b.x1 + SKY_R, ROOM.W / 2, nx);
+    const j0 = ci(b.z0 - SKY_R, ROOM.D / 2, nz);
+    const j1 = ci(b.z1 + SKY_R, ROOM.D / 2, nz);
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) if (b.y1 > h[i * nz + j]) h[i * nz + j] = b.y1;
+  }
+  // 丘: ますにかかる丘の高さを全部足したもの（本当の地面はこれ以下）
+  if (world.terrain?.length) {
+    const g = new Float64Array(nx * nz);
+    for (const f of world.terrain) {
+      if (!(f.h > 0)) continue;
+      const i0 = ci(f.x - f.r, ROOM.W / 2, nx);
+      const i1 = ci(f.x + f.r, ROOM.W / 2, nx);
+      const j0 = ci(f.z - f.r, ROOM.D / 2, nz);
+      const j1 = ci(f.z + f.r, ROOM.D / 2, nz);
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) g[i * nz + j] += f.h;
+    }
+    for (let k = 0; k < h.length; k++) if (g[k] > h[k]) h[k] = g[k];
+  }
+  m = { n: boxes.length, T: world.terrain, nx, nz, h, mv };
+  skyMaps.set(boxes, m);
+  return m;
+}
+/** 線分 a → b（太さ r）が、何にも当たらないと先に分かるか（分からないときは false。細かい計算へ） */
+function skyFree(world, ax, ay, az, bx, by, bz, r) {
+  if (r > SKY_R) return false;
+  const x0 = (ax < bx ? ax : bx) - r;
+  const x1 = (ax < bx ? bx : ax) + r;
+  const z0 = (az < bz ? az : bz) - r;
+  const z1 = (az < bz ? bz : az) + r;
+  const y0 = (ay < by ? ay : by) - r;
+  const y1 = (ay < by ? by : ay) + r;
+  const E = 1e-6;
+  // 壁・天井・床に届かない（NaN もここで細かい計算へ回る）
+  if (!(x0 > -ROOM.W / 2 + E && x1 < ROOM.W / 2 - E && z0 > -ROOM.D / 2 + E && z1 < ROOM.D / 2 - E && y1 < ROOM.CEIL - E && y0 > E)) return false;
+  const m = skyMap(world);
+  const i0 = Math.floor((x0 + ROOM.W / 2) / SKY);
+  const i1 = Math.floor((x1 + ROOM.W / 2) / SKY);
+  const j0 = Math.floor((z0 + ROOM.D / 2) / SKY);
+  const j1 = Math.floor((z1 + ROOM.D / 2) / SKY);
+  if ((i1 - i0 + 1) * (j1 - j0 + 1) > 24) return false; // 長い線分（見通しの確認など）は細かい計算の方が速い
+  if (i0 < 0 || j0 < 0 || i1 >= m.nx || j1 >= m.nz) return false;
+  for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) if (m.h[i * m.nz + j] + E >= y0) return false;
+  // 押せるもの（動くので、毎回その場所で見る）
+  for (let k = 0; k < m.mv.length; k++) {
+    const b = m.mv[k];
+    if (b.x0 <= x1 && b.x1 >= x0 && b.z0 <= z1 && b.z1 >= z0 && b.y0 <= y1 && b.y1 >= y0) return false;
+  }
+  return true;
+}
+
 /**
  * 線分 a → b（3D）が、最初に何かに当たる割合 t（0〜1）。当たらなければ 1。
  * 当たったものは out に { t, nx, ny, nz }（当たった面の向き）。床・壁・天井・箱
  */
 export function segmentHit(arena, ax, ay, az, bx, by, bz, r = 0, out = null) {
+  // 何もない空中を飛んでいるだけなら、細かい計算はしない（高さの地図で先に見分ける。結果は同じ）
+  if (skyFree(arena, ax, ay, az, bx, by, bz, r)) {
+    if (out) {
+      out.t = 1;
+      out.nx = out.ny = out.nz = 0;
+    }
+    return 1;
+  }
   // Rust（WebAssembly）が使えればそちらで（collide.js）。結果は下の JavaScript と同じ
   let t = wasmSegmentHit(arena.boxes, ROOM.W, ROOM.D, ax, ay, az, bx, by, bz, r, out, arena.floorY || 0, ROOM.CEIL);
   if (t === null) t = segmentHitJs(arena, ax, ay, az, bx, by, bz, r, out);

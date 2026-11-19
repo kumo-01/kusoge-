@@ -277,7 +277,17 @@ export class GomuSim {
       }
     } else p.rg = 0;
     if (!p.bot) return; // 人の犬はその人の端末が動かす
-    const inp = botThink(this, p, dt);
+    // CPU の「考える」は 2 tick に 1 回（毎秒 30 回。犬ごとに 1 tick ずらして、同じ tick に重ならないように）。
+    // あいだの tick は前に決めた操作のまま動く（動きそのものは毎 tick 計算するので、なめらかさは同じ）
+    const bt = (this._botT ||= []);
+    let k = bt[p.i];
+    if (!k) k = bt[p.i] = { n: p.i & 1, acc: 0, inp: null };
+    k.acc += dt;
+    let inp = k.inp;
+    if (!inp || ++k.n % 2 === 0) {
+      inp = k.inp = botThink(this, p, k.acc);
+      k.acc = 0;
+    } else inp.jump = false; // ジャンプは押した瞬間だけ
     const slow = p.stuck > 0 ? 0 : p.stun > 0 ? PLAYER.STUN_SPEED : 1;
     stepMove(p, inp, dt, this.cw, slow);
     p.moving = Math.hypot(p.vx, p.vz) > 0.5;
