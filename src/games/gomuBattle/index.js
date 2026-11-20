@@ -370,6 +370,7 @@ class GomuGame {
       // 止まっている間は 4 tick に 1 回だけ送る（受け取り確認は続けて届けたいので、止めはしない）
       // 動いている間は毎秒 20 回。
       // 伏せ・ジャンプ・着地・復活のように、状態が変わった tick はすぐに送る。止まっている間は 4 tick に 1 回
+      this._seq++;
       const pk = packPilot(p);
       const key = pk.join(',');
       const flags = pk[9] | (pk[10] << 8);
@@ -377,17 +378,17 @@ class GomuGame {
       let send;
       if (key === this._pilotKey) {
         this._pilotIdle = (this._pilotIdle | 0) + 1;
-        send = this._pilotIdle % 6 === 0 || (this._gotEv && this._pilotIdle % 3 === 0); // 止まっている間は毎秒 10 回（知らせが届いたら、確認を早く返す）
+        send = this._pilotIdle === 1 || this._pilotIdle % 6 === 0 || (this._gotEv && this._pilotIdle % 3 === 0); // 止まっている間は毎秒 10 回（知らせが届いたら、確認を早く返す）
       } else {
         this._pilotIdle = 0;
-        send = flags !== this._pilotFlags || this._pilotAcc >= 3; // 毎秒 20 回（ホストの配信と同じ）
+        send = flags !== this._pilotFlags || this._pilotAcc >= 2; // 毎秒 30 回（ホストは報告のあいだを、報告の tick から出した速さで進める）
       }
       this._pilotKey = key;
       this._pilotFlags = flags;
       if (send) {
-        this._pilotAcc = Math.max(0, this._pilotAcc - 3);
+        this._pilotAcc = 0;
         this._gotEv = false;
-        this.ctx.sendInput(++this._seq, pk);
+        this.ctx.sendInput(this._seq, pk); // 番号 = この端末の tick（ホストが報告の間隔を正確に知るため）
       }
       this._stepGuestBands(dt);
     }
@@ -974,7 +975,7 @@ class GomuGame {
     if (!this.isHost) return;
     if (msg.type === 'player_input') {
       const st = unpackPilot(msg.inputs);
-      if (st && msg.player > 0 && msg.player < this.humans) this.sim.setPilot(msg.player, st);
+      if (st && msg.player > 0 && msg.player < this.humans) this.sim.setPilot(msg.player, st, Number.isFinite(msg.seq) ? msg.seq : null);
       return;
     }
     // バイナリのメッセージ（撃った・当たった）は、JSON と同じ形に戻して同じように扱う
@@ -1095,6 +1096,11 @@ class GomuGame {
       this._ivl = this._ivl == null ? gap : this._ivl * 0.9 + gap * 0.1;
       this._jit = this._jit == null ? 0 : this._jit * 0.9 + Math.abs(gap - this._ivl) * 0.1;
     }
+    // 描く時刻の時計: 「ホストの時刻 − 自分の時計」を、いちばん早く届いたときの値に寄せて持つ。
+    // 届くたびに合わせ直すと、届く時刻のゆれがそのまま犬の動きのゆれになる
+    const off = st.t - now / 1000;
+    this._clockOff = this._clockOff == null || this._clockR !== st.round || Math.abs(off - this._clockOff) > 0.1 ? off : Math.max(off, this._clockOff - 0.002);
+    this._clockR = st.round;
     this.last = st;
     this._lastAt = now;
     this._syncTeams(st);
@@ -1148,6 +1154,7 @@ class GomuGame {
 
   resume() {
     this.paused = false;
+    this._clockOff = null; // 止まっていた間は時刻が進んでいないので、描く時刻の時計を合わせ直す
   }
 
   // ---- 描画 ----
@@ -1156,18 +1163,26 @@ class GomuGame {
     const buf = this.buffer;
     if (!buf.length) return this.last?.players || [];
     // 描く時刻: 最新の要約より「届く間隔 + ゆれ」だけ前（ふつうは 0.03〜0.06 秒。回線がゆれるときだけ長く）
-    const delay = Math.max(0.03, Math.min(0.15, (this._ivl ?? 0.05) * 1.0 + (this._jit ?? 0.01) * 2)); // 配信 1 回ぶん + ゆれの 2 倍だけ遅らせて、間をなめらかに
-    const rt = this.roundT - delay;
+    const delay = Math.max(0.04, Math.min(0.2, (this._ivl ?? 0.05) * 1.15 + (this._jit ?? 0.01) * 2.5)); // 配信 1 回ぶんと少し + ゆれの分だけ遅らせて、間をなめらかに
+    // 時刻は、ゆれをならした時計から（止まっている間・時計がまだないときは今までどおり）
+    const nowT = this.paused || this._clockOff == null ? this.roundT : Math.min(performance.now() / 1000 + this._clockOff, this.last.t + 0.5);
+    const rt = nowT - delay;
+    const n = buf.length;
     let a = buf[0];
-    let b = buf[buf.length - 1];
-    for (let k = buf.length - 1; k >= 0; k--) {
+    let b = buf[n - 1];
+    let fMax = 1;
+    if (n >= 2 && rt > b.t) {
+      // 次の配信がまだ届いていない（遅れ・取りこぼし）: 止めずに、最後の 2 つの動きのまま少しだけ先へ進める
+      a = buf[n - 2];
+      fMax = 2;
+    } else for (let k = n - 1; k >= 0; k--) {
       if (buf[k].t <= rt) {
         a = buf[k];
-        b = buf[Math.min(k + 1, buf.length - 1)];
+        b = buf[Math.min(k + 1, n - 1)];
         break;
       }
     }
-    const f = b.t > a.t ? Math.max(0, Math.min(1, (rt - a.t) / (b.t - a.t))) : 1;
+    const f = b.t > a.t ? Math.max(0, Math.min(fMax, (rt - a.t) / (b.t - a.t))) : 1;
     const lerpA = (x, y) => x + Math.atan2(Math.sin(y - x), Math.cos(y - x)) * f;
     return b.st.players.map((q, i) => {
       const pa = a.st.players[i] || q;

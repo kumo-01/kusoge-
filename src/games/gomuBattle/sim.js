@@ -165,18 +165,66 @@ export class GomuSim {
   }
 
   /** 人の犬の位置の報告（その人の端末から）。復活のあとの古い報告は捨てる */
-  setPilot(i, st) {
+  setPilot(i, st, tick = null) {
     const p = this.s.players[i];
     if (!p || p.bot || p.dead > 0 || st.g !== p.g) return;
-    p.x = st.x;
-    p.y = st.y;
-    p.z = st.z;
-    p.yaw = st.yaw;
     p.pitch = st.pitch;
     p.crouch = !!st.crouch;
     p.moving = !!st.moving;
     p.ground = st.ground !== false;
+    const dr = (this._dr ||= []);
+    if (tick == null) {
+      // ホスト自身の犬: 毎 tick そのまま
+      dr[i] = null;
+      p.x = st.x;
+      p.y = st.y;
+      p.z = st.z;
+      p.yaw = st.yaw;
+    } else {
+      // ゲストの犬: 報告は毎秒 30 回で、届く時刻もゆれる。報告についている「その人の端末の tick」から速さを出し、
+      // 報告のあいだはその速さで進めておく（計算の中の位置が毎 tick なめらかに動く。配る位置もなめらかになる）
+      let d = dr[i];
+      const hT = this._tickN | 0;
+      let vx = 0;
+      let vy = 0;
+      let vz = 0;
+      let vyaw = 0;
+      if (d && d.g === st.g && tick - d.T > -600) {
+        const dT = tick - d.T;
+        if (dT <= 0) return; // 順番が入れ替わった古い報告（ずっと前の番号なら、つなぎ直しとみて下で作り直す）
+        if (dT <= 12 && Math.hypot(st.x - d.x, st.z - d.z) < 4) {
+          const k = 60 / dT;
+          vx = (st.x - d.x) * k;
+          vy = (st.y - d.y) * k;
+          vz = (st.z - d.z) * k;
+          vyaw = Math.atan2(Math.sin(st.yaw - d.yaw), Math.cos(st.yaw - d.yaw)) * k;
+        }
+      } else d = dr[i] = { off: null };
+      // その人の tick とホストの tick のずれ（いちばん早く届いたときの値に寄せる。届くのが遅れた報告は、その分だけ先へ進めて使う）
+      const lag = hT - tick;
+      d.off = d.off == null || Math.abs(lag - d.off) > 30 ? lag : Math.min(lag, d.off + 0.05);
+      d.T = tick;
+      d.g = st.g;
+      d.x = st.x;
+      d.y = st.y;
+      d.z = st.z;
+      d.yaw = st.yaw;
+      d.vx = vx;
+      d.vy = vy;
+      d.vz = vz;
+      d.vyaw = vyaw;
+      this._drApply(p, d);
+    }
     shoveMovables(this.cw, p); // 押せるものに重なっていたら、押し出す（その人の端末で押した分）
+  }
+
+  /** ゲストの犬を、最後の報告から今の tick まで進めた位置に置く（進めるのは 4 tick 分まで） */
+  _drApply(p, d) {
+    const age = Math.max(0, Math.min(4, (this._tickN | 0) - d.off - d.T)) / 60;
+    p.x = d.x + d.vx * age;
+    p.y = d.y + d.vy * age;
+    p.z = d.z + d.vz * age;
+    p.yaw = d.yaw + d.vyaw * age;
   }
 
   /** 武器を選ぶ（ラウンドの前の選択画面で）。選び直しもできる */
@@ -204,6 +252,7 @@ export class GomuSim {
 
   /** 1 tick 進める */
   step(dt) {
+    this._tickN = (this._tickN | 0) + 1;
     this.cw.clock = this.s.t; // ギミック（間欠泉）の時刻
     const s = this.s;
     s.t += dt;
@@ -276,7 +325,12 @@ export class GomuSim {
         p.rg -= n;
       }
     } else p.rg = 0;
-    if (!p.bot) return; // 人の犬はその人の端末が動かす
+    if (!p.bot) {
+      // 人の犬はその人の端末が動かす。ゲストの犬は、報告のあいだを進めておく
+      const d = this._dr?.[p.i];
+      if (d && d.g === p.g) this._drApply(p, d);
+      return;
+    }
     // CPU の「考える」は 2 tick に 1 回（毎秒 30 回。犬ごとに 1 tick ずらして、同じ tick に重ならないように）。
     // あいだの tick は前に決めた操作のまま動く（動きそのものは毎 tick 計算するので、なめらかさは同じ）
     const bt = (this._botT ||= []);
