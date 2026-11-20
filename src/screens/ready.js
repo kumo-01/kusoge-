@@ -5,6 +5,7 @@ import { getGame } from '../games/registry.js';
 import { playerCard, linkFor, roomSummary, PLAYERS } from './common.js';
 import { TEAMS, TEAM_CPU_BIT, BOT_DOGS, autoTeamBits } from '../games/gomuBattle/constants.js';
 import { getSens, setSens, SENS_MIN, SENS_MAX } from '../games/gomuBattle/prefs.js';
+import { hunt } from '../games/gomuBattle/secret.js';
 import { MAX_PLAYERS, NAME_MAX, cleanName } from '../core/protocol.js';
 
 export function mount(el, app) {
@@ -118,9 +119,39 @@ export function mount(el, app) {
               : null,
           ),
         ),
+        isHost && !s.solo && def?.id === 'gomuBattle' ? huntRow(s) : null,
       ),
     );
     tickCountdown();
+  }
+
+  /**
+   * ホストだけの小さなボタン（いちばん下）。オンにして人を選ぶと、CPU がその人を何よりも先に狙う。
+   * ホストの端末の中だけの設定（部屋の設定ではないので、ゲストには送らない）
+   */
+  function huntRow(s) {
+    const slots = roomSummary(s).occupied;
+    if (hunt.slot != null && !slots.includes(hunt.slot)) hunt.slot = null; // 抜けた人は選び直し
+    return h('div.hunt-row', null,
+      h(`button.hunt-btn${hunt.on ? '.on' : ''}`, {
+        type: 'button',
+        'aria-pressed': hunt.on ? 'true' : 'false',
+        'aria-label': 'ボタン',
+        onclick: () => {
+          hunt.on = !hunt.on;
+          render();
+        },
+      }),
+      hunt.on
+        ? slots.map((slot) =>
+            h(`button.hunt-pick${hunt.slot === slot ? '.on' : ''}`, {
+              type: 'button',
+              onclick: () => {
+                hunt.slot = hunt.slot === slot ? null : slot;
+                render();
+              },
+            }, s.players[slot]?.name || PLAYERS[slot]?.name || `プレイヤー${slot + 1}`))
+        : null);
   }
 
   /** 自分の名前（ゲーム中に吹き出しで出る。この端末に保存される） */

@@ -1182,6 +1182,48 @@ a:hover {
   padding: var(--space-sm) var(--space-2xs) max(var(--space-md), env(safe-area-inset-bottom)) 0;
   background: var(--color-paper);
 }
+/* ホストだけの小さなボタン（いちばん下）。わざと目立たない */
+.hunt-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 18px 0 4px;
+}
+.hunt-btn {
+  width: 9px;
+  height: 9px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--color-rule);
+  border-radius: 50%;
+  background: transparent;
+  opacity: 0.35;
+  cursor: pointer;
+}
+.hunt-btn.on {
+  background: var(--color-ink);
+  opacity: 0.6;
+}
+.hunt-pick {
+  font: inherit;
+  font-size: 9px;
+  line-height: 1;
+  min-height: 0;
+  padding: 2px 5px;
+  border: 1px solid var(--color-rule);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--color-muted-sheet);
+  opacity: 0.6;
+  cursor: pointer;
+}
+.hunt-pick.on {
+  background: var(--color-ink);
+  color: var(--color-paper-3);
+  opacity: 0.85;
+}
 .ready-actions .btn-ghost {
   align-self: flex-start;
 }

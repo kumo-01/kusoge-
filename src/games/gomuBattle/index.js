@@ -14,6 +14,7 @@ import { GomuHud } from './hud.js';
 import { packPilot, unpackPilot, packState, unpackState, packBin, unpackBin, toB64, fromB64, packFire, packRemoteHit, unpackGameBin, packInts, unpackInts, packEvents, unpackEvents } from './net.js';
 import { GUN, PLAYER, ITEM, ITEMS, ITEM_INFO, ROUND, BOT, WEAPON, WEAPONS, noAmmoProof, MODE, TEAMS, teamList, BOSS, HAIRBALL, BOT_DOGS, BOMB_COUNT, TREAT, FUN, EXTRA } from './constants.js';
 import { getSens } from './prefs.js';
+import { hunt } from './secret.js';
 import { ROOM } from './arena.js';
 import { canSee } from './arena.js';
 
@@ -110,6 +111,8 @@ class GomuGame {
       this.sim = new GomuSim({ humans: this.humans, bots: this.nBots, mode: this.mode, teams: this.teams, pick: true });
       // ゲストが撃った輪ゴムの当たりは、撃った人の画面で決める（その人が見ているとおりに当たる。遅れがない）
       this.sim.clientJudge = (i) => i > 0 && i < this.humans && i !== this.me;
+      // ホストだけの小さなボタン（ホストの端末だけの設定）: 選ばれた人を CPU が何よりも先に狙う。ひとりのときは使わない
+      this.sim.huntTarget = hunt.on && this.humans > 1 ? ctx.players.indexOf(hunt.slot) : -1;
       this._hostEvents(this.sim.drainEvents());
     }
   }

@@ -42,7 +42,12 @@ export function botThink(sim, p, dt) {
     let bd = BOT.VIEW * (scoped(p) ? 1.6 : 1) * (sim.s.rain > 0 ? (sim.s.wx === 2 ? EXTRA.SNOW_VIEW : EXTRA.RAIN_VIEW) : 1) * (sim.s.round % 3 === 2 ? EXTRA.NIGHT_VIEW : 1); // 雨・雪・夜は遠くが見えにくい
     b.decoy = null;
     const boss = sim.s.boss;
-    if (boss && boss.hp > 0) {
+    const ht = huntOf(sim, p);
+    if (ht) {
+      // ボタンで選ばれた人: 何よりも先に、その人だけを狙う（遠さは問わない。見えなければ、その人の所へ向かう）
+      const qy = ht.y + heightOf(ht) * 0.6;
+      if (canSee(arena, ex, ey, ez, ht.x, qy, ht.z) && !smokeBlocks(sim, ex, ey, ez, ht.x, qy, ht.z)) best = ht.i;
+    } else if (boss && boss.hp > 0) {
       // ボス戦: 猫だけを狙う（見えていれば）
       const by = boss.y + BOSS.HEIGHT * 0.6;
       if (canSee(arena, ex, ey, ez, boss.x, by, boss.z) && !smokeBlocks(sim, ex, ey, ez, boss.x, by, boss.z)) best = -2;
@@ -55,8 +60,8 @@ export function botThink(sim, p, dt) {
       bd = d;
       best = q.i;
     }
-    // おとり人形（敵のもの）がもっと近くに見えたら、そっちを狙ってしまう
-    if (best !== -2) {
+    // おとり人形（敵のもの）がもっと近くに見えたら、そっちを狙ってしまう（選ばれた人を狙っているときはだまされない）
+    if (best !== -2 && !ht) {
       for (const dc of sim.s.decoys || []) {
         if (!sim.foes(p.i, dc.o)) continue;
         const d = Math.hypot(dc.x - p.x, dc.z - p.z);
@@ -159,7 +164,13 @@ export function botThink(sim, p, dt) {
     }
   } else {
     // 相手が見えない: アイテム → 最後に見た所 → 適当な所 へ歩く。着いたら少しその場で見張る
-    if (b.wait > 0) b.wait -= dt;
+    // （ボタンで選ばれた人がいれば、寄り道しないでその人の所へまっすぐ向かう）
+    const hg = huntOf(sim, p);
+    if (hg) {
+      b.wait = 0;
+      b.goal = { x: hg.x, z: hg.z };
+      b.goalT = 1;
+    } else if (b.wait > 0) b.wait -= dt;
     else if (!b.goal || Math.hypot(b.goal.x - p.x, b.goal.z - p.z) < 1 || (b.goalT -= dt) <= 0) {
       if (b.goal && rnd() < (b.goal.perch ? 0.5 : 0.3)) b.wait = b.goal.perch ? 4 + rnd() * 4 : 0.5 + rnd() * 1.0; // 高台に着いたスナイパーはしばらく見張る
       b.goal = pickGoal(sim, p, b);
@@ -216,6 +227,15 @@ export function lobPitch(v, g, hd, h) {
   const disc = v2 * v2 - g * (g * hd * hd + 2 * h * v2);
   if (disc < 0) return null;
   return Math.atan((v2 - Math.sqrt(disc)) / (g * Math.max(0.01, hd)));
+}
+
+/** ボタンで選ばれた人（生きていて、この CPU の敵のとき）。いなければ null */
+function huntOf(sim, p) {
+  const i = sim.huntTarget;
+  if (!(i >= 0)) return null;
+  const q = sim.s.players[i];
+  if (!q || q.bot || q.dead > 0 || !sim.foes(p.i, q.i)) return null;
+  return q;
 }
 
 function randomSpot(arena) {
