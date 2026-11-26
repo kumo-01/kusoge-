@@ -360,7 +360,7 @@ test('撃った人の画面で当たりを決める: ホストでは当てず、
   assert.equal(sim.remoteHit(1, key, 0, [a.x + 8, 0.6, a.z]), false, '相手から遠すぎる');
   assert.equal(sim.remoteHit(1, key, 0, [a.x + 0.3, 0.6, a.z]), true);
   assert.equal(a.hp, PLAYER.HP - 14, '撃った場所から当たった場所までの距離でダメージ（近いので 14）');
-  assert.equal(b.score, 1);
+  assert.equal(b.score, 7, 'ダメージの半分');
   assert.equal(sim.remoteHit(1, key, 0, [a.x, 0.6, a.z]), false, '同じ輪ゴムは 1 回だけ');
   const ev = sim.drainEvents();
   assert.ok(ev.some((e) => e.t === 'hit' && e.v === 0 && e.by === 1));
@@ -442,7 +442,7 @@ test('照準が相手に重なっているか（半直線と筒）: 遠くても
 });
 
 // ---- 武器えらび・スナイパー・チーム戦・ボス戦 ----
-import { WEAPON, WEAPONS, MODE, BOSS, teamOf } from '../src/games/gomuBattle/constants.js';
+import { WEAPON, WEAPONS, WEAPON_LIST, MODE, BOSS, teamOf } from '../src/games/gomuBattle/constants.js';
 
 test('武器えらび: ラウンドの前に選ぶ。全員選べば早く始まる。選ばなければ時間で始まる。CPU は自分で選ぶ', () => {
   const sim = new GomuSim({ humans: 2, bots: 2, seed: 4, pick: true });
@@ -551,7 +551,7 @@ test('ボス戦: 猫の体力は人数で変わる。犬どうしは当たらな
   sim.fire(0, eye(a), to.map((v) => v / tl));
   run(sim, 0.4);
   assert.equal(boss.hp, boss.max - 14, '近いので 14');
-  assert.equal(a.score, 1, 'ダメージ 10 ごとに 1 点');
+  assert.equal(a.score, 7, 'ダメージの半分');
   assert.ok(sim.drainEvents().some((e) => e.t === 'bhit' && e.by === 0));
   // とどめ
   boss.hp = 1;
@@ -624,13 +624,13 @@ test('体力: 生きている間は 1 秒に 1 ずつ回復する（100 まで�
   }
 });
 
-test('爆弾: 全員が 1 ラウンドに 5 回まで投げられる。山なりに投げて、当たると爆発。まわりの相手にまとめて、中心に近いほど大きなダメージ。ホストが爆発させる', async () => {
+test('爆弾: 全員がラウンドの始めに 10 個持っていて、なくなると投げられない。山なりに投げて、当たると爆発。まわりの相手にまとめて、中心に近いほど大きなダメージ。ホストが爆発させる', async () => {
   const { lobPitch } = await import('../src/games/gomuBattle/bot.js');
   const sim = new GomuSim({ humans: 3, bots: 0, seed: 11 });
   run(sim, ROUND.INTRO + 0.1);
   sim.clientJudge = () => true; // ゲストの爆弾でもホストが当たりを決める
   const [a, b, c] = sim.s.players;
-  assert.equal(a.bombs, 5);
+  assert.equal(a.bombs, 10);
   assert.equal(a.weapon, WEAPON.NORMAL, '武器はそのまま（爆弾は別に持っている）');
   Object.assign(a, { x: -8, z: 2, y: 0 });
   Object.assign(b, { x: 2, z: 2, y: 0 });
@@ -652,17 +652,17 @@ test('爆弾: 全員が 1 ラウンドに 5 回まで投げられる。山なり
   assert.ok(PLAYER.HP - b.hp > PLAYER.HP - c.hp, '中心に近い方が痛い');
   assert.equal(a.hp, PLAYER.HP, '自分は巻きこまれない');
   assert.ok(ev.some((x) => x.t === 'hit' && x.by === 0 && x.bm === 1), '爆弾の当たりの印（ゲストの画面で当たりを出すため）');
-  for (let k = 1; k < 5; k++) {
+  for (let k = 1; k < 10; k++) {
     assert.ok(sim.throwBomb(0, e, [0, 0.6, 0.8]));
     run(sim, W.gap + 0.05);
   }
   assert.equal(a.bombs, 0);
-  assert.equal(sim.throwBomb(0, e, [0, 0.6, 0.8]), false, '5 回で終わり');
-  // 倒れて復活しても増えない。次のラウンドで 5 に戻る
+  assert.equal(sim.throwBomb(0, e, [0, 0.6, 0.8]), false, '10 個で終わり（補充されるまで）');
+  // 次のラウンドで 10 に戻る
   sim.s.t = ROUND.TIME;
   run(sim, ROUND.END + ROUND.INTRO + 0.2);
   assert.equal(sim.s.round, 1);
-  assert.equal(a.bombs, 5);
+  assert.equal(a.bombs, 10);
 });
 
 test('チーム分け: 準備画面で組んだとおりに分かれる（人は席、CPU は番号）。片方が空なら交互', async () => {
@@ -742,7 +742,7 @@ test('配信: ホストのチームと残りの爆弾が載る（ゲストはホ
   const d = unpackBin(packBin(sim.s), 5);
   assert.deepEqual(d.st.players.map((p) => p.team), [1, 1, 0, 0, 1]);
   assert.equal(d.st.players[2].bombs, 3);
-  assert.equal(d.st.players[0].bombs, 5);
+  assert.equal(d.st.players[0].bombs, 10);
 });
 
 test('ヘッドショット: 頭（体の上の方）に当たると、スナイパーは 80（体力の 8 割）、輪ゴム鉄砲は 15% 多い。印つきで配る', () => {
@@ -1117,35 +1117,15 @@ test('天気: 雨か雪。雪は配信に載り、CPU の見える距離が短�
   assert.ok(snow > 0 && rain > 0, `雪 ${snow}・雨 ${rain}`);
 });
 
-test('マシンガン: 人だけ選べる・弾数は無限・ほぼ休みなく撃てる・ダメージ 3〜1、頭は 5・ゴム切れが効かない・配信に載る', () => {
+test('マシンガンはなくなった（選べない・番号 4 は断る）。どの武器でものぞける（輪ゴム鉄砲は少しだけ拡大）', () => {
+  assert.deepEqual(WEAPON_LIST, [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.RIFLE]);
+  assert.equal(WEAPON.MG, undefined);
   const sim = new GomuSim({ humans: 2, bots: 2, seed: 4, pick: true });
   run(sim, 0.1);
   assert.equal(sim.s.phase, 'pick');
-  assert.ok(sim.pickWeapon(1, WEAPON.MG));
-  assert.equal(sim.pickWeapon(2, WEAPON.MG), false, 'CPU は選べない');
-  for (let r = 0; r < 20; r++) for (const p of sim.s.players) if (p.bot) assert.notEqual(p.weapon, WEAPON.MG);
-  const W = WEAPONS[WEAPON.MG];
-  assert.ok(W.inf && W.gap <= 0.06);
-  assert.equal(weaponDamage(WEAPON.MG, 1), 3);
-  assert.equal(weaponDamage(WEAPON.MG, 60), 1);
-  assert.equal(hitDamage(WEAPON.MG, 1, 1, true), 5);
-  assert.equal(hitDamage(WEAPON.MG, 60, 1, true), 5);
-  assert.ok(hitDamage(WEAPON.MG, 10, 1, false) <= 3);
-  // 試合で: 100 発撃っても弾が減らない。ゴム切れでも撃てる
-  run(sim, ROUND.PICK + ROUND.INTRO + 0.2);
-  assert.equal(sim.s.phase, 'play');
-  const p = sim.s.players[1];
-  p.bot = true; // tryFire で数える（人の端末と同じ数え方）
-  p.noAmmo = 5;
-  let n = 0;
-  for (let k = 0; k < 100; k++) {
-    p.fireCd = 0;
-    if (sim.tryFire(p, [p.x, p.y + 1, p.z], [0, 0, 1])) n++;
-  }
-  assert.equal(n, 100);
-  assert.equal(p.ammo, W.ammo);
-  const d = unpackBin(packBin(sim.s), 4);
-  assert.equal(d.st.players[1].weapon, WEAPON.MG, '配信に載る');
+  assert.equal(sim.pickWeapon(1, 4), false);
+  for (const w of WEAPON_LIST) assert.ok(WEAPONS[w].zoomFov > 0 && WEAPONS[w].zoomFov < 72, `のぞける ${w}`);
+  assert.ok(WEAPONS[WEAPON.NORMAL].zoomFov >= 40, '輪ゴム鉄砲はスコープの枠が出ない程度');
 });
 
 import { packFire, packRemoteHit, unpackGameBin } from '../src/games/gomuBattle/net.js';
@@ -1183,39 +1163,59 @@ test('通信: 起きたこと（撃った・止まった・当たった）はバ
   assert.equal(unpackGameBin(new Uint8Array([9, 9])), null);
 });
 
-test('マシンガン: 輪ゴムが強くなるアイテムも出て、使うと 30 発。補給箱の金の輪ゴムは 20 発', async () => {
-  const { BAND_ITEMS, FUN: F } = await import('../src/games/gomuBattle/constants.js');
+test('爆弾: ラウンドの始めに 10 個。50〜70 秒（毎回ばらばら）に 1 度ずつ 2 個ふえる（犬ごと・知らせが出る・配信に載る）', async () => {
+  const { BOMB_COUNT, BOMB_REFILL } = await import('../src/games/gomuBattle/constants.js');
+  assert.equal(BOMB_COUNT, 10);
+  assert.deepEqual(BOMB_REFILL, { EVERY: [50, 70], ADD: 2 });
+  const sim = new GomuSim({ humans: 2, bots: 3, seed: 9 });
+  run(sim, ROUND.INTRO + 0.1);
+  assert.equal(sim.s.phase, 'play');
+  for (const p of sim.s.players) {
+    p.bot = false; // CPU が投げて数が減らないように
+    assert.equal(p.bombs, 10);
+    assert.ok(p.bombNext >= sim.s.t + 49.8 && p.bombNext <= sim.s.t + 70);
+  }
+  sim.drainEvents();
+  const got = [];
+  const t0 = sim.s.t;
+  while (sim.s.t < t0 + 145) {
+    sim.step(DT);
+    for (const e of sim.drainEvents()) if (e.t === 'bombs') got.push({ ...e, at: sim.s.t });
+  }
+  for (const p of sim.s.players) {
+    const mine = got.filter((e) => e.i === p.i);
+    assert.equal(mine.length, 2, `145 秒で 2 回（犬 ${p.i}）`);
+    assert.ok(mine[0].at - t0 >= 49.9 && mine[0].at - t0 <= 70.1);
+    assert.ok(mine[1].at - mine[0].at >= 49.9 && mine[1].at - mine[0].at <= 70.1);
+    assert.ok(mine.every((e) => e.n === 2));
+    assert.equal(p.bombs, 14);
+  }
+  assert.ok(new Set(got.map((e) => Math.round(e.at))).size > 2, '犬ごとにばらばら');
+  // 配信（バイナリ・整数）に 7 より多い数も載る
+  sim.s.players[1].bombs = 26;
+  assert.equal(unpackBin(packBin(sim.s), 2).st.players[1].bombs, 26);
+  // 次のラウンドはまた 10 個から
+  sim.s.t = ROUND.TIME;
+  run(sim, ROUND.END + 0.2);
+  assert.ok(sim.s.players.every((p) => p.bombs === 10));
+});
+
+test('点: 与えたダメージの半分（半端は持ちこす）。倒したときのおまけはそのまま', () => {
   const sim = ready();
   const [a, b] = sim.s.players;
-  a.weapon = WEAPON.MG;
-  const got = new Set();
-  for (let k = 0; k < 300; k++) {
-    a.item = 0;
-    sim.s.boxes = sim.s.boxes.map(() => 0);
-    const [bx, bz, by] = sim.arena.items[0];
-    Object.assign(a, { x: bx, z: bz, y: by, dead: 0 });
-    sim.step(DT);
-    if (a.item) got.add(a.item);
-  }
-  assert.ok([...got].some((it) => BAND_ITEMS.includes(it)), '強くなるアイテムも出る');
-  a.item = ITEM.TRIPLE;
-  assert.ok(sim.useItem(0, eye(a), [1, 0, 0]));
-  assert.equal(a.spN, ITEMS.SPECIAL_SHOTS_MG);
-  assert.equal(ITEMS.SPECIAL_SHOTS_MG, 30);
-  b.item = ITEM.TRIPLE;
-  assert.ok(sim.useItem(1, eye(b), [1, 0, 0]));
-  assert.equal(b.spN, ITEMS.SPECIAL_SHOTS, 'ふつうの鉄砲は 5 発のまま');
-  // 補給箱: マシンガンでも取れて、金の輪ゴム 30 発
-  a.sp = 0;
-  sim.s.nextDrop = sim.s.t;
-  run(sim, 0.05);
-  const dp = sim.s.drop;
-  run(sim, F.DROP_HEIGHT / F.DROP_FALL + 0.5);
-  Object.assign(a, { x: dp.x, z: dp.z, y: dp.y });
-  run(sim, 0.2);
-  assert.equal(sim.s.drop, null);
-  assert.equal(a.sp, ITEM.GOLD);
-  assert.equal(a.spN, 20);
+  const s0 = a.score;
+  sim._hit(b, { o: 0, dmg: 14, vx: 1, vz: 0 });
+  assert.equal(a.score - s0, 7);
+  sim._hit(b, { o: 0, dmg: 5, vx: 1, vz: 0 });
+  assert.equal(a.score - s0, 9, '5 の半分 2.5 → 2 点、0.5 は持ちこし');
+  sim._hit(b, { o: 0, dmg: 1, vx: 1, vz: 0 });
+  assert.equal(a.score - s0, 10, '持ちこした 0.5 と合わせて 1 点');
+  b.hp = 10;
+  b.inv = 0;
+  const k0 = a.score;
+  sim._hit(b, { o: 0, dmg: 50, vx: 1, vz: 0 });
+  assert.ok(b.dead > 0);
+  assert.ok(a.score - k0 >= 5 + 3, '体力 10 ぶんで 5 点 + 倒した 3 点（ほかのおまけもあれば足される）');
 });
 
 test('炎の輪ゴム: 当たった相手は 5 秒燃えて 1 秒ごとに 5 ダメージ（撃った犬の点）。配信に燃えている印が載る', async () => {
@@ -1267,10 +1267,8 @@ test('通信: 知らせの通し番号 sq は、連続撃破の数・強化ゴ�
   assert.deepEqual(d.ev.map((e) => [e.t, e.sq, e.n]), [['streak', 9001, 3], ['sp', 9002, 5]]);
 });
 
-test('マシンガンの輪ゴムはふだんから 5 回跳ね返る。見えない天井（雲より上）で輪ゴムが跳ね返り、犬も越えられない', () => {
-  assert.equal(bandSpec(0, WEAPON.MG).bounce, 5);
+test('見えない天井（雲より上）で輪ゴムが跳ね返り、犬も越えられない', () => {
   assert.equal(bandSpec(0, WEAPON.NORMAL).bounce, 1);
-  assert.equal(bandSpec(ITEM.BOUNCE, WEAPON.MG).bounce, 10, '跳ね返りゴムなら 10 回');
   assert.ok(ROOM.CEIL > 34 && ROOM.CEIL < 45, '雲（高さ 24〜35 くらい）より少し上');
   const a = ARENAS[0];
   const out = {};
@@ -1321,6 +1319,10 @@ test('通信（整数の差分）: 状態が元に戻り、前の状態との差
   let n = 0;
   for (let k = 0; k < 100; k++) {
     for (let j = 0; j < 3; j++) sim.step(1 / 60);
+    // CPU がおとり人形・煙・ガムを出すと後ろのバイト列に入るので、ここでは消して「何もないとき」を見る
+    sim.s.decoys = [];
+    sim.s.smokes = [];
+    sim.s.gums = [];
     const cur = packInts(sim.s);
     assert.equal(cur.tail.length, 0);
     const d = intDeltaEncode(base, cur.ints);

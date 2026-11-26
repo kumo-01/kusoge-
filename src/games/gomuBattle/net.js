@@ -154,7 +154,7 @@ export function unpackState(o, n) {
 // 差分が効くように、いつも同じ長さのもの（犬・箱・天気・押せるもの・猫）を前に、数が変わるもの（おとり人形・煙・ガム・
 // ラウンドごとの点・起きたこと）を後ろに並べる。止まっている犬・変わらない値は、ほぼ 0 バイトになる。
 // 起きたこと（撃った・当たった…）は、数を丸めた JSON を後ろにつける（少ないので）
-const BIN_V = 11;
+const BIN_V = 12;
 /** 位置のバイト列の単位（1 m を 500。i16 で ±65 m まで。会場は ±39 m） */
 const POS = 500;
 const PH = ['intro', 'play', 'end', 'done', 'pick'];
@@ -392,7 +392,7 @@ export function packBin(s, withRs = true, ev = null) {
     w.u8((p.weapon | 0) | (p.picked ? 4 : 0) | ((((s.teams?.[p.i] ?? -1) + 1) & 3) << 3) | ((Math.min(7, p.bombs | 0) & 7) << 5)); // チーム（ホストが決めたもの）・残りの爆弾
     w.u8(Math.min(255, p.hs | 0)); // ヘッドショットの数
     w.u8(p.shots ? Math.round((p.landed / p.shots) * 100) : 0); // 命中率（%）
-    w.u8((p.weapon | 0) | (p.burn > 0 ? 128 : 0)); // 武器（マシンガンは 4。上の 2 ビットでは足りないので別に）と、燃えている印（128）
+    w.u8((p.weapon & 3) | (Math.min(31, Math.max(0, p.bombs | 0)) << 2) | (p.burn > 0 ? 128 : 0)); // 武器と、残りの爆弾（31 まで。補充で 7 より多くなる）と、燃えている印（128）
   }
   w.u16(s.boxes.reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0));
   w.u16((s.heals || []).reduce((m, t, k) => (t > 0 ? m : m | (1 << k)), 0)); // 回復のおやつ（出ているもの）
@@ -496,7 +496,8 @@ export function unpackBin(u8, n, prevRs = null) {
       p.hs = r.u8();
       p.acc = r.u8();
       const wb2 = r.u8();
-      p.weapon = wb2 & 127;
+      p.weapon = wb2 & 3;
+      p.bombs = (wb2 >> 2) & 31;
       p.burning = !!(wb2 & 128);
       all.push(p);
     }

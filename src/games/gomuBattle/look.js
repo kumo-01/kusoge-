@@ -303,79 +303,8 @@ function rifleGun(bandColor) {
   return g;
 }
 
-/**
- * マシンガン: 6 本の銃身が回るガトリング。黒い本体にオレンジの線、上に持ち手と光る照準、
- * 横に輪ゴムの入った透明な箱（色とりどりの輪ゴムが見える）、銃身の先には輪ゴム、熱でうっすら光る放熱のすじ
- */
-function mgGun(bandColor) {
-  const g = new THREE.Group();
-  const metal = METAL();
-  const black = BLACK();
-  const gun = mat(0x56606d, { roughness: 0.32, metalness: 0.35 }); // 明るめのガンメタル（金属を強くしすぎると、映りこむ景色がなくて真っ黒に見える）
-  const accent = mat(0xff7a1a, { roughness: 0.4, metalness: 0.2, emissive: 0x5a1e00, emissiveIntensity: 0.4 });
-  const glow = mat(0xff9a3c, { roughness: 0.3, emissive: 0xff5a00, emissiveIntensity: 1.2 });
-  const steel = mat(0xa7b0ba, { roughness: 0.28, metalness: 0.45 }); // 銃身（明るい鋼）
-  // 本体（角を丸めた箱）と、オレンジの線
-  const body = new THREE.Mesh(new RoundedBoxGeometry(0.11, 0.12, 0.34, 3, 0.02), gun);
-  body.position.set(0, 0, 0.04);
-  for (const sx of [-1, 1]) {
-    const st = box(0.004, 0.018, 0.3, accent, sx * 0.056, 0.02, 0.04);
-    g.add(st);
-    // 放熱のすじ（うっすら光る）
-    for (let k = 0; k < 4; k++) g.add(box(0.004, 0.008, 0.03, glow, sx * 0.057, -0.025, -0.05 + k * 0.045));
-  }
-  // 後ろの握りと肩当て
-  const grip = box(0.045, 0.15, 0.06, black, 0, -0.1, -0.06);
-  grip.rotation.x = -0.35;
-  const stock = new THREE.Mesh(new RoundedBoxGeometry(0.07, 0.1, 0.12, 2, 0.02), black);
-  stock.position.set(0, -0.005, -0.19);
-  // 前の握り（縦）
-  const fore = box(0.04, 0.12, 0.045, black, 0, -0.1, 0.17);
-  // 上の持ち手と、光る照準（赤い点）
-  const handle = new THREE.Group();
-  handle.add(box(0.02, 0.05, 0.02, gun, 0, 0.085, -0.04), box(0.02, 0.05, 0.02, gun, 0, 0.085, 0.12), box(0.022, 0.018, 0.2, gun, 0, 0.115, 0.04));
-  const sight = new THREE.Mesh(new RoundedBoxGeometry(0.04, 0.035, 0.05, 2, 0.008), black);
-  sight.position.set(0, 0.145, 0.06);
-  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.013, 16), mat(0xff2d55, { emissive: 0xff1040, emissiveIntensity: 1.6, roughness: 0.1 }));
-  lens.position.set(0, 0.147, 0.086);
-  // 回る 6 本の銃身（前に 2 つの留め輪）と、先の輪ゴム
-  const barrels = new THREE.Group();
-  barrels.position.set(0, 0.0, 0.0);
-  for (let k = 0; k < 6; k++) {
-    const a = (k / 6) * Math.PI * 2;
-    const bx = Math.cos(a) * 0.03;
-    const by = Math.sin(a) * 0.03;
-    barrels.add(cyl(0.011, 0.44, steel, bx, by, 0.42, 0.011, 10));
-    const tip = new THREE.Mesh(new THREE.TorusGeometry(0.012, 0.004, 6, 12), mat([0xff4d6d, 0xffd23f, 0x3a86ff, 0x06d6a0, 0x8338ec, 0xfb5607][k], { roughness: 0.6 }));
-    tip.position.set(bx, by, 0.63);
-    barrels.add(tip);
-  }
-  barrels.add(cyl(0.048, 0.025, gun, 0, 0, 0.3), cyl(0.046, 0.02, accent, 0, 0, 0.47), cyl(0.05, 0.03, gun, 0, 0, 0.6));
-  barrels.add(cyl(0.016, 0.46, black, 0, 0, 0.42)); // 真ん中の軸
-  // 輪ゴムの箱（横。透明で、中に色とりどりの輪ゴム）
-  const hopper = new THREE.Group();
-  const glass = new THREE.Mesh(new RoundedBoxGeometry(0.07, 0.1, 0.13, 2, 0.015), mat(0xbfe9ff, { transparent: true, opacity: 0.35, roughness: 0.05, metalness: 0.1 }));
-  hopper.add(glass);
-  const cols = [0xff4d6d, 0xffd23f, 0x3a86ff, 0x06d6a0, 0xfb5607];
-  for (let k = 0; k < 9; k++) {
-    const r = new THREE.Mesh(new THREE.TorusGeometry(0.016, 0.004, 6, 12), mat(cols[k % cols.length], { roughness: 0.6 }));
-    r.position.set(((k % 3) - 1) * 0.018, -0.03 + Math.floor(k / 3) * 0.025, ((k * 37) % 5) * 0.02 - 0.04);
-    r.rotation.set(k * 0.7, k * 1.3, 0);
-    hopper.add(r);
-  }
-  hopper.add(box(0.074, 0.012, 0.134, accent, 0, 0.056, 0)); // ふた
-  hopper.position.set(0.095, -0.01, 0.06); // 一人称で見える側（画面の内側）
-  const feed = box(0.04, 0.03, 0.06, gun, 0.06, -0.01, 0.06);
-  const b = band(bandColor, 0.24, 0.07, 0.1);
-  g.add(body, grip, stock, fore, handle, sight, lens, barrels, hopper, feed, trigger(metal, -0.0), b);
-  g.userData.band = b;
-  g.userData.spin = barrels;
-  return g;
-}
-
 /** 武器 weapon の形 */
 export function makeWeapon(weapon, bandColor = 0xf4a261) {
-  if (weapon === WEAPON.MG) return mgGun(bandColor);
   if (weapon === WEAPON.SNIPER) return sniperGun(bandColor);
   if (weapon === WEAPON.RIFLE) return rifleGun(bandColor);
   return rubberGun(bandColor);
@@ -384,8 +313,7 @@ export function makeWeapon(weapon, bandColor = 0xf4a261) {
 /** 3 つの武器をまとめた入れ物（見せるのは 1 つ）。set(weapon) で持ちかえる */
 export function weaponRack(bandColor) {
   const g = new THREE.Group();
-  const list = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.RIFLE, WEAPON.BOMB, WEAPON.MG].map((w) => {
-    if (w === WEAPON.BOMB) return null; // 爆弾は武器ではない（番号をそろえるための空き）
+  const list = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.RIFLE].map((w) => {
     const m = makeWeapon(w, bandColor);
     m.visible = w === WEAPON.NORMAL;
     g.add(m);

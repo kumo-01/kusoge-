@@ -3,7 +3,7 @@ import { iconSvg, iconText } from '../../core/icons.js';
 import { h } from '../../core/util.js';
 import { ITEM_INFO, GUN, PLAYER, ROUND, WEAPON, WEAPONS, MODE, TEAMS, BOSS, FUN } from './constants.js';
 
-const AMMO_ICON = { [WEAPON.NORMAL]: 'ring', [WEAPON.SNIPER]: 'target', [WEAPON.RIFLE]: 'crosshair', [WEAPON.MG]: 'zap' };
+const AMMO_ICON = { [WEAPON.NORMAL]: 'ring', [WEAPON.SNIPER]: 'target', [WEAPON.RIFLE]: 'crosshair' };
 
 export class GomuHud {
   constructor(root, { touch, mode = MODE.FFA }) {
@@ -47,7 +47,6 @@ export class GomuHud {
     this._nameEls = [];
     this.mapCv = h('canvas.gm-minimap', { width: 156, height: 120, 'aria-label': 'ミニマップ' });
     this.scoreboard = h('div.gm-scoreboard', { hidden: true });
-    this.dmg = h('div.gm-dmgpop');
     this._hurtEls = [];
     this.hint = h('div.gm-hint');
     // ラストスパート（残り 30 秒）と突風の知らせ
@@ -67,11 +66,11 @@ export class GomuHud {
         h('span.gm-pick-ic', { html: iconSvg(ic, 44) }),
         h('b', null, WEAPONS[w].name),
         h('small', null, WEAPONS[w].desc),
-        h('kbd', null, String(w === WEAPON.MG ? 4 : w + 1)));
-    this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.RIFLE, 'crosshair'), card(WEAPON.MG, 'zap')];
+        h('kbd', null, String(w + 1)));
+    this.pickCards = [card(WEAPON.NORMAL, 'ring'), card(WEAPON.SNIPER, 'target'), card(WEAPON.RIFLE, 'crosshair')];
     this.pickInfo = h('p.gm-pick-info');
     this.pick = h('div.gm-pick', { hidden: true }, h('h2', null, '武器をえらぶ'), h('div.gm-pick-row', null, ...this.pickCards), this.pickInfo);
-    this.root.append(this.scope, this.nvFx, this.speed, this.lowHp, this.burnFx, this.smoke, this.vignette, this.nvHint, this.names, this.hurtDirs, this.cross, this.dmg, this.mapCv, this.scoreboard, h('div.gm-top', null, this.round, this.timer), h('div.gm-alerts', null, this.spurt, this.wind), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
+    this.root.append(this.scope, this.nvFx, this.speed, this.lowHp, this.burnFx, this.smoke, this.vignette, this.nvHint, this.names, this.hurtDirs, this.cross, this.mapCv, this.scoreboard, h('div.gm-top', null, this.round, this.timer), h('div.gm-alerts', null, this.spurt, this.wind), this.board, this.feed, h('div.gm-bl', null, this.hearts, this.stam, this.status), h('div.gm-br', null, this.special, this.bombs, this.ammo, this.reloadBar), this.itemBox, this.center, this.table, this.bossBar, this.pick, this.hint);
     this.touch = touch ? new GomuTouch(this.root) : null;
     this.root.classList.add(`mode-${mode}`);
     this.root.classList.toggle('is-touch', !!touch);
@@ -157,9 +156,7 @@ export class GomuHud {
     this.bombs.classList.toggle('is-empty', bn <= 0);
     // 輪ゴム
     const ammoN = v.me.reload > 0 ? -1 : Math.max(0, v.me.ammo);
-    // マシンガンは弾数が無限（∞ だけ出す）
-    if (v.me.inf) this._setHtml(this.ammo, 'ammo', `inf:${v.me.weapon}`, () => `<span class="gm-band on">${iconSvg('zap', 18)}</span><b class="gm-inf">∞</b>`);
-    else this._setHtml(this.ammo, 'ammo', `${ammoN}:${v.me.weapon}`, () => (ammoN < 0 ? '' : Array.from({ length: v.me.maxAmmo || GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg(AMMO_ICON[v.me.weapon] || 'ring', (v.me.maxAmmo || GUN.AMMO) > 5 ? 18 : 24)}</span>`).join('')));
+    this._setHtml(this.ammo, 'ammo', `${ammoN}:${v.me.weapon}`, () => (ammoN < 0 ? '' : Array.from({ length: v.me.maxAmmo || GUN.AMMO }, (_, k) => `<span class="gm-band${k < ammoN ? ' on' : ''}">${iconSvg(AMMO_ICON[v.me.weapon] || 'ring', (v.me.maxAmmo || GUN.AMMO) > 5 ? 18 : 24)}</span>`).join('')));
     this.reloadBar.hidden = !(v.me.reload > 0);
     if (v.me.reload > 0) this.reloadBar.firstChild.style.width = `${(1 - v.me.reload / (v.me.reloadT || GUN.RELOAD)) * 100}%`;
     this._setHtml(this.special, 'sp', v.me.sp ? `${v.me.sp}:${v.me.spN}` : '', () => (v.me.sp ? `${iconSvg(ITEM_INFO[v.me.sp].icon, 18)} ${ITEM_INFO[v.me.sp].name} ×${v.me.spN}` : ''));
@@ -318,14 +315,60 @@ export class GomuHud {
     );
   }
 
-  /** 与えたダメージの数（照準の右上にぽんと出る） */
+  /**
+   * 与えたダメージの数: 照準の右上にぽんと出て、左上の自分の点数へ飛んでいく（着いたら点数がはねる）。
+   * 続けて当てたときは、いくつも飛ぶ（多すぎるときは古いものから消す）
+   */
   dmgPop(n, head = false) {
     if (!(n > 0)) return;
-    this.dmg.textContent = head ? `ヘッドショット ${n}` : String(n);
-    this.dmg.classList.toggle('is-head', !!head);
-    this.dmg.classList.remove('on');
-    void this.dmg.offsetWidth;
-    this.dmg.classList.add('on');
+    const el = h(`div.gm-dmgfly${head ? '.is-head' : ''}`, null, head ? `ヘッドショット ${n}` : String(n));
+    const flies = (this._flies ||= []);
+    if (flies.length >= 12) flies.shift().remove();
+    flies.push(el);
+    this.root.append(el);
+    const done = () => {
+      el.remove();
+      const k = flies.indexOf(el);
+      if (k >= 0) flies.splice(k, 1);
+    };
+    const r = this.root.getBoundingClientRect();
+    const sx = r.width / 2 + 22;
+    const sy = r.height / 2 - 40;
+    el.style.left = `${sx}px`;
+    el.style.top = `${sy}px`;
+    if (typeof el.animate !== 'function') {
+      setTimeout(done, 900);
+      return;
+    }
+    // 行き先: 左上の点数表の自分の点（表が見えないときは左上のすみ）
+    const tgt = this.board.querySelector('.gm-row.me em');
+    const b = tgt?.getBoundingClientRect();
+    const tx = b && b.width ? b.left - r.left + b.width / 2 : 28;
+    const ty = b && b.width ? b.top - r.top + b.height / 2 : 24;
+    const dx = tx - sx;
+    const dy = ty - sy;
+    const jx = (Math.random() - 0.5) * 18; // 続けて出ても重ならないように、少し左右へ
+    const T = (x, y, s) => `translate(-50%, -50%) translate(${x}px, ${y}px) scale(${s})`;
+    const a = el.animate(
+      [
+        { transform: T(0, 8, 1.35), opacity: 1 },
+        { transform: T(jx, -16, 1.1), opacity: 1, offset: 0.3, easing: 'cubic-bezier(0.55, 0, 0.85, 0.35)' },
+        { transform: T(dx * 0.45 + jx, dy * 0.55 - 30, 0.85), opacity: 1, offset: 0.62, easing: 'cubic-bezier(0.3, 0.6, 0.7, 1)' },
+        { transform: T(dx, dy, 0.5), opacity: 0.95, offset: 0.94 },
+        { transform: T(dx, dy, 0.4), opacity: 0 },
+      ],
+      { duration: 950, fill: 'forwards' },
+    );
+    a.onfinish = () => {
+      done();
+      // 着いた: 自分の点数をはねさせる（表が作り直されていても、今の自分の行を探す）
+      const row = this.board.querySelector('.gm-row.me');
+      if (!row) return;
+      row.classList.remove('gm-bump');
+      void row.offsetWidth;
+      row.classList.add('gm-bump');
+    };
+    a.oncancel = done;
   }
 
   hitMarker(kill = false) {

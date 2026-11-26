@@ -2615,32 +2615,38 @@ body[data-screen='game'] {
   fill: var(--red);
   stroke: none;
 }
-/* 与えたダメージの数 */
-.gm-dmgpop {
+/* 与えたダメージの数: ぽんと出て、左上の自分の点数へ飛んでいく（動きは hud.js の dmgPop） */
+.gm-dmgfly {
   position: absolute;
-  left: calc(50% + 22px);
-  top: calc(50% - 40px);
+  z-index: 6;
   font-size: 1.15rem;
   font-weight: 900;
+  line-height: 1;
   color: var(--paper);
   text-shadow: 0 0 4px var(--red-d), 0 1px 2px oklch(0% 0 0 / 0.6);
-  opacity: 0;
+  white-space: nowrap;
   pointer-events: none;
+  will-change: transform, opacity;
 }
-.gm-dmgpop.on {
-  animation: gm-dmgpop 0.7s ease-out;
+.gm-dmgfly.is-head {
+  font-size: 1.4rem;
+  color: oklch(90% 0.17 95);
 }
-@keyframes gm-dmgpop {
+/* 点数に着いたとき、自分の点がはねる */
+.gm-row.me.gm-bump em {
+  display: inline-block;
+  animation: gm-bump 0.35s ease-out;
+}
+@keyframes gm-bump {
   0% {
-    opacity: 1;
-    transform: translateY(6px) scale(1.25);
+    transform: scale(1);
   }
-  70% {
-    opacity: 1;
+  35% {
+    transform: scale(1.45);
+    color: #ffd23f;
   }
   100% {
-    opacity: 0;
-    transform: translateY(-14px) scale(1);
+    transform: scale(1);
   }
 }
 /* タッチ: 体力は小さめに（下の真ん中。視界をふさがない） */
@@ -2805,12 +2811,6 @@ body[data-screen='game'] {
 }
 .gt-bomb.empty {
   opacity: 0.4;
-}
-/* ヘッドショット: 数を大きく、黄色く */
-.gm-dmgpop.is-head {
-  font-size: 1.4rem;
-  color: oklch(90% 0.17 95);
-  white-space: nowrap;
 }
 /* ラストスパート（残り 30 秒・点が 2 倍）と突風の知らせ（上の真ん中、時間の下） */
 .gm-spurt,
@@ -3079,11 +3079,6 @@ body[data-screen='game'] {
 }
 
 /* マシンガン: 弾数は無限（∞） */
-.gm-inf {
-  font-size: 1.3rem;
-  margin-left: 4px;
-  color: #fff;
-}
 /* 武器えらび: 4 つ並ぶので、狭い画面では 2 × 2 に */
 @media (max-width: 700px) {
   .gm-pick-card {

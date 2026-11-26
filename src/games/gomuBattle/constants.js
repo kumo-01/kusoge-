@@ -145,8 +145,6 @@ export const ITEMS = {
   BOX_RESPAWN: 10, // 箱を取ってから次が出るまで
   BOX_RADIUS: 0.8, // これより近づくと取れる
   SPECIAL_SHOTS: 5, // ゴムが変わるアイテムは次の 5 発
-  SPECIAL_SHOTS_MG: 30, // マシンガンで使うと次の 30 発
-  GOLD_SHOTS_MG: 20, // マシンガンの金の輪ゴム（補給箱）は 20 発
   THICK_SPEED: 37.8,
   THICK_RADIUS: 0.22,
   THICK_DAMAGE: 2,
@@ -172,7 +170,7 @@ export const ITEMS = {
 export const TREAT = { HEAL: 40, RESPAWN: 20, RADIUS: 0.9, COUNT: 8 };
 
 export const SCORE = {
-  DMG_PER_POINT: 10, // 相手に与えたダメージ 10 ごとに 1 点
+  DMG_PER_POINT: 2, // 相手に与えたダメージの半分が点（2 ごとに 1 点。半端は次に持ちこす）
   KILL: 3,
 };
 
@@ -187,10 +185,10 @@ export const BOT = {
 };
 
 export const ITEM_INFO = {
-  [ITEM.THICK]: { name: '極太ゴム', icon: 'thick', desc: '次の5発（マシンガンは30発）が太くて当たりやすく、ダメージ1.6倍' },
-  [ITEM.TRIPLE]: { name: '3方向ゴム', icon: 'triple', desc: '次の5発（マシンガンは30発）が、扇の形に3本ずつ飛ぶ' },
-  [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: 'bounce', desc: '次の5発（マシンガンは30発）が、壁や家具で3回（マシンガンは10回）まで跳ね返る' },
-  [ITEM.HOMING]: { name: '追いかけゴム', icon: 'target', desc: '次の5発（マシンガンは30発）が、狙った近くの相手へゆるく曲がる' },
+  [ITEM.THICK]: { name: '極太ゴム', icon: 'thick', desc: '次の5発が太くて当たりやすく、ダメージ1.6倍' },
+  [ITEM.TRIPLE]: { name: '3方向ゴム', icon: 'triple', desc: '次の5発が、扇の形に3本ずつ飛ぶ' },
+  [ITEM.BOUNCE]: { name: '跳ね返りゴム', icon: 'bounce', desc: '次の5発が、壁や家具で3回まで跳ね返る' },
+  [ITEM.HOMING]: { name: '追いかけゴム', icon: 'target', desc: '次の5発が、狙った近くの相手へゆるく曲がる' },
   [ITEM.SMOKE]: { name: '煙幕', icon: 'cloud', desc: '狙った所に煙を投げる。中は見えない' },
   [ITEM.SHAKE]: { name: '照準ぶれ', icon: 'spiral', desc: '自分以外の全員の狙いが3秒ゆらゆら' },
   [ITEM.NOAMMO]: { name: 'ゴム切れ', icon: 'scissors', desc: '自分以外の全員が3秒撃てない' },
@@ -198,7 +196,7 @@ export const ITEM_INFO = {
   [ITEM.HEAL]: { name: '回復おやつ', icon: 'heal', desc: '体力が40回復する' },
   [ITEM.STAR]: { name: '無敵スター', icon: 'star', desc: '10秒間、輪ゴムもガムも効かない' },
   [ITEM.GOLD]: { name: '金の輪ゴム', icon: 'crown', desc: '空からの補給箱の中身。次の3発がダメージ2倍' },
-  [ITEM.FIRE]: { name: '炎の輪ゴム', icon: 'flame', desc: '次の5発（マシンガンは30発）に火がつく。当たった相手は5秒燃えて、1秒ごとに5ダメージ' },
+  [ITEM.FIRE]: { name: '炎の輪ゴム', icon: 'flame', desc: '次の5発に火がつく。当たった相手は5秒燃えて、1秒ごとに5ダメージ' },
   [ITEM.DECOY]: { name: 'おとり人形', icon: 'person', desc: '足もとに自分そっくりの人形を置く。CPUはそれを狙う。輪ゴムを受け止める（15秒）' },
 };
 
@@ -207,23 +205,23 @@ export const ITEM_INFO = {
  * ダメージは距離で決まる: dmg = [近い, 遠い]、fall = [この距離まで「近い」, この距離から「遠い」]（間はなめらかに）
  * ふつうの鉄砲は近いほど強く、スナイパーは遠いほど強い。爆弾は爆発の中心からの距離（blast = 半径）
  */
-export const WEAPON = { NORMAL: 0, SNIPER: 1, RIFLE: 2, BOMB: 3, MG: 4 }; // BOMB は武器ではなく、全員が持つ爆弾（輪ゴムの種類として使う）
+export const WEAPON = { NORMAL: 0, SNIPER: 1, RIFLE: 2, BOMB: 3 }; // BOMB は武器ではなく、全員が持つ爆弾（輪ゴムの種類として使う）。4（マシンガン）は 2026-11-26 に削除
 export const WEAPONS = {
-  [WEAPON.NORMAL]: { name: '輪ゴム鉄砲', desc: '10発ずつ。連射がきく。近いほど痛い（14〜6）', ammo: 10, reload: 1.5, gap: 0.18, speed: 50.4, gravity: 2.5, dmg: [14, 6], fall: [8, 40], r: 0.08, life: 1.8 },
+  [WEAPON.NORMAL]: { name: '輪ゴム鉄砲', desc: '10発ずつ。連射がきく。近いほど痛い（14〜6）。のぞくと少し拡大', ammo: 10, reload: 1.5, gap: 0.18, speed: 50.4, gravity: 2.5, dmg: [14, 6], fall: [8, 40], r: 0.08, life: 1.8, zoomFov: 44 }, // のぞく: 少しだけ拡大（スコープの丸い枠は出さない）
   [WEAPON.SNIPER]: { name: 'スナイパー', desc: '5発ずつ。まっすぐ飛ぶ。遠いほど痛い（30〜60）。のぞくと拡大', ammo: 5, reload: 2.4, gap: 1.0, speed: 72, gravity: 0.3, dmg: [30, 60], fall: [10, 45], r: 0.06, life: 1.6, zoomFov: 24 },
   // ライフル: どんな距離でも当たれば一撃（体力 100 ぶん）。1 発しか込められず、補充はスナイパーより少し長い
   [WEAPON.RIFLE]: { name: 'ライフル', desc: '1発ずつ。どんな距離でも、当たれば一撃で倒す。1発ごとに3秒かけて補充。のぞくと拡大', ammo: 1, reload: 3.0, gap: 0.3, speed: 90, gravity: 0.2, dmg: [100, 100], fall: [0, 1], r: 0.05, life: 1.3, zoomFov: 20 },
-  // マシンガン（人だけが選べる。CPU は選ばない）: 弾数は無限、撃つ間隔はほぼ 0。1 発は弱い（近いほど 3〜1、頭は 5）。ゴム切れも効かない
-  [WEAPON.MG]: { name: 'マシンガン', desc: '弾は無限・ほぼ休みなく連射。1発は弱い（3〜1、頭に当てると5）。ゴム切れも効かない', ammo: 99, inf: true, reload: 0, gap: 0.05, speed: 55, gravity: 2.5, dmg: [3, 1], fall: [6, 30], r: 0.06, life: 1.5, head: 5, noAmmoProof: true, bounces: 5, bounceItem: 10 }, // ふだんから 5 回、跳ね返りゴムなら 10 回跳ね返る
-  // 爆弾（全員が 1 ラウンドに BOMB_COUNT 回まで投げられる。G キー）
+  // 爆弾（全員がラウンドの始めに BOMB_COUNT 個。BOMB_REFILL でふえる。G キー）
   [WEAPON.BOMB]: { name: '爆弾', desc: '山なりに投げて、何かに当たると爆発。まわりの相手まとめて（中心36〜はじ8）', gap: 0.9, speed: 19, gravity: 15, dmg: [36, 8], blast: 3.5, r: 0.2, life: 3.2 },
 };
-/** ラウンドの前に選べる武器（マシンガンは人だけ。CPU は選ばない） */
-export const WEAPON_LIST = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.RIFLE, WEAPON.MG];
+/** ラウンドの前に選べる武器（どれでものぞける） */
+export const WEAPON_LIST = [WEAPON.NORMAL, WEAPON.SNIPER, WEAPON.RIFLE];
 /** ゴム切れ（アイテム）が効かない武器か */
 export const noAmmoProof = (w) => !!WEAPONS[w]?.noAmmoProof;
-/** 爆弾: 1 ラウンドに投げられる数（全員） */
-export const BOMB_COUNT = 5;
+/** 爆弾: ラウンドの始めに持っている数（全員） */
+export const BOMB_COUNT = 10;
+/** 爆弾の補充: ラウンドの間、EVERY[0]〜EVERY[1] 秒（毎回ばらばら）に 1 度ずつ、ADD 個ふえる */
+export const BOMB_REFILL = { EVERY: [50, 70], ADD: 2 };
 /** ヘッドショット（頭に当たった）: スナイパーは体力の 8 割（80）、ほかの鉄砲はいつもより 15% 多い。ライフルは頭でなくても一撃 */
 export const HEADSHOT = { SNIPER_RATE: 0.8, MUL: 1.15 };
 /** 極太ゴムのダメージの倍率 */

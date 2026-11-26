@@ -357,9 +357,9 @@ export function bandSpec(kind, weapon = WEAPON.NORMAL) {
   const w = WEAPONS[weapon] ? weapon : WEAPON.NORMAL;
   const W = WEAPONS[w];
   const bomb = w === WEAPON.BOMB;
-  const base = { speed: W.speed, r: W.r, mul: 1, bounce: bomb ? 0 : W.bounces ?? GUN.BOUNCES, life: W.life, g: W.gravity, w };
+  const base = { speed: W.speed, r: W.r, mul: 1, bounce: bomb ? 0 : GUN.BOUNCES, life: W.life, g: W.gravity, w };
   if (kind === ITEM.THICK) return { ...base, speed: w === WEAPON.NORMAL ? ITEMS.THICK_SPEED : W.speed * (bomb ? 1 : 0.8), r: bomb ? W.r * 1.3 : ITEMS.THICK_RADIUS, mul: THICK_MUL };
-  if (kind === ITEM.BOUNCE) return { ...base, bounce: W.bounceItem ?? Math.max(base.bounce, ITEMS.BOUNCES), life: Math.max(W.life, ITEMS.BOUNCE_LIFE) };
+  if (kind === ITEM.BOUNCE) return { ...base, bounce: Math.max(base.bounce, ITEMS.BOUNCES), life: Math.max(W.life, ITEMS.BOUNCE_LIFE) };
   if (kind === ITEM.GOLD) return { ...base, mul: FUN.GOLD_MUL, r: W.r * 1.3 }; // 金の輪ゴム: ダメージ 2 倍
   return base;
 }
@@ -372,7 +372,6 @@ export function isHead(q, y) {
 /** 当たったときのダメージ（距離・極太ゴム・ヘッドショットこみ） */
 export function hitDamage(weapon, dist, mul = 1, head = false) {
   const base = weaponDamage(weapon, dist, mul);
-  if (WEAPONS[weapon]?.head) return head ? Math.max(1, Math.round(WEAPONS[weapon].head * mul)) : base; // マシンガン: 頭は 5
   if (!head || weapon === WEAPON.BOMB || weapon === WEAPON.RIFLE) return base;
   if (weapon === WEAPON.SNIPER) return Math.max(base, Math.round(PLAYER.HP * HEADSHOT.SNIPER_RATE));
   return Math.round(base * HEADSHOT.MUL);

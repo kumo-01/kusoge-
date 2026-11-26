@@ -2,7 +2,7 @@
 // 人の犬の位置は、その人の端末が計算して送ってくる（setPilot）。CPU の犬はここで動かす。
 // 起きたこと（撃った・当たった・倒れた・拾った…）は events に積み、ゲストへ配る。
 
-import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, BURN, TREAT, FUN, EXTRA, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, MODE, BOSS, HAIRBALL, noAmmoProof } from './constants.js';
+import { ROUND, PLAYER, GUN, ITEM, ITEMS, SCORE, BAND_ITEMS, BOX_ITEMS, BURN, TREAT, FUN, EXTRA, BOT, WEAPON, WEAPONS, WEAPON_LIST, BOMB_COUNT, BOMB_REFILL, MODE, BOSS, HAIRBALL, noAmmoProof } from './constants.js';
 import { ARENAS, segmentHit, ROOM, groundY } from './arena.js';
 import { createBody, stepMove, stepBand, bandSpec, segCylinder, heightOf, aimDir, eyeOf, movableBox, shoveMovables, fits, weaponDamage, hitDamage, isHead } from './physics.js';
 import { botThink } from './bot.js';
@@ -79,7 +79,8 @@ export class GomuSim {
       bot: i >= this.humans,
       weapon: WEAPON.NORMAL, // 武器（ラウンドの前に選ぶ）
       picked: false,
-      bombs: BOMB_COUNT, // 残りの爆弾（ラウンドごとに BOMB_COUNT）
+      bombs: BOMB_COUNT, // 残りの爆弾（ラウンドの始めに BOMB_COUNT。BOMB_REFILL でふえる）
+      bombNext: null, // 次に爆弾がふえる時刻（ラウンドの時刻。null = まだ決めていない）
       hs: 0, // ヘッドショットの数（称号のため）
       longest: 0, // いちばん遠くから当てた距離
       treats: 0, // 拾ったおやつ
@@ -151,7 +152,7 @@ export class GomuSim {
         p.weapon = r < 0.55 ? WEAPON.NORMAL : r < 0.85 ? WEAPON.SNIPER : WEAPON.RIFLE;
       }
       p.picked = p.bot || !this.usePick;
-      Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, star: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, burn: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bombs: BOMB_COUNT, bombCd: 0, stam: PLAYER.STAMINA, sprint: false, streak: 0, nemesis: -1, barkCd: 0, bot2: null });
+      Object.assign(p, { hp: PLAYER.HP, dead: 0, inv: 0, star: 0, stun: 0, stuck: 0, shake: 0, noAmmo: 0, burn: 0, ammo: WEAPONS[p.weapon].ammo, reload: 0, fireCd: 0, sp: 0, spN: 0, item: 0, bombs: BOMB_COUNT, bombNext: null, bombCd: 0, stam: PLAYER.STAMINA, sprint: false, streak: 0, nemesis: -1, barkCd: 0, bot2: null });
       this._place(p, this.arena.spawns[spots[k % spots.length]]);
     });
     s.boss = this.mode === MODE.BOSS ? this._newBoss(r) : null;
@@ -231,7 +232,6 @@ export class GomuSim {
   pickWeapon(i, w) {
     const p = this.s.players[i];
     if (!p || !WEAPON_LIST.includes(w) || this.s.phase !== 'pick') return false;
-    if (p.bot && w === WEAPON.MG) return false; // マシンガンは人だけ
     p.weapon = w;
     p.picked = true;
     p.ammo = WEAPONS[w].ammo;
@@ -286,6 +286,7 @@ export class GomuSim {
       return;
     }
     for (const p of s.players) this._stepPlayer(p, dt);
+    this._stepBombs();
     if (s.boss) {
       this._stepBoss(dt);
       if (s.boss.st !== 'pounce') s.boss.y = groundY(this.arena, s.boss.x, s.boss.z); // 丘・くぼみに沿って歩く
@@ -504,7 +505,6 @@ export class GomuSim {
     if (!this.fire(p.i, o, d, p.sp, 0)) return false;
     const w = WEAPONS[p.weapon];
     p.fireCd = p.bot ? Math.max(w.gap, BOT.FIRE_GAP) * (0.8 + nextRandom(this.s) * 0.6) : w.gap;
-    if (w.inf) return true; // 弾数は無限
     p.ammo--;
     if (p.ammo <= 0) p.reload = w.reload;
     return true;
@@ -670,7 +670,24 @@ export class GomuSim {
     }
   }
 
-  /** p が与えたダメージを点に（10 ごとに 1 点） */
+  /**
+   * 爆弾の補充: ラウンドの間、50〜70 秒（毎回ばらばら）に 1 度ずつ、全員の爆弾が 2 個ふえる（やられていてもふえる）。
+   * 次の時刻は犬ごとに決める（みんな同時にはふえない）
+   */
+  _stepBombs() {
+    const s = this.s;
+    const [lo, hi] = BOMB_REFILL.EVERY;
+    for (const p of s.players) {
+      if (p.bombNext == null) p.bombNext = s.t + lo + nextRandom(s) * (hi - lo);
+      else if (s.t >= p.bombNext) {
+        p.bombs = (p.bombs | 0) + BOMB_REFILL.ADD;
+        p.bombNext = s.t + lo + nextRandom(s) * (hi - lo);
+        this.events.push({ t: 'bombs', i: p.i, n: BOMB_REFILL.ADD, b: p.bombs });
+      }
+    }
+  }
+
+  /** p が与えたダメージを点に（ダメージの半分。半端は次に持ちこす） */
   _dealt(p, dmg) {
     p.dmgAcc = (p.dmgAcc || 0) + dmg;
     const pts = Math.floor(p.dmgAcc / SCORE.DMG_PER_POINT);
@@ -788,7 +805,7 @@ export class GomuSim {
         for (const p of s.players) {
           if (p.dead > 0 || Math.hypot(p.x - dp.x, p.z - dp.z) > FUN.DROP_RADIUS || Math.abs(p.y - dp.y) > 1.6) continue;
           p.sp = ITEM.GOLD;
-          p.spN = p.weapon === WEAPON.MG ? ITEMS.GOLD_SHOTS_MG : FUN.GOLD_SHOTS; // マシンガンは 20 発
+          p.spN = FUN.GOLD_SHOTS;
           this.events.push({ t: 'sp', i: p.i, k: ITEM.GOLD, n: p.spN });
           this.events.push({ t: 'dropget', i: p.i });
           s.drop = null;
@@ -982,7 +999,7 @@ export class GomuSim {
     this.events.push({ t: 'use', i, item: it });
     if (BAND_ITEMS.includes(it)) {
       p.sp = it;
-      p.spN = p.weapon === WEAPON.MG ? ITEMS.SPECIAL_SHOTS_MG : ITEMS.SPECIAL_SHOTS; // マシンガンは 30 発
+      p.spN = ITEMS.SPECIAL_SHOTS;
       this.events.push({ t: 'sp', i, k: it, n: p.spN });
     } else if (it === ITEM.SMOKE) {
       // 狙った所（家具・壁・床に当たる所。遠すぎれば手前）に煙
