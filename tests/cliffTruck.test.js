@@ -69,7 +69,7 @@ test('道: 同じ種なら同じ道。はじめはまっすぐ。カーブ（円
   assert.ok(flips >= 30, `${flips}`);
   // グネグネ: はじめの 1 km でも、100 m あたり平均 70 度以上曲がる
   const turn = (i0, i1) => (Array.from({ length: i1 - i0 }, (_, k) => Math.abs(a.h[i0 + k + 1] - a.h[i0 + k])).reduce((n, x) => n + x, 0) / (i1 - i0)) * 100 * (180 / Math.PI);
-  assert.ok(turn(100, 1000) > 70, `${turn(100, 1000)}`);
+  assert.ok(turn(100, 1000) > 95, `${turn(100, 1000)}`);
   assert.ok(turn(5000, 6000) > turn(100, 1000));
   // 幅: まっすぐな所はふつうの幅、急なカーブの所は、長い車体が内側を通る分だけ広い
   for (let i = 200; i < 6000; i += 7) {
@@ -104,12 +104,45 @@ test('道: どの種でも自分と重ならない（大きな向きは前から
   }
 });
 
+test('距離: 表示・記録するのは、実際に進んだ道の長さの半分', () => {
+  assert.equal(TRUCK.DIST_SCALE, 0.5);
+  const road = new Road(9);
+  road.ensure(1000);
+  for (let i = 0; i < road.x.length; i++) {
+    road.x[i] = 0;
+    road.z[i] = i;
+    road.h[i] = 0;
+    road.y[i] = 0;
+  }
+  const t = newTruck(road);
+  const z0 = t.z;
+  for (let k = 0; k < 8 / DT; k++) stepTruck(t, { throttle: 1 }, DT, road);
+  assert.ok(Math.abs(t.prog - (t.z - z0) / 2) < 1, `${t.prog} ${(t.z - z0) / 2}`);
+});
+
+test('横転: 90 度まで傾いても、曲がりがゆるめば起き上がれる。90 度をこえると横転', () => {
+  assert.equal(TRUCK.CRASH_ROLL, Math.PI / 2);
+  const road = new Road(3);
+  road.ensure(600);
+  road.w = road.w.map(() => 200);
+  const t = newTruck(road);
+  for (let k = 0; k < 900; k++) stepTruck(t, { throttle: 1 }, DT, road);
+  // 30 度より大きく傾くまで切って、もどす
+  let k = 0;
+  while (Math.abs(t.roll) < 0.6 && !t.over && k++ < 600) stepTruck(t, { steer: 1, throttle: 1 }, DT, road);
+  assert.equal(t.over, null, '30 度をこえても、まだ');
+  assert.ok(Math.abs(t.roll) >= 0.6);
+  for (let j = 0; j < 3 / DT; j++) stepTruck(t, { brake: 1 }, DT, road);
+  assert.equal(t.over, null, '起き上がった');
+  assert.ok(Math.abs(t.roll) < 0.1, `${t.roll}`);
+});
+
 test('トラック: アクセルで進み、ブレーキで止まる。車体はとても長い 1 本（23 m 以上）', () => {
   const road = new Road(7);
   const t = newTruck(road);
   assert.ok(TRUCK_LEN > 23);
   for (let k = 0; k < 4 / DT; k++) stepTruck(t, { throttle: 1 }, DT, road);
-  assert.ok(t.v > 5 && t.prog > 10 && !t.over, `${t.v} ${t.prog}`);
+  assert.ok(t.v > 5 && t.prog > 5 && !t.over, `${t.v} ${t.prog}`);
   const p = t.prog;
   let k = 0;
   while (t.v > 0 && k++ < 300) stepTruck(t, { brake: 1 }, DT, road);
@@ -186,10 +219,10 @@ test('動けなくなった: 車輪が道から出たまま 5 秒ほとんど動
 });
 
 test('トラック: 道に沿えば遠くまで行ける。ハンドルを切らないとカーブで落ちる。速いまま切り続けると横転。めちゃくちゃに回しても急には倒れない', () => {
-  // グネグネの道でも、長い車体で走りきれる（8 本の道のどれも 3 km 以上）
+  // グネグネの道でも、長い車体で走りきれる（8 本の道のどれも、表示の距離で 1500 m 以上 = 実際の道 3 km 以上）
   for (let seed = 1; seed <= 8; seed++) {
-    const t = drive(seed, 8, 420);
-    assert.ok(t.prog > 3000, `道 ${seed}: ${Math.round(t.prog)} m ${JSON.stringify(t.over)}`);
+    const t = drive(seed, 7, 480);
+    assert.ok(t.prog > 1500, `道 ${seed}: ${Math.round(t.prog)} m ${JSON.stringify(t.over)}`);
   }
   // まっすぐのまま
   const road = new Road(5);

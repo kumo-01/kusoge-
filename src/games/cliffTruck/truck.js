@@ -24,12 +24,13 @@ export const TRUCK = {
   REV_SPEED: 2.6, // バックのいちばん速い（m/秒）
   REV_ACC: 1.4, // バックの加速
   STUCK_TIME: 5, // 車輪が道から出たまま、ほとんど動けない時間がこれだけ続くと終わり（秒）
-  STEER_MAX: 0.62, // ハンドルをいっぱいに切ったときの前の車輪の角度（遅いとき）
+  DIST_SCALE: 0.5, // 表示・記録する距離は、実際に進んだ道の長さのこれだけ（半分）
+  STEER_MAX: 0.76, // ハンドルをいっぱいに切ったときの前の車輪の角度（遅いとき）
   STEER_RATE: 1.8, // 前の車輪がハンドルに追いつく速さ（1 / 秒）。めちゃくちゃに回しても、車輪はなめらかに動く
   LAT_SMOOTH: 0.45, // 傾きは、この時間（秒）でならした横の加速度で決まる（一瞬のハンドルでは倒れない）
   TIP_ACC: 3.9, // これより強く曲がり続けると、傾きがどんどん大きくなる（横の加速度 m/秒²。約 0.4 G）
   ROLL_K: 0.025, // ふつうに曲がっているときの傾き（横の加速度 1 あたり、ラジアン）
-  CRASH_ROLL: Math.PI / 6, // これより傾くと横転（30 度）
+  CRASH_ROLL: Math.PI / 2, // これより傾くと横転（90 度。それまでは、曲がりがゆるめば起き上がれる）
   EDGE_ROLL: 0.56, // 片側の車輪が道から出たときの傾き（車輪の真ん中が道のはしに来たとき、ラジアン）
 };
 /** 車体の長さ */
@@ -60,7 +61,7 @@ export function newTruck(road) {
     rollV: 0,
     dyn: 0, // 曲がりによる傾き（はみ出しの傾きは別）
     s0, // はじめの前の車輪の場所（ここが 0 m）
-    prog: 0, // 進んだ距離（m。いちばん遠く）
+    prog: 0, // 進んだ距離（表示・記録する値。実際の道の長さ × DIST_SCALE。いちばん遠く）
     hints: [i, i - Math.round(TRUCK.L)], // 前の車輪・後ろの車輪の、道の上の番号（探す手がかり）
     brake: 0, // ブレーキを踏んでいる強さ（0〜1。ランプ用）
     over: null, // 落ちた・横転した: { kind: 'fall' | 'roll', side: 1 右 / -1 左, at: 進んだ距離 }
@@ -145,7 +146,7 @@ export function stepTruck(t, inp, dt, road) {
   // 車輪が道から出たまま、ほとんど動けない時間
   t.stuckT = edge && Math.abs(t.v) < 0.4 ? t.stuckT + dt : 0;
   road.ensure(loc[0].i + 800);
-  t.prog = Math.max(t.prog, loc[0].i * ROAD.STEP - t.s0);
+  t.prog = Math.max(t.prog, (loc[0].i * ROAD.STEP - t.s0) * TRUCK.DIST_SCALE);
   if (fallSide) t.over = { kind: 'fall', side: fallSide, at: t.prog };
   else if (Math.abs(t.roll) > TRUCK.CRASH_ROLL) t.over = { kind: Math.abs(edge) > Math.abs(t.dyn) ? 'fall' : 'roll', side: Math.sign(t.roll), at: t.prog };
   else if (t.stuckT >= TRUCK.STUCK_TIME) t.over = { kind: 'stuck', side: Math.sign(edge) || 1, at: t.prog };
