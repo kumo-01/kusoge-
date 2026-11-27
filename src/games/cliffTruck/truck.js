@@ -7,8 +7,9 @@
 
 import { ROAD } from './road.js';
 
+
 export const TRUCK = {
-  L: 18.6, // 後ろの車輪（2 本の真ん中） → 前の車輪（m）
+  L: 24, // 後ろの車輪（2 本の真ん中） → 前の車輪（m）。road.js の WHEELBASE と同じ
   FRONT: 1.4, // 前の車輪 → 車体の前のはし
   REAR: 3.6, // 後ろの車輪 → 車体の後ろのはし
   CAB: 2.6, // 運転台の長さ（前のはしから）
@@ -141,17 +142,38 @@ export function startWreck(t, road) {
     hint: -1,
   };
   b.hint = road.locate(b.x, b.z, -1).i;
-  return { side, bodies: [b], t: 0 };
+  return { side, kind: t.over.kind, bodies: [b], t: 0 };
 }
 
 const wl = {};
+const wl2 = {};
 export function stepWreck(w, dt, road) {
   w.t += dt;
   for (const b of w.bodies) {
     const L = road.locate(b.x, b.z, b.hint, wl);
     b.hint = L.i;
-    // 車体の真ん中が道の外に出たら落ちる（落ちはじめたら、もう戻らない）
-    if (!b.falling && Math.abs(L.d) > L.hw + 0.4) b.falling = true;
+    // 車体の真ん中が道の外に出たら落ちる（落ちはじめたら、もう戻らない）。
+    // 道から出て落ちたときは、前のはし・後ろのはしが道の外に出ても、そちらから落ちていく（長い車体がずり落ちる）
+    if (!b.falling) {
+      if (Math.abs(L.d) > L.hw + 0.4) b.falling = true;
+      else if (w.kind === 'fall') {
+        const fx = Math.sin(b.yaw);
+        const fz = Math.cos(b.yaw);
+        for (const [e, sg] of [
+          [TRUCK.L - MID, 1],
+          [-MID, -1],
+        ]) {
+          const E = road.locate(b.x + fx * e, b.z + fz * e, Math.max(0, b.hint + e), wl2);
+          if (Math.abs(E.d) > E.hw + 0.4) {
+            b.falling = true;
+            b.pitchV = sg * 0.5; // 前から落ちるなら前のめり
+            b.vx += -Math.cos(b.yaw) * w.side * 1.5;
+            b.vz += Math.sin(b.yaw) * w.side * 1.5;
+            break;
+          }
+        }
+      }
+    }
     b.rollV += w.side * (b.falling ? 1.5 : 5) * dt;
     b.roll += b.rollV * dt;
     b.yaw += b.yawV * dt;
