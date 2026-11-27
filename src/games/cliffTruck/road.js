@@ -4,6 +4,7 @@
 // 道の形: 円の弧（カーブ）を、左右かわるがわる、間にほとんど直線をはさまずにつなぐ（S 字が続くグネグネ）。
 // 1 つのカーブで大きく（最大 150 度）曲がる。カーブのつなぎ目は、曲がり具合を少しずつ変えてなめらかに。
 // 道の大きな向きは、はじめの向きから ±H_MAX までにおさえる（道が自分と重ならない）。
+// 上り下り: ゆるい長い波と短い波を重ねた高さ（はじめのまっすぐな所は平ら。そこから少しずつ）。
 // 道幅: 長いトラックはカーブで後ろの車輪が内側を通るので、その分だけ、急なカーブの所を広くする（手前から少しずつ）。
 // 先へ進むほど、カーブは急で長く、広げる分の余裕は少なくなる（むずかしくなる）。
 
@@ -25,6 +26,11 @@ export const ROAD = {
   TRACK: 2.1, // 左右の車輪の間
   MARGIN: [1.3, 0.45], // カーブで、車輪の通り道の外に残す余裕（片側。はじめ → むずかしくなったとき）
   SPREAD: 28, // 広げはじめ・広げおわりを、カーブの何 m 手前・先にするか
+  HILLS: [
+    [9, 560], // [高さの振れ幅（m）, 波の長さ（m）]
+    [2.8, 230],
+  ],
+  HILL_RAMP: 160, // はじめのまっすぐな所のあと、この長さで平らから上り下りへ
 };
 
 /** 種から作る乱数（0〜1。同じ種なら同じ並び） */
@@ -50,7 +56,11 @@ export class Road {
     this.z = [0];
     this.h = [0];
     this.k = [0];
-    this.w = []; // 幅は、先の曲がりがわかってから決める（ensure）
+    this.y = [0]; // 道の高さ（m）
+    this.w = [];
+    // 上り下りの波のずらし（カーブとは別の乱数。カーブの並びは変えない）
+    const hr = mulberry32((this.seed ^ 0x5bd1e995) >>> 0 || 7);
+    this.hills = ROAD.HILLS.map(([a, l]) => ({ a, f: (2 * Math.PI) / l, p: hr() * Math.PI * 2 })); // 幅は、先の曲がりがわかってから決める（ensure）
     this._side = this.rnd() < 0.5 ? 1 : -1;
     this._plan = []; // これから作る区間（曲がり具合の目標と長さ）
     this._kNow = 0;
@@ -63,6 +73,17 @@ export class Road {
   /** s（m）でのむずかしさ（0〜1） */
   diff(s) {
     return Math.max(0, Math.min(1, (s - ROAD.START_STRAIGHT) / ROAD.DIFF));
+  }
+
+  /** 進んだ距離 s での道の高さ（はじめは 0。まっすぐな所のあと、なめらかに上り下りへ） */
+  heightAt(s) {
+    const L = ROAD.START_STRAIGHT;
+    if (s <= L) return 0;
+    const u = Math.min(1, (s - L) / ROAD.HILL_RAMP);
+    const ramp = u * u * (3 - 2 * u);
+    let e = 0;
+    for (const w of this.hills) e += w.a * (Math.sin(w.f * s + w.p) - Math.sin(w.f * L + w.p));
+    return e * ramp;
   }
 
   /** 次のカーブ（と、その前の直線）を決める */
@@ -130,6 +151,7 @@ export class Road {
       this.z.push(this.z[j] + Math.cos(hm) * ROAD.STEP);
       this.h.push(h);
       this.k.push(k);
+      this.y.push(this.heightAt(s + ROAD.STEP));
     }
     // 幅: まっすぐな所の幅と、前後 SPREAD m の中でいちばん要る幅の大きい方。さらに前後 8 m でならす
     while (this.w.length <= n) {
@@ -184,6 +206,8 @@ export class Road {
     out.d = -dx * fz + dz * fx;
     out.hw = this.w[i] / 2;
     out.h = h;
+    const i2 = f >= 0 ? Math.min(this.y.length - 1, i + 1) : Math.max(0, i - 1);
+    out.y = this.y[i] + (this.y[i2] - this.y[i]) * Math.abs(f);
     return out;
   }
 }

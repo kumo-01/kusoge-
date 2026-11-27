@@ -119,6 +119,33 @@ function glowTex() {
   return t;
 }
 
+/**
+ * 谷底の霧: ふつうの霧（遠いほど白い）に加えて、低い所ほど白くする（HFOG.TOP から下へ、HFOG.RANGE m で見えなくなる）。
+ * 崖の下・落ちていくトラックが、だんだん霧に消える。この会場の材質だけに足す（ほかのゲームの材質は変えない）
+ */
+const HFOG = { TOP: -34, RANGE: 52 };
+function heightFog(m) {
+  if (!m || m.userData.hfog || m.fog === false) return m;
+  m.userData.hfog = true;
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <fog_pars_vertex>', '#include <fog_pars_vertex>\nvarying float vHFogY;')
+      .replace('#include <fog_vertex>', '#include <fog_vertex>\nvHFogY = ( modelMatrix * vec4( transformed, 1.0 ) ).y;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nvarying float vHFogY;')
+      .replace(
+        '#include <fog_fragment>',
+        `#ifdef USE_FOG
+  float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+  fogFactor = max( fogFactor, smoothstep( ${HFOG.TOP.toFixed(1)}, ${(HFOG.TOP - HFOG.RANGE).toFixed(1)}, vHFogY ) );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+#endif`,
+      );
+  };
+  m.customProgramCacheKey = () => 'cliff-hfog';
+  return m;
+}
+
 /** 少しずつ変わるでこぼこ（-1〜1）。同じ場所なら同じ値 */
 function bumpy(a, b) {
   return Math.sin(a * 0.31 + b * 1.7) * 0.5 + Math.sin(a * 0.093 + b * 0.53 + 1.3) * 0.35 + Math.sin(a * 0.71 + b * 2.9 + 4.1) * 0.15;
@@ -163,7 +190,11 @@ export class CliffWorld {
       rock: new THREE.MeshLambertMaterial({ map: rockTex(), vertexColors: true, side: THREE.DoubleSide }),
       shoulder: new THREE.MeshLambertMaterial({ map: shoulderTex(), side: THREE.DoubleSide }),
     };
-    for (const m of Object.values(this.mats)) m.map.anisotropy = this.aniso;
+    for (const m of Object.values(this.mats)) {
+      m.map.anisotropy = this.aniso;
+      heightFog(m);
+    }
+    this.camOff = 0; // 指でなぞって回したカメラの向き（ラジアン。離すとゆっくり戻る）
     this.chunks = new Map();
     this._mountains();
     this._truck();
@@ -247,19 +278,20 @@ export class CliffWorld {
       const rx = -Math.cos(h);
       const rz = Math.sin(h);
       const hw = road.w[i] / 2;
+      const y = road.y[i];
       const v = (i * ROAD.STEP) / 12;
       // 道（左 → 右）
-      roadPos.push(x - rx * hw, 0.02, z - rz * hw, x + rx * hw, 0.02, z + rz * hw);
+      roadPos.push(x - rx * hw, y + 0.02, z - rz * hw, x + rx * hw, y + 0.02, z + rz * hw);
       roadUv.push(0, v, 1, v);
       // 肩と崖（左右）
       for (const side of [-1, 1]) {
         const sh = 0.55 + 0.25 * bumpy(i * 0.7, side * 3); // 肩の幅
         const e = hw + sh;
-        shPos.push(x + rx * side * hw, 0.01, z + rz * side * hw, x + rx * side * e, 0.0, z + rz * side * e);
+        shPos.push(x + rx * side * hw, y + 0.01, z + rz * side * hw, x + rx * side * e, y, z + rz * side * e);
         shUv.push(0, v * 3, 1, v * 3);
         for (let L = 0; L < levels.length; L++) {
           const o = e + out[L] + (L > 0 ? (0.35 + 0.12 * L) * (0.5 + 0.5 * bumpy(i * 0.45 + L * 7, side + L)) : 0);
-          wallPos.push(x + rx * side * o, levels[L], z + rz * side * o);
+          wallPos.push(x + rx * side * o, L === levels.length - 1 ? levels[L] : y + levels[L], z + rz * side * o);
           wallUv.push(i * 0.08, levels[L] / 9);
           // 絵の色に、場所ごとの明るさの差だけかける（1 に近い値。かけすぎると暗くなる）
           const k = 0.8 + 0.3 * (0.5 + 0.5 * bumpy(i * 0.2 + L, side * 5));
@@ -421,6 +453,9 @@ export class CliffWorld {
     tilt.add(g);
     outer.add(tilt);
     outer.rotation.order = 'YXZ';
+    outer.traverse((o) => {
+      if (o.isMesh) for (const m of [].concat(o.material)) heightFog(m);
+    });
     this.scene.add(outer);
     return Object.assign(out, { outer, tilt });
   }
@@ -448,9 +483,9 @@ export class CliffWorld {
   }
 
   setTruck(t) {
-    this._place(this.truck, t.x, 0, t.z, t.th, t.roll, 0, t.delta || 0);
+    this._place(this.truck, t.x, t.y || 0, t.z, t.th, t.roll, t.pitch || 0, t.delta || 0);
     this._brake(t.brake);
-    this.truckView = { x: t.x, z: t.z, th: t.th };
+    this.truckView = { x: t.x, y: t.y || 0, z: t.z, th: t.th };
   }
 
   /** 落ちていく・横だおしのトラック（体の真ん中 → 後ろの車輪へ戻して置く） */
@@ -491,13 +526,17 @@ export class CliffWorld {
     if (!v) return;
     // 向きはゆっくり追いかける（細かいハンドルで画面がゆれないように）
     this.camYaw = snap || this.camPos == null ? v.th : this.camYaw + angDiff(this.camYaw, v.th) * Math.min(1, dt * 2.2);
-    const fx = Math.sin(this.camYaw);
-    const fz = Math.cos(this.camYaw);
-    const pos = new THREE.Vector3(v.x - fx * 30, 30, v.z - fz * 30);
+    const fx = Math.sin(this.camYaw + this.camOff);
+    const fz = Math.cos(this.camYaw + this.camOff);
+    // トラックの真ん中のまわりを回る（なぞって回したとき、トラックが画面から外れないように）
+    const mx = v.x + Math.sin(v.th) * MID;
+    const mz = v.z + Math.cos(v.th) * MID;
+    const back = 30 + MID;
+    const pos = new THREE.Vector3(mx - fx * back, v.y + 30, mz - fz * back);
     if (snap || !this.camPos) this.camPos = pos.clone();
     else this.camPos.lerp(pos, Math.min(1, dt * 6));
     this.camera.position.copy(this.camPos);
-    this.camera.lookAt(v.x + fx * 34, 0, v.z + fz * 34);
+    this.camera.lookAt(mx + fx * (34 - MID), v.y, mz + fz * (34 - MID));
     this._follow = null;
   }
 
@@ -533,8 +572,9 @@ export class CliffWorld {
     const th = this.truckView?.th ?? 0;
     const cx = o.x + Math.sin(th) * MID;
     const cz = o.z + Math.cos(th) * MID;
-    this.sun.position.set(cx + 18, 60, cz + 10);
-    this.sun.target.position.set(cx, 0, cz);
+    const cy = o.y;
+    this.sun.position.set(cx + 18, cy + 60, cz + 10);
+    this.sun.target.position.set(cx, cy, cz);
     this.renderer.render(this.scene, this.camera);
   }
 

@@ -19,6 +19,11 @@ export const TRUCK = {
   ACCEL: 1.9, // アクセル（遅いとき。速くなるほど弱く）
   BRAKE: 6.5, // ブレーキ
   DRAG: 0.12, // 何もしないと少しずつ遅く
+  SLOPE: 0.6, // 坂で重さが速さに効く割合（1 で本当どおり。上り坂で止まってしまわないように弱め）
+  REV_WAIT: 0.35, // 止まってからブレーキをこの時間押し続けると、バックしはじめる（秒）
+  REV_SPEED: 2.6, // バックのいちばん速い（m/秒）
+  REV_ACC: 1.4, // バックの加速
+  STUCK_TIME: 5, // 車輪が道から出たまま、ほとんど動けない時間がこれだけ続くと終わり（秒）
   STEER_MAX: 0.62, // ハンドルをいっぱいに切ったときの前の車輪の角度（遅いとき）
   STEER_RATE: 1.8, // 前の車輪がハンドルに追いつく速さ（1 / 秒）。めちゃくちゃに回しても、車輪はなめらかに動く
   LAT_SMOOTH: 0.45, // 傾きは、この時間（秒）でならした横の加速度で決まる（一瞬のハンドルでは倒れない）
@@ -46,6 +51,11 @@ export function newTruck(road) {
     steer: 0, // 前の車輪の切れ具合（-1 左 〜 1 右）
     delta: 0, // 前の車輪の角度（ラジアン。正 = 左。見た目用）
     lat: 0, // ならした横の加速度（正 = 左へ曲がっている）
+    y: 0, // 後ろの車輪の所の道の高さ
+    pitch: 0, // 前のめり（正 = 前が下。上り坂では負）
+    rev: false, // バックしている
+    holdB: 0, // 止まってからブレーキを押している時間
+    stuckT: 0, // 車輪が道から出たまま動けない時間
     roll: 0, // 傾き（正 = 右が下）
     rollV: 0,
     dyn: 0, // 曲がりによる傾き（はみ出しの傾きは別）
@@ -72,13 +82,32 @@ export function stepTruck(t, inp, dt, road) {
   t.steer += Math.abs(ds) <= rate ? ds : Math.sign(ds) * rate;
   const maxD = TRUCK.STEER_MAX / (1 + (t.v * t.v) / 900);
   t.delta = -t.steer * maxD; // 向き th が増える = 左へ曲がる。右に切ると減る
-  // 速さ
+  // 速さ（坂: 上りは遅く、下りは速く）
   const thr = Math.max(0, Math.min(1, inp.throttle || 0));
   const br = Math.max(0, Math.min(1, inp.brake || 0));
   t.brake = br;
-  let a = thr * TRUCK.ACCEL * Math.max(0, 1 - t.v / TRUCK.V_MAX) - TRUCK.DRAG - 0.0015 * t.v * t.v;
-  a -= br * TRUCK.BRAKE;
-  t.v = Math.max(0, Math.min(TRUCK.V_MAX, t.v + a * dt));
+  const slopeA = 9.8 * Math.sin(t.pitch) * TRUCK.SLOPE; // 前が下（下り坂）なら前へ
+  if (t.rev) {
+    // バック中: ブレーキを押している間だけ、ゆっくり後ろへ。離す・アクセルで止まって、前へ走れるようにもどる
+    if (br > 0.5 && thr < 0.05) t.v = Math.max(-TRUCK.REV_SPEED, t.v - TRUCK.REV_ACC * dt);
+    else {
+      t.v = Math.min(0, t.v + TRUCK.BRAKE * dt);
+      if (t.v >= 0) {
+        t.v = 0;
+        t.rev = false;
+        t.holdB = 0;
+      }
+    }
+    // はじめの所より後ろへは下がらない
+    if (t.hints[1] < 3) t.v = Math.max(0, t.v);
+  } else {
+    let a = thr * TRUCK.ACCEL * Math.max(0, 1 - t.v / TRUCK.V_MAX) - TRUCK.DRAG - 0.0015 * t.v * t.v + slopeA;
+    a -= br * TRUCK.BRAKE;
+    t.v = Math.max(0, Math.min(TRUCK.V_MAX, t.v + a * dt));
+    // 止まってからブレーキを押し続けると、バック
+    t.holdB = t.v < 0.05 && br > 0.5 && thr < 0.05 ? t.holdB + dt : 0;
+    if (t.holdB >= TRUCK.REV_WAIT && t.hints[1] >= 3) t.rev = true;
+  }
   // 車体（後ろの車輪のまわりを回る）
   const dth = (t.v / TRUCK.L) * Math.tan(t.delta);
   const hm = t.th + (dth * dt) / 2;
@@ -110,10 +139,16 @@ export function stepTruck(t, inp, dt, road) {
     }
   }
   t.roll = t.dyn + edge;
+  // 坂: 前と後ろの車輪の所の高さから、車体の前のめり
+  t.y = loc[1].y;
+  t.pitch = -Math.atan2(loc[0].y - loc[1].y, TRUCK.L);
+  // 車輪が道から出たまま、ほとんど動けない時間
+  t.stuckT = edge && Math.abs(t.v) < 0.4 ? t.stuckT + dt : 0;
   road.ensure(loc[0].i + 800);
   t.prog = Math.max(t.prog, loc[0].i * ROAD.STEP - t.s0);
   if (fallSide) t.over = { kind: 'fall', side: fallSide, at: t.prog };
   else if (Math.abs(t.roll) > TRUCK.CRASH_ROLL) t.over = { kind: Math.abs(edge) > Math.abs(t.dyn) ? 'fall' : 'roll', side: Math.sign(t.roll), at: t.prog };
+  else if (t.stuckT >= TRUCK.STUCK_TIME) t.over = { kind: 'stuck', side: Math.sign(edge) || 1, at: t.prog };
   return t.over;
 }
 
@@ -124,20 +159,21 @@ export function stepTruck(t, inp, dt, road) {
 export function startWreck(t, road) {
   const side = t.over.side;
   const yaw = t.th;
-  const push = t.over.kind === 'fall' ? 1.6 : 0.8;
+  const stuck = t.over.kind === 'stuck';
+  const push = t.over.kind === 'fall' ? 1.6 : stuck ? 0 : 0.8;
   const b = {
     x: t.x + Math.sin(yaw) * MID,
-    y: 0,
+    y: t.y - Math.sin(t.pitch) * MID,
     z: t.z + Math.cos(yaw) * MID,
     yaw,
     roll: t.roll,
-    pitch: 0,
-    vx: Math.sin(yaw) * t.v - Math.cos(yaw) * side * push,
+    pitch: t.pitch,
+    vx: stuck ? 0 : Math.sin(yaw) * t.v - Math.cos(yaw) * side * push,
     vy: 0,
-    vz: Math.cos(yaw) * t.v + Math.sin(yaw) * side * push,
-    rollV: side * (1.2 + Math.abs(t.rollV)),
+    vz: stuck ? 0 : Math.cos(yaw) * t.v + Math.sin(yaw) * side * push,
+    rollV: stuck ? 0 : side * (1.2 + Math.abs(t.rollV)),
     pitchV: 0,
-    yawV: (t.v / TRUCK.L) * Math.tan(t.delta),
+    yawV: stuck ? 0 : (t.v / TRUCK.L) * Math.tan(t.delta),
     falling: false,
     hint: -1,
   };
@@ -149,6 +185,7 @@ const wl = {};
 const wl2 = {};
 export function stepWreck(w, dt, road) {
   w.t += dt;
+  if (w.kind === 'stuck') return w; // 動けなくなった: その場で止まったまま
   for (const b of w.bodies) {
     const L = road.locate(b.x, b.z, b.hint, wl);
     b.hint = L.i;
@@ -180,6 +217,7 @@ export function stepWreck(w, dt, road) {
     b.yawV *= Math.max(0, 1 - 2 * dt);
     if (!b.falling) {
       // 道の上で横だおし: 90 度で止まって、すべりながら止まる
+      b.y = L.y; // 道の上（坂に沿う）
       if (Math.abs(b.roll) >= Math.PI / 2) {
         b.roll = (Math.PI / 2) * Math.sign(b.roll);
         b.rollV = 0;

@@ -111,10 +111,78 @@ test('トラック: アクセルで進み、ブレーキで止まる。車体は
   for (let k = 0; k < 4 / DT; k++) stepTruck(t, { throttle: 1 }, DT, road);
   assert.ok(t.v > 5 && t.prog > 10 && !t.over, `${t.v} ${t.prog}`);
   const p = t.prog;
-  for (let k = 0; k < 3 / DT; k++) stepTruck(t, { brake: 1 }, DT, road);
-  assert.equal(t.v, 0);
+  let k = 0;
+  while (t.v > 0 && k++ < 300) stepTruck(t, { brake: 1 }, DT, road);
+  assert.equal(t.v, 0, '止まる');
   assert.equal(t.brake, 1, 'ランプが光る');
   assert.ok(t.prog > p && t.prog < p + 40);
+  // 止まってからブレーキを押し続けると、ゆっくりバック（進んだ距離は減らない）
+  const x0 = t.x;
+  const z0 = t.z;
+  const prog = t.prog;
+  for (let j = 0; j < 3 / DT; j++) stepTruck(t, { brake: 1 }, DT, road);
+  assert.ok(t.rev && t.v < -2 && t.v >= -TRUCK.REV_SPEED, `${t.v}`);
+  assert.ok(Math.hypot(t.x - x0, t.z - z0) > 2, '後ろへ下がった');
+  assert.equal(t.prog, prog);
+  // アクセルで止まって、前へ
+  for (let j = 0; j < 2 / DT; j++) stepTruck(t, { throttle: 1 }, DT, road);
+  assert.ok(!t.rev && t.v > 0.5, `${t.v}`);
+});
+
+test('上り坂・下り坂: 道に高さがある（はじめは平ら）。上りは遅く、下りは速い。車体は坂に沿って前のめり・後ろのめり', async () => {
+  const { TRUCK: T } = await import('../src/games/cliffTruck/truck.js');
+  const road = new Road(21);
+  road.ensure(4000);
+  for (let i = 0; i <= ROAD.START_STRAIGHT; i++) assert.equal(road.y[i], 0);
+  const ys = road.y.slice(400, 4000);
+  assert.ok(Math.max(...ys) - Math.min(...ys) > 10, '高低差がある');
+  let maxSlope = 0;
+  for (let i = 1; i < 4000; i++) maxSlope = Math.max(maxSlope, Math.abs(road.y[i] - road.y[i - 1]));
+  assert.ok(maxSlope < 0.2, `坂は 20% まで ${maxSlope}`);
+  // まっすぐで、一定の坂の道（上り 8% / 下り 8%）で、同じアクセルで比べる
+  const slopeRoad = (g) => {
+    const r = new Road(1);
+    r.ensure(1200);
+    for (let i = 0; i < r.x.length; i++) {
+      r.x[i] = 0;
+      r.z[i] = i;
+      r.h[i] = 0;
+      r.k[i] = 0;
+      r.y[i] = g * i;
+    }
+    for (let i = 0; i < r.w.length; i++) r.w[i] = 10;
+    return r;
+  };
+  const speedOn = (g) => {
+    const r = slopeRoad(g);
+    const t = newTruck(r);
+    t.v = 6;
+    for (let k = 0; k < 4 / DT; k++) stepTruck(t, { throttle: 0.4 }, DT, r);
+    assert.equal(t.over, null);
+    return t;
+  };
+  const a = speedOn(0.08);
+  const b = speedOn(-0.08);
+  const c = speedOn(0);
+  assert.ok(a.pitch < 0 && b.pitch > 0 && Math.abs(c.pitch) < 1e-9, '上りは前が上、下りは前が下');
+  assert.ok(a.v < c.v - 1 && b.v > c.v + 1, `${a.v} ${c.v} ${b.v}`);
+  assert.ok(Math.abs(T.SLOPE) > 0);
+});
+
+test('動けなくなった: 車輪が道から出たまま 5 秒ほとんど動けないと終わり', () => {
+  const road = new Road(11);
+  const t = newTruck(road);
+  const hw = road.w[0] / 2;
+  t.x -= hw - TRUCK.TRACK / 2 + 0.4; // 右の車輪が少し道の外
+  for (let k = 0; k < 4.8 / DT; k++) stepTruck(t, {}, DT, road);
+  assert.equal(t.over, null);
+  for (let k = 0; k < 0.4 / DT; k++) stepTruck(t, {}, DT, road);
+  assert.equal(t.over?.kind, 'stuck');
+  // 落ちたときの絵は、その場で止まったまま
+  const w = startWreck(t, road);
+  const y0 = w.bodies[0].y;
+  for (let k = 0; k < 60; k++) stepWreck(w, DT, road);
+  assert.equal(w.bodies[0].y, y0);
 });
 
 test('トラック: 道に沿えば遠くまで行ける。ハンドルを切らないとカーブで落ちる。速いまま切り続けると横転。めちゃくちゃに回しても急には倒れない', () => {

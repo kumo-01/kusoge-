@@ -89,7 +89,7 @@ const EMOJI_ICON = {
   '☔': 'umbrella', '🎵': 'music', '🎥': 'camera', '⚙': 'gear', '⛶': 'fullscreen', '📱': 'phone', '📶': 'wifi', '⏸': 'pause',
   '🛡': 'shield', '🧑': 'person', '🎯': 'target', '🏆': 'trophy', '🗾': 'map', '🎁': 'gift', '🍬': 'candy', '🌀': 'spiral',
   '✂': 'scissors', '⭐': 'star', '🖱': 'mouse', '🎧': 'headphones', '🥁': 'drum', '✅': 'check', '✔': 'check', '⌛': 'clock',
-  '⏱': 'clock', '🔥': 'zap', '🚗': 'car', '🚚': 'truck', '📏': 'flag', '🔁': 'reverse', '🎡': 'wheel', '🔱': 'triple', '🏓': 'bounce', '💨': 'cloud', '✨': 'star',
+  '⏱': 'clock', '🔥': 'zap', '🚗': 'car', '🚚': 'truck', '⛰': 'flag', '📏': 'flag', '🔁': 'reverse', '🎡': 'wheel', '🔱': 'triple', '🏓': 'bounce', '💨': 'cloud', '✨': 'star',
   '❄': 'snow', '🌙': 'moon', '👁': 'eye', '🌅': 'sun', '☀': 'sun', '🌧': 'umbrella', '🌤': 'sun', '🟢': 'target', '🌋': 'cloud',
 };
 

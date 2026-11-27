@@ -18,7 +18,10 @@ export function createGame() {
 }
 
 const RESULT_DELAY = 2; // 落ちてから結果を出すまで（秒）
-const WHEEL_MAX = Math.PI * 0.9; // ハンドルをこれだけ回すと、いっぱいに切ったことになる（ラジアン）
+const WHEEL_MAX = Math.PI * 1.5; // ハンドルを片側 270 度まで回せる。ここまで回すと、いっぱいに切ったことになる（ラジアン）
+const WHEEL_BACK = 8; // 手を離したとき、ハンドルがまっすぐへ戻る速さ（ラジアン/秒）
+const KEY_RATE = 1.25; // キーを押している間に切れていく速さ（いっぱいまで約 0.8 秒）
+const CAM_DRAG = 0.0052; // 画面をなぞって 1 px 動かしたときに、カメラが回る角度（ラジアン）
 const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 const fmt = (m) => `${Math.max(0, Math.floor(m)).toLocaleString('ja-JP')} m`;
 
@@ -78,7 +81,7 @@ class CliffTruck extends HostedGame {
       return [b.x - Math.sin(b.yaw) * MID, b.y, b.z - Math.cos(b.yaw) * MID, b.yaw, b.roll, b.pitch, 0].map(r2);
     }
     const t = this.truck;
-    return t ? [t.x, 0, t.z, t.th, t.roll, 0, t.delta || 0].map(r2) : null;
+    return t ? [t.x, t.y || 0, t.z, t.th, t.roll, t.pitch || 0, t.delta || 0].map(r2) : null;
   }
 
   onState() {
@@ -302,6 +305,24 @@ class CliffTruck extends HostedGame {
       on(elx, 'lostpointercapture', rel);
     }
     on(this.root, 'contextmenu', (e) => e.preventDefault());
+    // 画面（3D の絵の上）を横になぞると、カメラが回る（離すと少しして、ゆっくり戻る）
+    on(this.root, 'pointerdown', (e) => {
+      if (!this.world || e.target !== this.world.renderer.domElement || this._camPtr) return;
+      this.root.setPointerCapture?.(e.pointerId);
+      this._camPtr = { id: e.pointerId, x: e.clientX };
+    });
+    on(this.root, 'pointermove', (e) => {
+      const p = this._camPtr;
+      if (!p || p.id !== e.pointerId || !this.world) return;
+      this.world.camOff = Math.max(-Math.PI, Math.min(Math.PI, this.world.camOff - (e.clientX - p.x) * CAM_DRAG));
+      p.x = e.clientX;
+      this._camIdle = 0;
+    });
+    const camUp = (e) => {
+      if (this._camPtr && this._camPtr.id === e.pointerId) this._camPtr = null;
+    };
+    on(this.root, 'pointerup', camUp);
+    on(this.root, 'pointercancel', camUp);
     this._unbind = () => offs.forEach((f) => f());
   }
 
@@ -313,13 +334,13 @@ class CliffTruck extends HostedGame {
     if (kl || kr) {
       // キーボード: 押している間だけ、少しずつ切る（離すと戻る）
       const want = (kr ? 1 : 0) - (kl ? 1 : 0);
-      this.steerIn += Math.max(-dt * 1.6, Math.min(dt * 1.6, want - this.steerIn));
+      this.steerIn += Math.max(-dt * KEY_RATE, Math.min(dt * KEY_RATE, want - this.steerIn));
       this.wheelA = this.steerIn * WHEEL_MAX;
     } else if (this._wheelPtr) {
       this.steerIn = Math.max(-1, Math.min(1, this.wheelA / WHEEL_MAX));
     } else {
       // 手を離すと、ハンドルはまっすぐへ戻る
-      const back = dt * 3.2;
+      const back = dt * WHEEL_BACK;
       this.wheelA = Math.abs(this.wheelA) <= back ? 0 : this.wheelA - Math.sign(this.wheelA) * back;
       this.steerIn = Math.max(-1, Math.min(1, this.wheelA / WHEEL_MAX));
     }
@@ -371,7 +392,7 @@ class CliffTruck extends HostedGame {
     const o = this.el.over;
     o.replaceChildren(
       h('div.ct-over-card', null,
-        h('div.ct-over-title', null, t.over.kind === 'roll' ? '横転した！' : '落下した！'),
+        h('div.ct-over-title', null, t.over.kind === 'roll' ? '横転した！' : t.over.kind === 'stuck' ? '動けなくなった！' : '落下した！'),
         h('div.ct-over-dist', null, fmt(d)),
         h('div.ct-over-rec', null, rec ? '新記録更新！' : `過去最大：${fmt(this._prevBest || 0)}`),
         h('div.ct-over-btns', null,
@@ -418,6 +439,14 @@ class CliffTruck extends HostedGame {
       w.setWreck(this.wreck);
       w.followCamera(this.wreck, dt || 1 / 60);
     } else if (t) {
+      // なぞって回したカメラは、指を離して 1 秒たったら、ゆっくりまっすぐへ戻す
+      if (!this._camPtr && w.camOff) {
+        this._camIdle = (this._camIdle || 0) + (dt || 1 / 60);
+        if (this._camIdle > 1) {
+          const k = (dt || 1 / 60) * 1.4;
+          w.camOff = Math.abs(w.camOff) <= k ? 0 : w.camOff - Math.sign(w.camOff) * k;
+        }
+      }
       w.setTruck(t);
       w.chaseCamera(dt || 1 / 60);
       w.updateRoad(t.hints[0]);
