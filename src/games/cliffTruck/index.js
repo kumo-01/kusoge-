@@ -3,13 +3,14 @@
 //
 // トラックの動きは各自の端末だけで計算する（ほかの人のトラックは見えない。道は全員同じ = ホストが決めた種）。
 // ホスト（common2d.js の HostedGame）は、全員のいちばん長い距離を集めて、終わらせたときに結果を出す。
-// ゲスト → ホスト: { b: いちばん長い距離 }、{ c: 1 }（「終わらせてくれー！」の文句）。効果音はなし。
+// ゲスト → ホスト: { b: いちばん長い距離 }、{ c: 1 }（「終わらせてくれー！」の文句）、{ p: いまの位置 }（2 人以上のとき、毎秒 15 回）。
+// ホスト → 全員: 全員のいまの位置（毎秒 20 回）。ほかの人のトラックを、その人の色の半透明で見せる（ぶつからない）。効果音はなし。
 
 import { h } from '../../core/util.js';
 import { PLAYERS } from '../../screens/common.js';
 import { HostedGame, SLOT_COLORS } from '../common2d.js';
 import { Road } from './road.js';
-import { newTruck, stepTruck, startWreck, stepWreck } from './truck.js';
+import { newTruck, stepTruck, startWreck, stepWreck, MID } from './truck.js';
 import { CliffWorld } from './world.js';
 
 export function createGame() {
@@ -23,7 +24,7 @@ const fmt = (m) => `${Math.max(0, Math.floor(m)).toLocaleString('ja-JP')} m`;
 
 class CliffTruck extends HostedGame {
   initState() {
-    return { t: 0, seed: (Math.random() * 2 ** 31) >>> 0 || 1, best: Array.from({ length: this.n }, () => 0), done: false };
+    return { t: 0, seed: (Math.random() * 2 ** 31) >>> 0 || 1, best: Array.from({ length: this.n }, () => 0), pos: Array.from({ length: this.n }, () => null), done: false };
   }
 
   sanitize(r) {
@@ -33,13 +34,16 @@ class CliffTruck extends HostedGame {
       t: num(r.t, 0, 0, 1e7),
       seed: num(r.seed, 1, 1, 2 ** 31) >>> 0,
       best: Array.from({ length: this.n }, (_, i) => num(Array.isArray(r.best) ? r.best[i] : 0, 0, 0, 1e7)),
+      pos: Array.from({ length: this.n }, () => null),
       done: !!r.done,
     };
   }
 
   light() {
     const s = this.s;
-    return { t: s.t, seed: s.seed, best: s.best.map((b) => Math.floor(b)) };
+    const l = { t: s.t, seed: s.seed, best: s.best.map((b) => Math.floor(b)) };
+    if (this.humans > 1) l.pos = s.pos; // 全員のいまの位置（ほかの人のトラックを見せる）
+    return l;
   }
 
   mergeLight(r) {
@@ -48,6 +52,33 @@ class CliffTruck extends HostedGame {
       this._seedOk = true;
     }
     if (Array.isArray(r.best)) this.s.best = this.s.best.map((b, i) => Math.max(b, Number(r.best[i]) || 0));
+    if (Array.isArray(r.pos)) r.pos.forEach((p, i) => i !== this.me && this._gotPos(i, p));
+  }
+
+  /** 2 人以上のときは位置を毎秒 20 回配る（1 人のときは毎秒 10 回で十分） */
+  get netEvery() {
+    return this.humans > 1 ? 3 : 6;
+  }
+
+  /** ほかの人のいまの位置が届いた（同じものは捨てる）。p = [x, y, z, 向き, 傾き, 前のめり, 前の車輪の角度] */
+  _gotPos(i, p) {
+    if (!Array.isArray(p) || p.length < 7 || !p.every((v) => typeof v === 'number' && Number.isFinite(v))) return;
+    const g = ((this._ghost ||= [])[i] ||= { buf: [] });
+    const last = g.buf[g.buf.length - 1];
+    if (last && last.p.every((v, k) => v === p[k])) return;
+    g.buf.push({ at: performance.now(), p: p.slice(0, 7) });
+    if (g.buf.length > 12) g.buf.shift();
+  }
+
+  /** 自分のいまの位置（後ろの車輪の真ん中・向き・傾き。落ちている間は落ちていく車体の位置） */
+  _myPos() {
+    const r2 = (v) => Math.round(v * 100) / 100;
+    if (this.wreck) {
+      const b = this.wreck.bodies[0];
+      return [b.x - Math.sin(b.yaw) * MID, b.y, b.z - Math.cos(b.yaw) * MID, b.yaw, b.roll, b.pitch, 0].map(r2);
+    }
+    const t = this.truck;
+    return t ? [t.x, 0, t.z, t.th, t.roll, 0, t.delta || 0].map(r2) : null;
   }
 
   onState() {
@@ -66,6 +97,10 @@ class CliffTruck extends HostedGame {
     if (!this.isHost || !d || typeof d !== 'object' || this.s.done) return;
     if (!(player >= 0 && player < this.n)) return;
     if (typeof d.b === 'number' && Number.isFinite(d.b)) this.s.best[player] = Math.max(this.s.best[player], Math.min(1e7, Math.max(0, d.b)));
+    if (Array.isArray(d.p) && d.p.length === 7 && d.p.every((v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1e7)) {
+      this.s.pos[player] = d.p;
+      this._gotPos(player, d.p);
+    }
     if (d.c && player !== this.me) this._peek(player);
   }
 
@@ -107,7 +142,6 @@ class CliffTruck extends HostedGame {
     this._seedOk = this.isHost;
     this.world = null;
     this.truck = null;
-    this.prev = null;
     this.wreck = null;
     this.myBest = 0; // この試合の、自分のいちばん長い距離
     this._sentBest = 0;
@@ -166,11 +200,10 @@ class CliffTruck extends HostedGame {
     if (!this.road) return;
     if (!first && this.s.done) return;
     this.truck = newTruck(this.road);
-    this.prev = { ...this.truck };
     this.wreck = null;
     this._overAt = 0;
     this.el.over.hidden = true;
-    this.world.setTruck(this.truck, this.prev, 1);
+    this.world.setTruck(this.truck);
     this.world.updateRoad(this.truck.hints[0]);
     this.world.chaseCamera(0, true);
   }
@@ -301,6 +334,12 @@ class CliffTruck extends HostedGame {
     super.update(dt);
     if (this.paused || !this._ensureWorld() || !this.truck) return;
     this._t += dt;
+    // 2 人以上: 自分の位置をみんなへ（ホストは自分の分を配る状態に書く。ゲストはホストへ毎秒 15 回）
+    if (this.humans > 1) {
+      const p = this._myPos();
+      if (this.isHost) this.s.pos[this.me] = p;
+      else if ((this._posN = ((this._posN | 0) + 1) % 4) === 0 && p) this.sendToHost({ p });
+    }
     if (this.wreck) {
       stepWreck(this.wreck, dt, this.road);
       if (!this._shown && this._t - this._overAt >= RESULT_DELAY) this._showOver();
@@ -308,7 +347,6 @@ class CliffTruck extends HostedGame {
     }
     const inp = this._input(dt);
     const t = this.truck;
-    Object.assign(this.prev, t);
     const over = stepTruck(t, inp, dt, this.road);
     const before = this.myBest;
     this.myBest = Math.max(this.myBest, t.prog);
@@ -346,6 +384,29 @@ class CliffTruck extends HostedGame {
     this._closeMenu();
   }
 
+  /** ほかの人のトラック（届いた位置の少し前の時刻を、2 つの間でなめらかに）。その人の色 */
+  _ghostViews() {
+    const out = [];
+    const now = performance.now() - 140; // 届く間隔（毎秒 15〜20 回）より少し遅らせて、間をなめらかに
+    (this._ghost || []).forEach((g, i) => {
+      if (!g || i === this.me || !g.buf.length) return;
+      const B = g.buf;
+      let p = B[B.length - 1].p;
+      for (let k = B.length - 1; k > 0; k--) {
+        if (B[k - 1].at <= now) {
+          const a = B[k - 1];
+          const b = B[k];
+          p = lerpPos(a.p, b.p, Math.max(0, Math.min(1, (now - a.at) / Math.max(1, b.at - a.at))));
+          break;
+        }
+      }
+      if (now < B[0].at) p = B[0].p;
+      const slot = this.slots[i] ?? i;
+      out.push({ key: i, color: SLOT_COLORS[slot] || '#888', x: p[0], y: p[1], z: p[2], th: p[3], roll: p[4], pitch: p[5], delta: p[6] });
+    });
+    return out;
+  }
+
   draw(dt) {
     if (!this.world) {
       this._ensureWorld();
@@ -357,10 +418,11 @@ class CliffTruck extends HostedGame {
       w.setWreck(this.wreck);
       w.followCamera(this.wreck, dt || 1 / 60);
     } else if (t) {
-      w.setTruck(t, this.prev, 1);
+      w.setTruck(t);
       w.chaseCamera(dt || 1 / 60);
       w.updateRoad(t.hints[0]);
     }
+    if (this.humans > 1) w.setGhosts(this._ghostViews());
     w.render();
     // 距離（上の真ん中）とハンドルの回り具合
     const d = t ? fmt(t.prog) : '';
@@ -374,6 +436,11 @@ class CliffTruck extends HostedGame {
       this.el.wheel.firstChild.style.transform = `rotate(${wa}rad)`;
     }
   }
+}
+
+/** 2 つの位置の間（向き・傾きは角度として） */
+function lerpPos(a, b, f) {
+  return a.map((v, k) => (k >= 3 && k <= 6 ? v + angDiff(v, b[k]) * f : v + (b[k] - v) * f));
 }
 
 /** ハンドルの絵（丸と 3 本のスポーク、上に赤い印） */

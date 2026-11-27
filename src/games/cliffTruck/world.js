@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { device } from '../../core/device.js';
 import { ROAD } from './road.js';
-import { TRUCK, L2 } from './truck.js';
+import { TRUCK, MID } from './truck.js';
 
 const FOG = 0xcfd9e2;
 const CHUNK = 40; // 道のかたまりの長さ（点の数）
@@ -16,11 +16,13 @@ const DROP = 340; // 崖の深さ（霧で見えなくなる）
 const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 
 /** ざらざらした絵（道・岩）。fn(ctx, w, h) で描く */
-function canvasTex(w, h, fn, repeat = true) {
+function canvasTex(w, h, fn, repeat = true, sc = 2) {
+  // 描くのは w × h のつもりで、実際は sc 倍の細かさの絵にする（近くで見てもガビガビにならないように）
   const cv = document.createElement('canvas');
-  cv.width = w;
-  cv.height = h;
+  cv.width = w * sc;
+  cv.height = h * sc;
   const x = cv.getContext('2d');
+  x.scale(sc, sc);
   fn(x, w, h);
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
@@ -44,7 +46,7 @@ function roadTex() {
   return canvasTex(256, 512, (x, w, h) => {
     x.fillStyle = '#5d6166';
     x.fillRect(0, 0, w, h);
-    speckle(x, w, h, 9000, ['#4c5055', '#6b6f74', '#55595e', '#74787c'], 2);
+    speckle(x, w, h, 30000, ['#4c5055', '#6b6f74', '#55595e', '#74787c'], 1.2);
     // ひび
     x.strokeStyle = 'rgba(40,42,46,0.55)';
     x.lineWidth = 1;
@@ -86,7 +88,7 @@ function rockTex() {
       x.ellipse(Math.random() * w, Math.random() * h, 4 + Math.random() * 14, 3 + Math.random() * 8, 0, 0, Math.PI * 2);
       x.fill();
     }
-    speckle(x, w, h, 4000, ['#7b7a70', '#c0beb0', '#8f9a80'], 2);
+    speckle(x, w, h, 14000, ['#7b7a70', '#c0beb0', '#8f9a80'], 1.2);
   });
 }
 
@@ -95,7 +97,7 @@ function shoulderTex() {
   return canvasTex(64, 256, (x, w, h) => {
     x.fillStyle = '#8f8366';
     x.fillRect(0, 0, w, h);
-    speckle(x, w, h, 2500, ['#7a6f55', '#a39674', '#6c7355', '#857b5e'], 3);
+    speckle(x, w, h, 7000, ['#7a6f55', '#a39674', '#6c7355', '#857b5e'], 2);
   });
 }
 
@@ -126,8 +128,9 @@ export class CliffWorld {
   constructor(container, road) {
     this.container = container;
     this.road = road;
-    const r = new THREE.WebGLRenderer({ antialias: !device.low, powerPreference: 'high-performance' });
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, device.maxPixelRatio));
+    // 画質: 物が少ないので、スマホ・タブレットでも、ふちのなめらかさ（アンチエイリアス）と画面の細かさ（2 倍まで）を落とさない
+    const r = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.0;
@@ -148,17 +151,19 @@ export class CliffWorld {
     sun.castShadow = true;
     const sr = 26;
     Object.assign(sun.shadow.camera, { left: -sr, right: sr, top: sr, bottom: -sr, near: 1, far: 120 });
-    const ms = device.low ? 1024 : 2048;
+    const ms = device.low ? 2048 : 4096;
     sun.shadow.mapSize.set(ms, ms);
     sun.shadow.bias = -0.0006;
     sun.shadow.normalBias = 0.04;
     scene.add(sun, sun.target);
     this.sun = sun;
+    this.aniso = r.capabilities.getMaxAnisotropy?.() || 8; // ななめから見る道・崖の模様をくっきり
     this.mats = {
       road: new THREE.MeshLambertMaterial({ map: roadTex() }),
       rock: new THREE.MeshLambertMaterial({ map: rockTex(), vertexColors: true, side: THREE.DoubleSide }),
       shoulder: new THREE.MeshLambertMaterial({ map: shoulderTex(), side: THREE.DoubleSide }),
     };
+    for (const m of Object.values(this.mats)) m.map.anisotropy = this.aniso;
     this.chunks = new Map();
     this._mountains();
     this._truck();
@@ -318,106 +323,114 @@ export class CliffWorld {
   }
 
   // ---- トラック ----
-  _truck() {
-    const lam = (c, o = {}) => new THREE.MeshLambertMaterial({ color: c, ...o });
+  /**
+   * 1 本の車体のトラック（運転台と荷台は固定。動くのは前の車輪の向きだけ）。原点 = 後ろの車輪の真ん中・地面。+z が前。
+   * ghost: ほかの人のトラック（その人の色の半透明。影・光なし）
+   */
+  _makeTruck(ghost = null) {
+    const gm = ghost ? new THREE.MeshBasicMaterial({ color: ghost, transparent: true, opacity: 0.36, depthWrite: false }) : null;
+    const lam = (c, o = {}) => gm || new THREE.MeshLambertMaterial({ color: c, ...o });
     const box = (w, h, l, mat, x, y, z) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat);
       m.position.set(x, y, z);
-      m.castShadow = true;
+      m.castShadow = !ghost;
       return m;
     };
-    const wheelGeo = new THREE.CylinderGeometry(0.52, 0.52, 0.42, 18);
-    wheelGeo.rotateZ(Math.PI / 2);
+    const wheelGeo = (this._wheelGeo ||= new THREE.CylinderGeometry(0.52, 0.52, 0.42, 24).rotateZ(Math.PI / 2));
+    const hubGeo = (this._hubGeo ||= new THREE.CylinderGeometry(0.22, 0.22, 0.44, 12).rotateZ(Math.PI / 2));
     const tire = lam(0x1c1d20);
     const hub = lam(0x9aa0a6);
     const wheel = (x, z, dual = false) => {
       const g = new THREE.Group();
       const t = new THREE.Mesh(wheelGeo, tire);
-      t.castShadow = true;
+      t.castShadow = !ghost;
       g.add(t);
       if (dual) {
         const t2 = t.clone();
         t2.position.x = -Math.sign(x) * 0.45;
         g.add(t2);
       }
-      const hb = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.44, 10).rotateZ(Math.PI / 2), hub);
-      g.add(hb);
+      g.add(new THREE.Mesh(hubGeo, hub));
       g.position.set(x, 0.52, z);
       return g;
     };
     const W = TRUCK.WIDTH;
     const TW = TRUCK.TRACK / 2 + 0.12;
-    // 運転台（原点 = 後ろの車輪の真ん中・地面。+z が前）
-    const cab = new THREE.Group();
+    const front = TRUCK.L + TRUCK.FRONT; // 前のはし
+    const back = -TRUCK.REAR; // 後ろのはし
+    const cabZ = front - TRUCK.CAB / 2;
+    const g = new THREE.Group();
     const red = lam(0xd8443a);
-    const dark = lam(0x2a2d33);
     const chassis = lam(0x33363b);
-    const cabLen = 2.6;
-    const cabZ = TRUCK.L1 + TRUCK.CAB_FRONT - cabLen / 2;
-    cab.add(box(W, 2.5, cabLen, red, 0, 2.15, cabZ)); // 運転台
-    cab.add(box(W - 0.1, 0.8, cabLen - 0.4, red, 0, 3.65, cabZ - 0.15)); // 屋根の上
-    cab.add(box(W - 0.3, 1.0, 0.06, lam(0x3a4a5a), 0, 2.75, cabZ + cabLen / 2 + 0.01)); // 前の窓
-    cab.add(box(W + 0.02, 0.35, 0.3, lam(0xc9ccd1), 0, 1.0, TRUCK.L1 + TRUCK.CAB_FRONT - 0.1)); // バンパー
-    cab.add(box(1.2, 0.35, TRUCK.L1 + TRUCK.CAB_FRONT + TRUCK.CAB_BACK - 0.4, chassis, 0, 0.95, (TRUCK.L1 + TRUCK.CAB_FRONT - TRUCK.CAB_BACK) / 2)); // 車台
-    cab.add(box(0.5, 0.5, 1.4, lam(0xb0b5ba), W / 2 - 0.3, 1.0, 1.6)); // 燃料タンク
-    cab.add(box(0.5, 0.5, 1.4, lam(0xb0b5ba), -W / 2 + 0.3, 1.0, 1.6));
-    cab.add(box(2.0, 0.15, 1.6, dark, 0, 1.2, 0)); // 連結の台
-    for (const s of [-1, 1]) {
-      cab.add(box(0.35, 0.2, 0.06, lam(0xfff6d8, { emissive: 0xfff2c0, emissiveIntensity: 0.4 }), s * (W / 2 - 0.35), 1.25, TRUCK.L1 + TRUCK.CAB_FRONT + 0.02)); // 前の灯り
-      cab.add(wheel(s * TW, TRUCK.L1));
-      cab.add(wheel(s * TW, 0, true));
-      cab.add(wheel(s * TW, -1.35, true));
+    // 運転台（前）
+    g.add(box(W, 2.5, TRUCK.CAB, red, 0, 2.15, cabZ));
+    g.add(box(W - 0.1, 0.8, TRUCK.CAB - 0.4, red, 0, 3.65, cabZ - 0.15));
+    g.add(box(W - 0.3, 1.0, 0.06, lam(0x3a4a5a), 0, 2.75, front + 0.01)); // 前の窓
+    g.add(box(W + 0.02, 0.35, 0.3, lam(0xc9ccd1), 0, 1.0, front - 0.1)); // バンパー
+    for (const s of [-1, 1]) g.add(box(0.35, 0.2, 0.06, lam(0xfff6d8, { emissive: 0xfff2c0, emissiveIntensity: 0.4 }), s * (W / 2 - 0.35), 1.25, front + 0.02)); // 前の灯り
+    // 荷台（運転台のすぐ後ろから、後ろのはしまで。つながっていて曲がらない）
+    const boxFront = front - TRUCK.CAB - 0.2;
+    const L = boxFront - back;
+    const zc = back + L / 2;
+    g.add(box(2.6, 3.4, L, lam(0xeef0f2), 0, 2.95, zc));
+    g.add(box(2.5, 0.35, front - back - 0.4, chassis, 0, 1.0, (front + back) / 2)); // 下の枠（前から後ろまで 1 本）
+    if (!ghost) {
+      for (let k = 1; k < 11; k++) g.add(box(2.62, 0.05, 0.05, lam(0xd6d9dc), 0, 4.66, back + (L / 11) * k)); // 屋根のすじ
+      g.add(box(2.5, 3.2, 0.05, lam(0xdfe2e5), 0, 2.95, back - 0.03)); // 後ろの扉
+      g.add(box(0.04, 3.2, 0.06, lam(0xa9aeb4), 0, 2.95, back - 0.06));
+      g.add(box(2.4, 0.25, 0.12, lam(0x30333a), 0, 0.85, back + 0.05)); // 後ろのバンパー
+      g.add(box(0.5, 0.5, 1.4, lam(0xb0b5ba), W / 2 - 0.3, 1.0, cabZ - 2.2)); // 燃料タンク
+      g.add(box(0.5, 0.5, 1.4, lam(0xb0b5ba), -W / 2 + 0.3, 1.0, cabZ - 2.2));
     }
-    // 荷台（原点 = 連結部・地面。荷台は -z へのびる）
-    const tr = new THREE.Group();
-    const white = lam(0xeef0f2);
-    const L = TRUCK.TRAILER;
-    const z0 = TRUCK.T_FRONT; // 連結部 → 前のはし
-    const zc = z0 - L / 2;
-    tr.add(box(2.6, 3.4, L, white, 0, 2.95, zc)); // 箱
-    tr.add(box(2.5, 0.35, L - 0.4, chassis, 0, 1.1, zc)); // 下の枠
-    for (let k = 1; k < 12; k++) tr.add(box(2.62, 0.05, 0.05, lam(0xd6d9dc), 0, 4.62, z0 - (L / 12) * k)); // 屋根のすじ
-    const back = z0 - L;
-    tr.add(box(2.5, 3.2, 0.05, lam(0xdfe2e5), 0, 2.95, back - 0.03)); // 後ろの扉
-    tr.add(box(0.04, 3.2, 0.06, lam(0xa9aeb4), 0, 2.95, back - 0.06));
-    tr.add(box(2.4, 0.25, 0.12, lam(0x30333a), 0, 0.85, back + 0.05)); // 後ろのバンパー
-    const axle = back + TRUCK.T_AXLE;
+    // 車輪: 後ろは 2 本（2 重）、前はハンドルで向きが変わる
+    const fronts = [];
     for (const s of [-1, 1]) {
-      tr.add(wheel(s * TW, axle + 0.7, true));
-      tr.add(wheel(s * TW, axle - 0.7, true));
+      g.add(wheel(s * TW, 0.7, true));
+      g.add(wheel(s * TW, -0.7, true));
+      const fw = wheel(s * TW, TRUCK.L);
+      fronts.push(fw);
+      g.add(fw);
     }
-    // ブレーキのランプ（踏むと明るく光る）と、地面を照らす光
-    this.lampMat = new THREE.MeshLambertMaterial({ color: 0x7a1010, emissive: 0xff2a1a, emissiveIntensity: 0.35 });
-    for (const s of [-1, 1]) {
-      const lp = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.25, 0.08), this.lampMat);
-      lp.position.set(s * 0.95, 1.25, back - 0.08);
-      tr.add(lp);
+    const out = { fronts };
+    if (!ghost) {
+      // ブレーキのランプ（踏むと明るく光る）と、地面を照らす光
+      out.lampMat = new THREE.MeshLambertMaterial({ color: 0x7a1010, emissive: 0xff2a1a, emissiveIntensity: 0.35 });
+      for (const s of [-1, 1]) {
+        const lp = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.25, 0.08), out.lampMat);
+        lp.position.set(s * 0.95, 1.25, back - 0.08);
+        g.add(lp);
+      }
+      const spot = new THREE.SpotLight(0xff2010, 0, 26, 0.75, 0.6, 1.2);
+      spot.position.set(0, 1.3, back - 0.3);
+      spot.target.position.set(0, -0.6, back - 9);
+      g.add(spot, spot.target);
+      out.spot = spot;
+      const glow = new THREE.Mesh(new THREE.PlaneGeometry(7, 9), new THREE.MeshBasicMaterial({ map: glowTex(), color: 0xff2a14, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+      glow.rotation.x = -Math.PI / 2;
+      glow.position.set(0, 0.05, back - 3.6);
+      g.add(glow);
+      out.glow = glow;
+    } else {
+      g.traverse((o) => {
+        if (o.isMesh) o.renderOrder = 3;
+      });
     }
-    const spot = new THREE.SpotLight(0xff2010, 0, 26, 0.75, 0.6, 1.2);
-    spot.position.set(0, 1.3, back - 0.3);
-    spot.target.position.set(0, -0.6, back - 9);
-    tr.add(spot, spot.target);
-    this.brakeLight = spot;
-    const glow = new THREE.Mesh(new THREE.PlaneGeometry(7, 9), new THREE.MeshBasicMaterial({ map: glowTex(), color: 0xff2a14, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
-    glow.rotation.x = -Math.PI / 2;
-    glow.position.set(0, 0.05, back - 3.6);
-    tr.add(glow);
-    this.glow = glow;
     // 傾けるための入れ物（外 = 位置と向き、中 = 傾き）
-    const wrap = (inner) => {
-      const outer = new THREE.Group();
-      const tilt = new THREE.Group();
-      tilt.add(inner);
-      outer.add(tilt);
-      outer.rotation.order = 'YXZ';
-      this.scene.add(outer);
-      return { outer, tilt };
-    };
-    this.cab = wrap(cab);
-    this.trailer = wrap(tr);
+    const outer = new THREE.Group();
+    const tilt = new THREE.Group();
+    tilt.add(g);
+    outer.add(tilt);
+    outer.rotation.order = 'YXZ';
+    this.scene.add(outer);
+    return Object.assign(out, { outer, tilt });
   }
 
-  /** 傾ける（外側の車輪の所を軸に）。roll: 正 = 右（-x）が下 */
+  _truck() {
+    this.truck = this._makeTruck();
+    this.ghosts = new Map();
+  }
+
+  /** 傾ける（外側の車輪の所を軸に）。roll: 正 = 右（-x）が下。pitch: 前のめり（正 = 前が下） */
   _tilt(t, roll, pitch = 0) {
     const xp = roll >= 0 ? -TRUCK.WIDTH / 2 : TRUCK.WIDTH / 2; // 下がる側の車輪
     t.tilt.rotation.order = 'XZY';
@@ -426,46 +439,50 @@ export class CliffWorld {
     t.tilt.position.set(xp - xp * Math.cos(roll), -xp * Math.sin(roll), 0);
   }
 
-  /** 走っているトラック。t: truck.js の状態（a は前の tick の状態。間をなめらかに） */
-  setTruck(t, a, f) {
-    const lerp = (p, q) => p + (q - p) * f;
-    const x = lerp(a.x, t.x);
-    const z = lerp(a.z, t.z);
-    const th = a.th + angDiff(a.th, t.th) * f;
-    const ph = a.ph + angDiff(a.ph, t.ph) * f;
-    const roll = lerp(a.roll, t.roll);
-    this.cab.outer.position.set(x, 0, z);
-    this.cab.outer.rotation.set(0, th, 0);
-    this._tilt(this.cab, roll);
-    const hx = x + Math.sin(th) * TRUCK.KING;
-    const hz = z + Math.cos(th) * TRUCK.KING;
-    this.trailer.outer.position.set(hx, 0, hz);
-    this.trailer.outer.rotation.set(0, ph, 0);
-    this._tilt(this.trailer, roll * 0.9);
-    this._brake(t.brake);
-    this.truckView = { x, z, th, ph, hx, hz };
+  /** 走っているトラックの置き場所（x, z = 後ろの車輪、th = 向き、roll、delta = 前の車輪の角度） */
+  _place(o, x, y, z, th, roll, pitch, delta) {
+    o.outer.position.set(x, y, z);
+    o.outer.rotation.set(0, th, 0);
+    this._tilt(o, roll, pitch);
+    for (const fw of o.fronts) fw.rotation.y = delta;
   }
 
-  /** 落ちていく・横だおしのトラック（運転台・荷台を別々に） */
+  setTruck(t) {
+    this._place(this.truck, t.x, 0, t.z, t.th, t.roll, 0, t.delta || 0);
+    this._brake(t.brake);
+    this.truckView = { x: t.x, z: t.z, th: t.th };
+  }
+
+  /** 落ちていく・横だおしのトラック（体の真ん中 → 後ろの車輪へ戻して置く） */
   setWreck(w) {
-    const [c, tr] = w.bodies;
-    // 体の真ん中 → 入れ物の原点（運転台は後ろの車輪、荷台は連結部）
-    const put = (o, b, back) => {
-      o.outer.position.set(b.x - Math.sin(b.yaw) * back, b.y, b.z - Math.cos(b.yaw) * back);
-      o.outer.rotation.set(0, b.yaw, 0);
-      this._tilt(o, b.roll, b.pitch);
-    };
-    put(this.cab, c, TRUCK.L1 / 2);
-    put(this.trailer, tr, -(TRUCK.TRAILER / 2 - TRUCK.T_FRONT));
+    const b = w.bodies[0];
+    this._place(this.truck, b.x - Math.sin(b.yaw) * MID, b.y, b.z - Math.cos(b.yaw) * MID, b.yaw, b.roll, b.pitch, 0);
     this._brake(0);
+  }
+
+  /** ほかの人のトラック（半透明・その人の色）。list: [{ key, color, x, y, z, th, roll, pitch, delta }] */
+  setGhosts(list) {
+    const seen = new Set();
+    for (const g of list) {
+      seen.add(g.key);
+      let o = this.ghosts.get(g.key);
+      if (!o) {
+        o = this._makeTruck(g.color);
+        this.ghosts.set(g.key, o);
+      }
+      o.outer.visible = true;
+      this._place(o, g.x, g.y, g.z, g.th, g.roll, g.pitch, g.delta);
+    }
+    for (const [k, o] of this.ghosts) if (!seen.has(k)) o.outer.visible = false;
   }
 
   _brake(b) {
     const k = this._bk == null ? b : this._bk + (b - this._bk) * 0.35;
     this._bk = k;
-    this.lampMat.emissiveIntensity = 0.35 + k * 3.2;
-    this.brakeLight.intensity = k * 60;
-    this.glow.material.opacity = k * 0.55;
+    const T = this.truck;
+    T.lampMat.emissiveIntensity = 0.35 + k * 3.2;
+    T.spot.intensity = k * 60;
+    T.glow.material.opacity = k * 0.55;
   }
 
   /** カメラ: 走っている間はトラックの後ろの高い所から、道の先を見る */
@@ -473,37 +490,30 @@ export class CliffWorld {
     const v = this.truckView;
     if (!v) return;
     // 向きはゆっくり追いかける（細かいハンドルで画面がゆれないように）
-    const want = v.th * 0.45 + (v.th + angDiff(v.th, v.ph)) * 0.55;
-    this.camYaw = snap || this.camPos == null ? want : this.camYaw + angDiff(this.camYaw, want) * Math.min(1, dt * 2.2);
+    this.camYaw = snap || this.camPos == null ? v.th : this.camYaw + angDiff(this.camYaw, v.th) * Math.min(1, dt * 2.2);
     const fx = Math.sin(this.camYaw);
     const fz = Math.cos(this.camYaw);
-    const back = TRUCK.TRAILER + 26;
-    const pos = new THREE.Vector3(v.hx - fx * back, 30, v.hz - fz * back);
+    const pos = new THREE.Vector3(v.x - fx * 30, 30, v.z - fz * 30);
     if (snap || !this.camPos) this.camPos = pos.clone();
     else this.camPos.lerp(pos, Math.min(1, dt * 6));
     this.camera.position.copy(this.camPos);
-    this.camera.lookAt(v.hx + fx * 14, 0, v.hz + fz * 14);
+    this.camera.lookAt(v.x + fx * 34, 0, v.z + fz * 34);
     this._follow = null;
   }
 
   /** カメラ: 落ちた・横転したら、トラックを追いかけて見る */
   followCamera(w, dt) {
-    // 見るのは落ちていくかたまり（両方なら真ん中。まだ道の上なら両方の真ん中）
-    const fall = w.bodies.filter((b) => b.falling);
-    const list = fall.length ? fall : w.bodies;
-    const tx = list.reduce((n, b) => n + b.x, 0) / list.length;
-    const ty = list.reduce((n, b) => n + b.y, 0) / list.length;
-    const tz = list.reduce((n, b) => n + b.z, 0) / list.length;
-    const tr = w.bodies[1];
+    const b = w.bodies[0];
+    const tx = b.x;
+    const ty = b.y;
+    const tz = b.z;
     if (!this._follow) {
-      // はじめ: いまのカメラの場所から、トラックの横・上へ回りこむ
+      // はじめ: いまのカメラの場所から、落ちていく側の外へ回りこむ
       const dx = this.camera.position.x - tx;
       const dz = this.camera.position.z - tz;
       const l = Math.hypot(dx, dz) || 1;
-      const side = w.side;
-      // 落ちていく側の、少し手前から見下ろす
-      const rx = -Math.cos(tr.yaw) * side;
-      const rz = Math.sin(tr.yaw) * side;
+      const rx = -Math.cos(b.yaw) * w.side;
+      const rz = Math.sin(b.yaw) * w.side;
       this._follow = { ox: (dx / l) * 0.45 + rx, oz: (dz / l) * 0.45 + rz };
     }
     const F = this._follow;
@@ -519,13 +529,12 @@ export class CliffWorld {
     const c = this.camera.position;
     this.mountains.position.set(c.x, 0, c.z);
     // 影はトラックのまわりだけ（日の光もいっしょに動かす）
-    const v = this.truckView;
-    if (v) {
-      const cx = this.cab.outer.position.x;
-      const cz = this.cab.outer.position.z;
-      this.sun.position.set(cx + 18, 60, cz + 10);
-      this.sun.target.position.set(cx - Math.sin(v.th) * 10, 0, cz - Math.cos(v.th) * 10);
-    }
+    const o = this.truck.outer.position;
+    const th = this.truckView?.th ?? 0;
+    const cx = o.x + Math.sin(th) * MID;
+    const cz = o.z + Math.cos(th) * MID;
+    this.sun.position.set(cx + 18, 60, cz + 10);
+    this.sun.target.position.set(cx, 0, cz);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -543,4 +552,3 @@ export class CliffWorld {
   }
 }
 
-export { L2 };
