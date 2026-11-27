@@ -13,8 +13,11 @@ function drive(seed, vTarget, sec) {
   for (let k = 0; k < sec / DT && !t.over; k++) {
     road.locate(t.x + Math.sin(t.th) * TRUCK.L1, t.z + Math.cos(t.th) * TRUCK.L1, t.hints[0], L);
     const i = Math.floor(L.i);
-    road.ensure(i + 40);
-    const tgtD = Math.max(-1.5, Math.min(1.5, (road.h[i + 25] - road.h[i]) * 40));
+    road.ensure(i + 60);
+    // 先 5〜40 m の曲がりの平均を見て、外側へなめらかに寄る
+    const kAvg = (road.h[i + 40] - road.h[i + 5]) / 35;
+    t._tg = (t._tg ?? 0) + (Math.max(-1.8, Math.min(1.8, kAvg * 110)) - (t._tg ?? 0)) * 0.03;
+    const tgtD = t._tg;
     const hErr = Math.atan2(Math.sin(t.th - road.h[i + 6]), Math.cos(t.th - road.h[i + 6]));
     stepTruck(t, { steer: -(L.d - tgtD) * 0.35 + hErr * 2.2, throttle: t.v < vTarget ? 1 : 0, brake: t.v > vTarget + 1 ? 0.5 : 0 }, DT, road);
   }
@@ -36,7 +39,11 @@ test('道: 同じ種なら同じ道。先へ行くほど曲がりがきつく、
   a.ensure(7000);
   assert.ok(Math.abs(a.w[6000] - ROAD.W_MIN) < 1e-9, 'いちばんせまい');
   const maxK = (i0, i1) => Math.max(...Array.from({ length: i1 - i0 }, (_, k) => Math.abs(a.h[i0 + k + 1] - a.h[i0 + k])));
-  assert.ok(maxK(5500, 6900) > maxK(200, 1200) * 2, '先の方が急');
+  assert.ok(maxK(5500, 6900) > maxK(200, 1200) * 1.5, '先の方が急');
+  // グネグネ: はじめの 1 km でも、100 m あたり平均 15 度以上曲がる（左右に曲がりかえしながら）
+  const turn = (i0, i1) => (Array.from({ length: i1 - i0 }, (_, k) => Math.abs(a.h[i0 + k + 1] - a.h[i0 + k])).reduce((n, x) => n + x, 0) / (i1 - i0)) * 100 * (180 / Math.PI);
+  assert.ok(turn(100, 1000) > 15, `${turn(100, 1000)}`);
+  assert.ok(turn(5000, 6000) > turn(100, 1000));
   assert.ok(maxK(0, 6900) <= 1 / ROAD.R_MIN + 1e-9, 'いちばん急でも半径 R_MIN');
   // 場所を探す: 道の真ん中から右へ 1.5 m の点
   const i = 2500;

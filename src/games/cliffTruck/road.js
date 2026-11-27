@@ -6,11 +6,13 @@ export const ROAD = {
   STEP: 1, // 点の間隔（m）
   START_STRAIGHT: 90, // はじめのまっすぐな区間（m）。トラックはここに置く
   W0: 8.0, // はじめの道幅（m）
-  W_MIN: 6.0, // いちばんせまい道幅
+  W_MIN: 6.8, // いちばんせまい道幅（いちばん急なカーブでも、荷台が内側を通る分 + 少し余裕）
   W_DIST: 4500, // ここまで進むと、いちばんせまくなる（m）
-  R0: 260, // はじめのいちばん急なカーブの半径（m）
-  R_MIN: 62, // いちばん急なカーブの半径（これより急にはならない）
+  R0: 110, // はじめのいちばん急なカーブの半径（m）
+  R_MIN: 52, // いちばん急なカーブの半径（これより急にはならない。長い荷台が内側を通る分は約 4.2 m）
   R_DIST: 5000, // ここまで進むと、いちばん急になる（m）
+  WAVE: [70, 220], // 曲がりの波の長さ（m）。左右に曲がりかえす間隔
+  BEND: 1.6, // 波を重ねたものを、これだけ強める（いちばん急なカーブの半径はこえない）
 };
 
 /** 種から作る乱数（0〜1。同じ種なら同じ並び） */
@@ -29,8 +31,8 @@ export class Road {
   constructor(seed = 1) {
     this.seed = seed >>> 0;
     const rnd = mulberry32(this.seed || 1);
-    // 曲がり具合 = いくつかの波を重ねたもの（波の長さ 150〜520 m）。重ねた大きさが 1 をこえないように割る
-    this.waves = Array.from({ length: 4 }, (_, k) => ({ a: 0.5 + rnd() * 0.5, f: (2 * Math.PI) / (150 + rnd() * 370), p: rnd() * Math.PI * 2, k }));
+    // 曲がり具合 = いくつかの波を重ねたもの（波の長さ WAVE[0]〜WAVE[1] m。短いほどグネグネ）。重ねた大きさが 1 をこえないように割る
+    this.waves = Array.from({ length: 4 }, (_, k) => ({ a: 0.5 + rnd() * 0.5, f: (2 * Math.PI) / (ROAD.WAVE[0] + rnd() * (ROAD.WAVE[1] - ROAD.WAVE[0])), p: rnd() * Math.PI * 2, k }));
     const sum = this.waves.reduce((n, w) => n + w.a, 0);
     for (const w of this.waves) w.a /= sum;
     this.x = [0];
@@ -48,6 +50,7 @@ export class Road {
     const A = 1 / ROAD.R0 + (1 / ROAD.R_MIN - 1 / ROAD.R0) * k;
     let v = 0;
     for (const w of this.waves) v += w.a * Math.sin(w.f * s + w.p);
+    v = Math.max(-1, Math.min(1, v * ROAD.BEND)); // 強めて、半径の上限で頭打ち（急なカーブが長く続く）
     return A * ramp * v;
   }
 
