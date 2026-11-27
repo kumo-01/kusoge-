@@ -3109,3 +3109,231 @@ body[data-screen='game'] {
     animation: none;
   }
 }
+
+/* ================= がけっぷち長距離トラック（cliffTruck） ================= */
+/* 画面に出すのは、距離・ハンドル・アクセル・ブレーキ・左上のメニューだけ */
+.ct-root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #cfd9e2;
+  font-family: var(--font);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.ct-dist {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--display);
+  font-size: clamp(1.6rem, 4.4vw, 2.6rem);
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 6px oklch(30% 0.02 240 / 0.45);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ct-menu-btn {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+  width: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px oklch(30% 0.02 240 / 0.25);
+  display: grid;
+  place-content: center;
+  gap: 5px;
+  cursor: pointer;
+  padding: 0;
+}
+.ct-menu-btn span {
+  display: block;
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: #2b2f36;
+}
+.ct-menu {
+  position: absolute;
+  top: calc(max(14px, env(safe-area-inset-top)) + 60px);
+  left: max(14px, env(safe-area-inset-left));
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 6px 20px oklch(30% 0.02 240 / 0.25);
+  max-width: min(78vw, 320px);
+}
+.ct-menu[hidden],
+.ct-over[hidden] {
+  display: none;
+}
+.ct-btn {
+  font: inherit;
+  font-size: 1rem;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 0;
+  background: #e9edf1;
+  color: #22262c;
+  cursor: pointer;
+}
+.ct-btn:disabled {
+  opacity: 0.6;
+}
+.ct-btn-main {
+  background: #2b2f36;
+  color: #fff;
+}
+.ct-btn-end {
+  background: #e04a3c;
+  color: #fff;
+}
+/* ハンドル（左下）とペダル（右下） */
+.ct-wheel {
+  position: absolute;
+  left: max(18px, env(safe-area-inset-left));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: clamp(120px, 22vmin, 190px);
+  aspect-ratio: 1;
+  touch-action: none;
+  cursor: grab;
+}
+.ct-wheel svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.ct-pedals {
+  position: absolute;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(12px, 2.4vmin, 22px);
+}
+.ct-pedal {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10%;
+  padding: 0 14%;
+  border-radius: 14px;
+  background: #3b3f45;
+  touch-action: none;
+  cursor: pointer;
+  transition: transform 0.06s, filter 0.06s;
+}
+.ct-pedal i {
+  display: block;
+  height: 9px;
+  border-radius: 5px;
+  background: #8a9099;
+}
+.ct-brake {
+  width: clamp(70px, 13vmin, 104px);
+  height: clamp(100px, 18vmin, 146px);
+}
+.ct-gas {
+  width: clamp(58px, 10.5vmin, 96px);
+  height: clamp(140px, 26vmin, 208px);
+}
+.ct-pedal.on {
+  transform: scale(0.94) translateY(3px);
+  filter: brightness(1.25);
+}
+/* 落ちた・横転した */
+.ct-over {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: oklch(25% 0.02 240 / 0.25);
+}
+.ct-over-card {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 22px 26px 20px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 10px 30px oklch(25% 0.02 240 / 0.3);
+  text-align: center;
+  max-width: min(92vw, 460px);
+}
+.ct-over-title {
+  font-family: var(--display);
+  font-size: 1.9rem;
+  color: #e04a3c;
+}
+.ct-over-dist {
+  font-family: var(--display);
+  font-size: 2.6rem;
+  line-height: 1.1;
+  color: #22262c;
+}
+.ct-over-rec {
+  font-size: 1.05rem;
+  color: #4a505a;
+  margin-bottom: 8px;
+}
+.ct-over-btns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+/* ホスト: 画面の右はしから、にょいっと「終わらせてくれー！」 */
+.ct-peeks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.ct-peek {
+  position: absolute;
+  right: 0;
+  display: grid;
+  gap: 2px;
+  padding: 10px 22px 10px 16px;
+  border-radius: 16px 0 0 16px;
+  border-left: 6px solid var(--c);
+  background: #fff;
+  box-shadow: 0 4px 14px oklch(25% 0.02 240 / 0.3);
+  font-size: 1.05rem;
+  color: #22262c;
+  animation: ct-peek 3.5s cubic-bezier(0.3, 1.4, 0.5, 1) forwards;
+}
+.ct-peek b {
+  font-size: 0.8rem;
+  color: #5a606a;
+}
+.ct-peek span {
+  font-family: var(--display);
+  font-size: 1.3rem;
+}
+@keyframes ct-peek {
+  0% {
+    transform: translateX(105%) rotate(-4deg);
+  }
+  12% {
+    transform: translateX(8%) rotate(-4deg);
+  }
+  18% {
+    transform: translateX(14%) rotate(-2deg);
+  }
+  85% {
+    transform: translateX(14%) rotate(-2deg);
+  }
+  100% {
+    transform: translateX(105%) rotate(-4deg);
+  }
+}

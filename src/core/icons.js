@@ -47,6 +47,7 @@ const P = {
   gear: '<circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>',
   fullscreen: '<path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/>',
   phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+  truck: '<path d="M2 6h11v10H2z"/><path d="M13 9h4l4 4v3h-8z"/><circle cx="6" cy="17" r="2"/><circle cx="17" cy="17" r="2"/>',
   car: '<path d="M4 17h16v-5l-2.5-5h-11L4 12z"/><path d="M4 12h16"/><circle cx="8" cy="17" r="2"/><circle cx="16" cy="17" r="2"/>',
   wheel: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7M4.5 16.5l5.8-3.5M19.5 16.5l-5.8-3.5"/>',
   pen: '<path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="m14 7 3 3"/>',
@@ -79,7 +80,7 @@ const P = {
 };
 
 /** ゲームごとのアイコン */
-export const GAME_ICON = { dogKart: 'flag', gomuBattle: 'crosshair', angleDuel: 'angle', prefBattle: 'map', reaction: 'zap', rhythm: 'drum' };
+export const GAME_ICON = { dogKart: 'flag', gomuBattle: 'crosshair', angleDuel: 'angle', prefBattle: 'map', reaction: 'zap', rhythm: 'drum', cliffTruck: 'truck' };
 
 /** 文の頭の絵文字 → アイコン（ゲーム中のお知らせ・状態の文を、絵文字なしで出すため） */
 const EMOJI_ICON = {
@@ -88,7 +89,7 @@ const EMOJI_ICON = {
   '☔': 'umbrella', '🎵': 'music', '🎥': 'camera', '⚙': 'gear', '⛶': 'fullscreen', '📱': 'phone', '📶': 'wifi', '⏸': 'pause',
   '🛡': 'shield', '🧑': 'person', '🎯': 'target', '🏆': 'trophy', '🗾': 'map', '🎁': 'gift', '🍬': 'candy', '🌀': 'spiral',
   '✂': 'scissors', '⭐': 'star', '🖱': 'mouse', '🎧': 'headphones', '🥁': 'drum', '✅': 'check', '✔': 'check', '⌛': 'clock',
-  '⏱': 'clock', '🔥': 'zap', '🚗': 'car', '🎡': 'wheel', '🔱': 'triple', '🏓': 'bounce', '💨': 'cloud', '✨': 'star',
+  '⏱': 'clock', '🔥': 'zap', '🚗': 'car', '🚚': 'truck', '📏': 'flag', '🔁': 'reverse', '🎡': 'wheel', '🔱': 'triple', '🏓': 'bounce', '💨': 'cloud', '✨': 'star',
   '❄': 'snow', '🌙': 'moon', '👁': 'eye', '🌅': 'sun', '☀': 'sun', '🌧': 'umbrella', '🌤': 'sun', '🟢': 'target', '🌋': 'cloud',
 };
 
