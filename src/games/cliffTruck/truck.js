@@ -28,7 +28,10 @@ export const TRUCK = {
   STEER_MAX: 0.76, // ハンドルをいっぱいに切ったときの前の車輪の角度（遅いとき）
   STEER_RATE: 1.8, // 前の車輪がハンドルに追いつく速さ（1 / 秒）。めちゃくちゃに回しても、車輪はなめらかに動く
   LAT_SMOOTH: 0.45, // 傾きは、この時間（秒）でならした横の加速度で決まる（一瞬のハンドルでは倒れない）
-  TIP_ACC: 3.9, // これより強く曲がり続けると、傾きがどんどん大きくなる（横の加速度 m/秒²。約 0.4 G）
+  TIP_ACC: 6.5, // これより強く曲がり続けると、傾きがどんどん大きくなる（横の加速度 m/秒²。約 0.66 G。かなり倒れにくい）
+  TIP_GAIN: 0.8, // 基準をこえた分が傾きをふやす強さ
+  TIP_ANGLE: 0.4, // これより傾くと、重さでさらに倒れようとする（ラジアン。約 23 度）
+  TIP_PULL: 6, // その倒れようとする強さ
   ROLL_K: 0.025, // ふつうに曲がっているときの傾き（横の加速度 1 あたり、ラジアン）
   CRASH_ROLL: Math.PI / 2, // これより傾くと横転（90 度。それまでは、曲がりがゆるめば起き上がれる）
   EDGE_ROLL: 0.56, // 片側の車輪が道から出たときの傾き（車輪の真ん中が道のはしに来たとき、ラジアン）
@@ -118,8 +121,8 @@ export function stepTruck(t, inp, dt, road) {
   // 傾き: ならした横の加速度で外側へ。強すぎるのが続くと、どんどん傾く
   t.lat += (t.v * dth - t.lat) * Math.min(1, dt / TRUCK.LAT_SMOOTH);
   const ex = Math.max(0, Math.abs(t.lat) - TRUCK.TIP_ACC);
-  const target = t.lat * TRUCK.ROLL_K + Math.sign(t.lat) * ex * 0.9;
-  const tip = Math.abs(t.dyn) > 0.22 ? Math.sign(t.dyn) * (Math.abs(t.dyn) - 0.22) * 14 : 0;
+  const target = t.lat * TRUCK.ROLL_K + Math.sign(t.lat) * ex * TRUCK.TIP_GAIN;
+  const tip = Math.abs(t.dyn) > TRUCK.TIP_ANGLE ? Math.sign(t.dyn) * (Math.abs(t.dyn) - TRUCK.TIP_ANGLE) * TRUCK.TIP_PULL : 0;
   t.rollV += ((target - t.dyn) * 30 - t.rollV * 8 + tip) * dt;
   t.dyn += t.rollV * dt;
   // 道からはみ出したか（前・後ろの車輪の組）

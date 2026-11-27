@@ -218,7 +218,7 @@ test('動けなくなった: 車輪が道から出たまま 5 秒ほとんど動
   assert.equal(w.bodies[0].y, y0);
 });
 
-test('トラック: 道に沿えば遠くまで行ける。ハンドルを切らないとカーブで落ちる。速いまま切り続けると横転。めちゃくちゃに回しても急には倒れない', () => {
+test('トラック: 道に沿えば遠くまで行ける。ハンドルを切らないとカーブで落ちる。とても速いまま切り続けたときだけ横転。めちゃくちゃに回しても急には倒れない', () => {
   // グネグネの道でも、長い車体で走りきれる（8 本の道のどれも、表示の距離で 1500 m 以上 = 実際の道 3 km 以上）
   for (let seed = 1; seed <= 8; seed++) {
     const t = drive(seed, 7, 480);
@@ -229,13 +229,31 @@ test('トラック: 道に沿えば遠くまで行ける。ハンドルを切ら
   const t = newTruck(road);
   for (let k = 0; k < 60 / DT && !t.over; k++) stepTruck(t, { throttle: 1 }, DT, road);
   assert.equal(t.over?.kind, 'fall');
-  // 速いまま、いっぱいに切る
-  const r2 = new Road(3);
-  const u = newTruck(r2);
-  r2.ensure(600);
-  r2.w = r2.w.map(() => 200); // 道から出ないように（横転だけを見る）
-  for (let k = 0; k < 900; k++) stepTruck(u, { throttle: 1 }, DT, r2);
-  for (let k = 0; k < 400 && !u.over; k++) stepTruck(u, { steer: 1, throttle: 1 }, DT, r2);
+  // 横転はかなりしにくい: 時速 50 km でいっぱいに切り続けても倒れない。いちばん速い近く（平らな道で約 62 km/h）で切り続けたときだけ横転
+  const flat = () => {
+    const r = new Road(3);
+    r.ensure(4000);
+    for (let i = 0; i < r.x.length; i++) {
+      r.x[i] = 0;
+      r.z[i] = i;
+      r.h[i] = 0;
+      r.k[i] = 0;
+      r.y[i] = 0;
+    }
+    r.w = r.w.map(() => 1000); // 道から出ないように（横転だけを見る）
+    return r;
+  };
+  const fullLock = (v0) => {
+    const r = flat();
+    const q = newTruck(r);
+    let n = 0;
+    while (q.v < v0 && n++ < 6000) stepTruck(q, { throttle: 1 }, DT, r);
+    assert.ok(q.v >= v0, `${q.v}`);
+    for (let k = 0; k < 6 / DT && !q.over; k++) stepTruck(q, { steer: 1, throttle: 1 }, DT, r);
+    return q;
+  };
+  assert.equal(fullLock(14).over, null, '時速 50 km では倒れない');
+  const u = fullLock(17);
   assert.equal(u.over?.kind, 'roll');
   assert.ok(Math.abs(u.roll) > TRUCK.CRASH_ROLL);
   assert.equal(u.over.side, -1, '右へ切ると、左へ倒れる');
